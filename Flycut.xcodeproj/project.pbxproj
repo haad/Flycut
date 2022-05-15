@@ -517,9 +517,6 @@
 					77192A2523D6EA7A00EDB9BC = {
 						CreatedOnToolsVersion = 11.3;
 						ProvisioningStyle = Manual;
-					};
-					8D1107260486CEB800E47090 = {
-						ProvisioningStyle = Manual;
 						SystemCapabilities = {
 							com.apple.Push = {
 								enabled = 0;
@@ -805,8 +802,8 @@
 				INFOPLIST_FILE = Info.plist;
 				INSTALL_PATH = /Applications;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 11.5;
-				MARKETING_VERSION = 1.9.6;
+				MACOSX_DEPLOYMENT_TARGET = 12.3;
+				MARKETING_VERSION = 1.9.6.latest;
 				PRODUCT_BUNDLE_IDENTIFIER = com.generalarcade.flycut;
 				PRODUCT_NAME = Flycut;
 				PROVISIONING_PROFILE = "";
@@ -842,8 +839,8 @@
 				INFOPLIST_FILE = Info.plist;
 				INSTALL_PATH = /Applications;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 11.5;
-				MARKETING_VERSION = 1.9.6;
+				MACOSX_DEPLOYMENT_TARGET = 12.3;
+				MARKETING_VERSION = 1.9.6.latest;
 				PRODUCT_BUNDLE_IDENTIFIER = com.generalarcade.flycut;
 				PRODUCT_NAME = Flycut;
 				PROVISIONING_PROFILE = "";
