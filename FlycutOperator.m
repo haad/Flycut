@@ -14,7 +14,6 @@
 
 #import <Foundation/Foundation.h>
 #import "FlycutOperator.h"
-#import "MJCloudKitUserDefaultsSync/MJCloudKitUserDefaultsSync/MJCloudKitUserDefaultsSync.h"
 
 #ifdef FLYCUT_MAC
 #import "AppController.h"
@@ -86,7 +85,7 @@
 	// Stack position starts @ 0 by default
 	stackPosition = favoritesStackPosition = stashedStackPosition = 0;
 
-	[self registerOrDeregisterICloudSync];
+//	[self registerOrDeregisterICloudSync];
 }
 
 -(FlycutStore*) allocInitFlycutStoreRemembering:(int) remembering
@@ -636,47 +635,47 @@
     }
 }
 
--(void) registerOrDeregisterICloudSync
-{
-	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"syncSettingsViaICloud"] ) {
-		[[MJCloudKitUserDefaultsSync sharedSync] startWithKeyMatchList:settingsSyncList
-								  withContainerIdentifier:kiCloudId];
-	}
-	else {
-		[[MJCloudKitUserDefaultsSync sharedSync] stopForKeyMatchList:settingsSyncList];
-	}
-
-	BOOL syncClippings = [[NSUserDefaults standardUserDefaults] boolForKey:@"syncClippingsViaICloud"];
-	BOOL changedSyncClippings = ( ![[NSUserDefaults standardUserDefaults] objectForKey:@"previousSyncClippingsViaICloud"]
-								 || syncClippings != [[NSUserDefaults standardUserDefaults] boolForKey:@"previousSyncClippingsViaICloud"] );
-
-	if ( changedSyncClippings )
-		[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:syncClippings]
-												 forKey:@"previousSyncClippingsViaICloud"];
-
-	// We will enable / disable regardless of changedSyncClippings because this gets called at app launch, where the feature was previously enabled but needs to be registered.
-	if ( syncClippings ) {
-		if ( changedSyncClippings )
-			firstClippingsSyncAfterEnabling = YES;
-
-		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationChanges forTarget:self];
-		[[MJCloudKitUserDefaultsSync sharedSync] addNotificationFor:MJSyncNotificationChanges withSelector:@selector(checkPreferencesChanges:) withTarget: self];
-
-		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationConflicts forTarget:self];
-		[[MJCloudKitUserDefaultsSync sharedSync] addNotificationFor:MJSyncNotificationConflicts withSelector:@selector(checkPreferencesConflicts:) withTarget: self];
-
-		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationSaveSuccess forTarget:self];
-		[[MJCloudKitUserDefaultsSync sharedSync] addNotificationFor:MJSyncNotificationSaveSuccess withSelector:@selector(checkPreferencesSaveSuccess:) withTarget: self];
-
-		[[MJCloudKitUserDefaultsSync sharedSync] startWithKeyMatchList:@[@"store"]
-								  withContainerIdentifier:kiCloudId];
-	}
-	else {
-		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationChanges forTarget:self];
-
-		[[MJCloudKitUserDefaultsSync sharedSync] stopForKeyMatchList:@[@"store"]];
-	}
-}
+//-(void) registerOrDeregisterICloudSync
+//{
+//	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"syncSettingsViaICloud"] ) {
+//		[[MJCloudKitUserDefaultsSync sharedSync] startWithKeyMatchList:settingsSyncList
+//								  withContainerIdentifier:kiCloudId];
+//	}
+//	else {
+//		[[MJCloudKitUserDefaultsSync sharedSync] stopForKeyMatchList:settingsSyncList];
+//	}
+//
+//	BOOL syncClippings = [[NSUserDefaults standardUserDefaults] boolForKey:@"syncClippingsViaICloud"];
+//	BOOL changedSyncClippings = ( ![[NSUserDefaults standardUserDefaults] objectForKey:@"previousSyncClippingsViaICloud"]
+//								 || syncClippings != [[NSUserDefaults standardUserDefaults] boolForKey:@"previousSyncClippingsViaICloud"] );
+//
+//	if ( changedSyncClippings )
+//		[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:syncClippings]
+//												 forKey:@"previousSyncClippingsViaICloud"];
+//
+//	// We will enable / disable regardless of changedSyncClippings because this gets called at app launch, where the feature was previously enabled but needs to be registered.
+//	if ( syncClippings ) {
+//		if ( changedSyncClippings )
+//			firstClippingsSyncAfterEnabling = YES;
+//
+//		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationChanges forTarget:self];
+//		[[MJCloudKitUserDefaultsSync sharedSync] addNotificationFor:MJSyncNotificationChanges withSelector:@selector(checkPreferencesChanges:) withTarget: self];
+//
+//		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationConflicts forTarget:self];
+//		[[MJCloudKitUserDefaultsSync sharedSync] addNotificationFor:MJSyncNotificationConflicts withSelector:@selector(checkPreferencesConflicts:) withTarget: self];
+//
+//		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationSaveSuccess forTarget:self];
+//		[[MJCloudKitUserDefaultsSync sharedSync] addNotificationFor:MJSyncNotificationSaveSuccess withSelector:@selector(checkPreferencesSaveSuccess:) withTarget: self];
+//
+//		[[MJCloudKitUserDefaultsSync sharedSync] startWithKeyMatchList:@[@"store"]
+//								  withContainerIdentifier:kiCloudId];
+//	}
+//	else {
+//		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationChanges forTarget:self];
+//
+//		[[MJCloudKitUserDefaultsSync sharedSync] stopForKeyMatchList:@[@"store"]];
+//	}
+//}
 
 -(NSDictionary*) checkPreferencesChanges:(NSDictionary*)changes
 {
@@ -992,10 +991,10 @@
 	return nil;
 }
 
--(void) checkCloudKitUpdates
-{
-	[[MJCloudKitUserDefaultsSync sharedSync] checkCloudKitUpdates];
-}
+//-(void) checkCloudKitUpdates
+//{
+//	[[MJCloudKitUserDefaultsSync sharedSync] checkCloudKitUpdates];
+//}
 
 -(bool) loadEngineFrom:(NSDictionary*)loadDict key:(NSString*)listKey into:(FlycutStore*)store
 {

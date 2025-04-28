@@ -19,7 +19,7 @@
 #import "UKLoginItemRegistry.h"
 #import "NSWindow+TrueCenter.h"
 #import "NSWindow+ULIZoomEffect.h"
-#import "MJCloudKitUserDefaultsSync/MJCloudKitUserDefaultsSync.h"
+//#import "MJCloudKitUserDefaultsSync/MJCloudKitUserDefaultsSync.h"
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <ServiceManagement/ServiceManagement.h>
@@ -106,24 +106,24 @@
 	return [super init];
 }
 
-- (void)registerOrDeregisterICloudSync
-{
-	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"syncSettingsViaICloud"] ) {
-		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationChanges forTarget:self];
-		[[MJCloudKitUserDefaultsSync sharedSync] addNotificationFor:MJSyncNotificationChanges withSelector:@selector(checkPreferencesChanges:) withTarget: self];
-		// Not registering for conflict notifications, since we just sync settings, and if the settings are conflictingly adjusted simultaneously on two systems there is nothing to say which setting is better.
-
-		[[MJCloudKitUserDefaultsSync sharedSync] startWithKeyMatchList:settingsSyncList
-					withContainerIdentifier:kiCloudId];
-	}
-	else {
-		[[MJCloudKitUserDefaultsSync sharedSync] stopForKeyMatchList:settingsSyncList];
-
-		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationChanges forTarget:self];
-	}
-
-	[flycutOperator registerOrDeregisterICloudSync];
-}
+//- (void)registerOrDeregisterICloudSync
+//{
+//	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"syncSettingsViaICloud"] ) {
+//		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationChanges forTarget:self];
+//		[[MJCloudKitUserDefaultsSync sharedSync] addNotificationFor:MJSyncNotificationChanges withSelector:@selector(checkPreferencesChanges:) withTarget: self];
+//		// Not registering for conflict notifications, since we just sync settings, and if the settings are conflictingly adjusted simultaneously on two systems there is nothing to say which setting is better.
+//
+//		[[MJCloudKitUserDefaultsSync sharedSync] startWithKeyMatchList:settingsSyncList
+//					withContainerIdentifier:kiCloudId];
+//	}
+//	else {
+//		[[MJCloudKitUserDefaultsSync sharedSync] stopForKeyMatchList:settingsSyncList];
+//
+//		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationChanges forTarget:self];
+//	}
+//
+//	[flycutOperator registerOrDeregisterICloudSync];
+//}
 
 - (void)showAccessibilityAlert {
     BOOL suppressAlert = [[NSUserDefaults standardUserDefaults] boolForKey:@"suppressAccessibilityAlert"];
@@ -254,7 +254,7 @@
         }
 #endif
     });
-    [self registerOrDeregisterICloudSync];
+//    [self registerOrDeregisterICloudSync];
 
     [NSApp activateIgnoringOtherApps: YES];
     
@@ -1044,13 +1044,13 @@
 didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken {
 	// Forward the token to your provider, using a custom method.
 	NSLog(@"Registered for remote notifications.");
-	[[MJCloudKitUserDefaultsSync sharedSync] setRemoteNotificationsEnabled:YES];
+//	[[MJCloudKitUserDefaultsSync sharedSync] setRemoteNotificationsEnabled:YES];
 }
 
 - (void)application:(NSApplication *)application
 didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	NSLog(@"Remote notification support is unavailable due to error: %@", error);
-	[[MJCloudKitUserDefaultsSync sharedSync] setRemoteNotificationsEnabled:NO];
+//	[[MJCloudKitUserDefaultsSync sharedSync] setRemoteNotificationsEnabled:NO];
 }
 
 - (void)application:(NSApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo
