@@ -59,10 +59,6 @@
 		77A4F3B3139BD72300F39666 /* SGKeyCombo.h in Headers */ = {isa = PBXBuildFile; fileRef = 77A4F3AB139BD72300F39666 /* SGKeyCombo.h */; };
 		77A4F3B4139BD72300F39666 /* SGKeyCombo.m in Sources */ = {isa = PBXBuildFile; fileRef = 77A4F3AC139BD72300F39666 /* SGKeyCombo.m */; };
 		77AE72BD23CAE81A00F6A44B /* ApplicationServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 77AE72BC23CAE81A00F6A44B /* ApplicationServices.framework */; };
-		77DA6B921CB9549B0077917F /* FlycutStore.m in Sources */ = {isa = PBXBuildFile; fileRef = 77DA6B8E1CB9549B0077917F /* FlycutStore.m */; };
-		77DA6B931CB9549B0077917F /* FlycutStore.h in Headers */ = {isa = PBXBuildFile; fileRef = 77DA6B8F1CB9549B0077917F /* FlycutStore.h */; };
-		77DA6B941CB9549B0077917F /* FlycutClipping.m in Sources */ = {isa = PBXBuildFile; fileRef = 77DA6B901CB9549B0077917F /* FlycutClipping.m */; };
-		77DA6B951CB9549B0077917F /* FlycutClipping.h in Headers */ = {isa = PBXBuildFile; fileRef = 77DA6B911CB9549B0077917F /* FlycutClipping.h */; };
 		8D0C119F1F147E250046FAA0 /* FlycutOperator.m in Sources */ = {isa = PBXBuildFile; fileRef = 8D0C119E1F147E250046FAA0 /* FlycutOperator.m */; };
 		8D11072A0486CEB800E47090 /* MainMenu.nib in Resources */ = {isa = PBXBuildFile; fileRef = 29B97318FDCFA39411CA2CEA /* MainMenu.nib */; };
 		8D11072D0486CEB800E47090 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 29B97316FDCFA39411CA2CEA /* main.m */; settings = {ATTRIBUTES = (); }; };
@@ -76,6 +72,10 @@
 		AAFAC85F0A1BD9DD00DC6025 /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AAFAC84A0A1BD9DD00DC6025 /* Carbon.framework */; };
 		DBEB0C9C1442F2AE0080D24E /* NSWindow+ULIZoomEffect.h in Headers */ = {isa = PBXBuildFile; fileRef = DBEB0C9A1442F2AE0080D24E /* NSWindow+ULIZoomEffect.h */; };
 		DBEB0C9D1442F2AE0080D24E /* NSWindow+ULIZoomEffect.m in Sources */ = {isa = PBXBuildFile; fileRef = DBEB0C9B1442F2AE0080D24E /* NSWindow+ULIZoomEffect.m */; };
+		E5334CA42DBF0A1D00AAEAEE /* FlycutStore.m in Sources */ = {isa = PBXBuildFile; fileRef = E5334CA22DBF0A1D00AAEAEE /* FlycutStore.m */; };
+		E5334CA52DBF0A1D00AAEAEE /* FlycutClipping.m in Sources */ = {isa = PBXBuildFile; fileRef = E5334CA02DBF0A1D00AAEAEE /* FlycutClipping.m */; };
+		E5334CA62DBF0A1D00AAEAEE /* FlycutStore.h in Headers */ = {isa = PBXBuildFile; fileRef = E5334CA12DBF0A1D00AAEAEE /* FlycutStore.h */; };
+		E5334CA72DBF0A1D00AAEAEE /* FlycutClipping.h in Headers */ = {isa = PBXBuildFile; fileRef = E5334C9F2DBF0A1D00AAEAEE /* FlycutClipping.h */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -198,10 +198,6 @@
 		77A4F3AB139BD72300F39666 /* SGKeyCombo.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SGKeyCombo.h; sourceTree = "<group>"; };
 		77A4F3AC139BD72300F39666 /* SGKeyCombo.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SGKeyCombo.m; sourceTree = "<group>"; };
 		77AE72BC23CAE81A00F6A44B /* ApplicationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ApplicationServices.framework; path = System/Library/Frameworks/ApplicationServices.framework; sourceTree = SDKROOT; };
-		77DA6B8E1CB9549B0077917F /* FlycutStore.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = FlycutStore.m; path = FlycutEngine/FlycutStore.m; sourceTree = SOURCE_ROOT; };
-		77DA6B8F1CB9549B0077917F /* FlycutStore.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = FlycutStore.h; path = FlycutEngine/FlycutStore.h; sourceTree = SOURCE_ROOT; };
-		77DA6B901CB9549B0077917F /* FlycutClipping.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = FlycutClipping.m; path = FlycutEngine/FlycutClipping.m; sourceTree = SOURCE_ROOT; };
-		77DA6B911CB9549B0077917F /* FlycutClipping.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = FlycutClipping.h; path = FlycutEngine/FlycutClipping.h; sourceTree = SOURCE_ROOT; };
 		8D0C119E1F147E250046FAA0 /* FlycutOperator.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FlycutOperator.m; sourceTree = "<group>"; };
 		8D0C11A01F147E3C0046FAA0 /* FlycutOperator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FlycutOperator.h; sourceTree = "<group>"; };
 		8D0C11D41F1720070046FAA0 /* Flycut-iOS-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Flycut-iOS-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -221,6 +217,10 @@
 		AAFAC84A0A1BD9DD00DC6025 /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = /System/Library/Frameworks/Carbon.framework; sourceTree = "<absolute>"; };
 		DBEB0C9A1442F2AE0080D24E /* NSWindow+ULIZoomEffect.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "NSWindow+ULIZoomEffect.h"; sourceTree = "<group>"; };
 		DBEB0C9B1442F2AE0080D24E /* NSWindow+ULIZoomEffect.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "NSWindow+ULIZoomEffect.m"; sourceTree = "<group>"; };
+		E5334C9F2DBF0A1D00AAEAEE /* FlycutClipping.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FlycutClipping.h; sourceTree = "<group>"; };
+		E5334CA02DBF0A1D00AAEAEE /* FlycutClipping.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FlycutClipping.m; sourceTree = "<group>"; };
+		E5334CA12DBF0A1D00AAEAEE /* FlycutStore.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FlycutStore.h; sourceTree = "<group>"; };
+		E5334CA22DBF0A1D00AAEAEE /* FlycutStore.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FlycutStore.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -257,10 +257,10 @@
 				7761C896139BDEC4000FB3AB /* UKPrefsPanel */,
 				7761C889139BDEAF000FB3AB /* UI */,
 				7761C880139BDE94000FB3AB /* LoginItem */,
-				7761C877139BDE7F000FB3AB /* FlycutEngine */,
 				77A4F3A4139BD72300F39666 /* SGHotKeysLib */,
 				8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */,
 				8D0DC8391F3D4B6A00A2A8AF /* MGSwipeTableCell.xcodeproj */,
+				E5334CA32DBF0A1D00AAEAEE /* FlycutEngine */,
 			);
 			name = Classes;
 			sourceTree = "<group>";
@@ -372,18 +372,6 @@
 			path = FlycutHelper;
 			sourceTree = "<group>";
 		};
-		7761C877139BDE7F000FB3AB /* FlycutEngine */ = {
-			isa = PBXGroup;
-			children = (
-				77DA6B8E1CB9549B0077917F /* FlycutStore.m */,
-				77DA6B8F1CB9549B0077917F /* FlycutStore.h */,
-				77DA6B901CB9549B0077917F /* FlycutClipping.m */,
-				77DA6B911CB9549B0077917F /* FlycutClipping.h */,
-			);
-			name = FlycutEngine;
-			path = JumpcutEngine;
-			sourceTree = "<group>";
-		};
 		7761C880139BDE94000FB3AB /* LoginItem */ = {
 			isa = PBXGroup;
 			children = (
@@ -471,6 +459,17 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		E5334CA32DBF0A1D00AAEAEE /* FlycutEngine */ = {
+			isa = PBXGroup;
+			children = (
+				E5334C9F2DBF0A1D00AAEAEE /* FlycutClipping.h */,
+				E5334CA02DBF0A1D00AAEAEE /* FlycutClipping.m */,
+				E5334CA12DBF0A1D00AAEAEE /* FlycutStore.h */,
+				E5334CA22DBF0A1D00AAEAEE /* FlycutStore.m */,
+			);
+			path = FlycutEngine;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXHeadersBuildPhase section */
@@ -490,11 +489,11 @@
 				7761C899139BDEC4000FB3AB /* UKPrefsPanel.h in Headers */,
 				7761C8AA139BDF12000FB3AB /* SRCommon.h in Headers */,
 				7761C8AC139BDF12000FB3AB /* SRKeyCodeTransformer.h in Headers */,
-				77DA6B951CB9549B0077917F /* FlycutClipping.h in Headers */,
+				E5334CA62DBF0A1D00AAEAEE /* FlycutStore.h in Headers */,
+				E5334CA72DBF0A1D00AAEAEE /* FlycutClipping.h in Headers */,
 				7761C8AE139BDF12000FB3AB /* SRRecorderCell.h in Headers */,
 				7761C8B0139BDF12000FB3AB /* SRRecorderControl.h in Headers */,
 				7761C8B2139BDF12000FB3AB /* SRValidator.h in Headers */,
-				77DA6B931CB9549B0077917F /* FlycutStore.h in Headers */,
 				773ABFB113E9AA1A00AE3969 /* NSWindow+TrueCenter.h in Headers */,
 				DBEB0C9C1442F2AE0080D24E /* NSWindow+ULIZoomEffect.h in Headers */,
 			);
@@ -703,6 +702,8 @@
 				AABE497C09FF9CD000A6A239 /* AppController.m in Sources */,
 				77A4F3AE139BD72300F39666 /* SGHotKey.m in Sources */,
 				77A4F3B0139BD72300F39666 /* SGHotKeyCenter.m in Sources */,
+				E5334CA42DBF0A1D00AAEAEE /* FlycutStore.m in Sources */,
+				E5334CA52DBF0A1D00AAEAEE /* FlycutClipping.m in Sources */,
 				77A4F3B2139BD72300F39666 /* SGKeyCodeTranslator.m in Sources */,
 				77A4F3B4139BD72300F39666 /* SGKeyCombo.m in Sources */,
 				7761C885139BDE94000FB3AB /* LoginItemsAE.c in Sources */,
@@ -712,12 +713,10 @@
 				7761C895139BDEAF000FB3AB /* RoundRecTextField.m in Sources */,
 				7761C89A139BDEC4000FB3AB /* UKPrefsPanel.m in Sources */,
 				7761C8AB139BDF12000FB3AB /* SRCommon.m in Sources */,
-				77DA6B941CB9549B0077917F /* FlycutClipping.m in Sources */,
 				8D0C119F1F147E250046FAA0 /* FlycutOperator.m in Sources */,
 				7761C8AD139BDF12000FB3AB /* SRKeyCodeTransformer.m in Sources */,
 				7761C8AF139BDF12000FB3AB /* SRRecorderCell.m in Sources */,
 				7761C8B1139BDF12000FB3AB /* SRRecorderControl.m in Sources */,
-				77DA6B921CB9549B0077917F /* FlycutStore.m in Sources */,
 				7761C8B3139BDF12000FB3AB /* SRValidator.m in Sources */,
 				773ABFB213E9AA1A00AE3969 /* NSWindow+TrueCenter.m in Sources */,
 				DBEB0C9D1442F2AE0080D24E /* NSWindow+ULIZoomEffect.m in Sources */,
