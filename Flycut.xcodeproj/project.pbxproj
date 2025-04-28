@@ -78,37 +78,6 @@
 		E5334CA72DBF0A1D00AAEAEE /* FlycutClipping.h in Headers */ = {isa = PBXBuildFile; fileRef = E5334C9F2DBF0A1D00AAEAEE /* FlycutClipping.h */; };
 /* End PBXBuildFile section */
 
-/* Begin PBXContainerItemProxy section */
-		8D0DC8561F3D682800A2A8AF /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 8D0DC8391F3D4B6A00A2A8AF /* MGSwipeTableCell.xcodeproj */;
-			proxyType = 2;
-			remoteGlobalIDString = C63EE56B1BBA07ED008F46BB;
-			remoteInfo = MGSwipeTableCell;
-		};
-		8D180E1C1F9FD3320001F912 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */;
-			proxyType = 2;
-			remoteGlobalIDString = E42ADA8F168202D700295D85;
-			remoteInfo = InAppSettingsKit;
-		};
-		8D180E1E1F9FD3320001F912 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */;
-			proxyType = 2;
-			remoteGlobalIDString = E42ADAA2168202D700295D85;
-			remoteInfo = InAppSettingsKitTests;
-		};
-		8D180E201F9FD3320001F912 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */;
-			proxyType = 2;
-			remoteGlobalIDString = DAC156231B54533D00655031;
-			remoteInfo = InAppSettingsKitFramework;
-		};
-/* End PBXContainerItemProxy section */
-
 /* Begin PBXCopyFilesBuildPhase section */
 		77192A3923D6F45F00EDB9BC /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
@@ -258,9 +227,9 @@
 				7761C889139BDEAF000FB3AB /* UI */,
 				7761C880139BDE94000FB3AB /* LoginItem */,
 				77A4F3A4139BD72300F39666 /* SGHotKeysLib */,
-				8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */,
-				8D0DC8391F3D4B6A00A2A8AF /* MGSwipeTableCell.xcodeproj */,
 				E5334CA32DBF0A1D00AAEAEE /* FlycutEngine */,
+				8D0DC8391F3D4B6A00A2A8AF /* MGSwipeTableCell.xcodeproj */,
+				8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */,
 			);
 			name = Classes;
 			sourceTree = "<group>";
@@ -441,24 +410,6 @@
 			path = SGHotKeysLib;
 			sourceTree = "<group>";
 		};
-		8D0DC8531F3D682800A2A8AF /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				8D0DC8571F3D682800A2A8AF /* MGSwipeTableCell.framework */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
-		8D180E171F9FD3320001F912 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				8D180E1D1F9FD3320001F912 /* libInAppSettingsKit.a */,
-				8D180E1F1F9FD3320001F912 /* InAppSettingsKitTests.xctest */,
-				8D180E211F9FD3320001F912 /* InAppSettingsKit.framework */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
 		E5334CA32DBF0A1D00AAEAEE /* FlycutEngine */ = {
 			isa = PBXGroup;
 			children = (
@@ -596,16 +547,6 @@
 			);
 			mainGroup = 29B97314FDCFA39411CA2CEA /* Jumpcut */;
 			projectDirPath = "";
-			projectReferences = (
-				{
-					ProductGroup = 8D180E171F9FD3320001F912 /* Products */;
-					ProjectRef = 8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */;
-				},
-				{
-					ProductGroup = 8D0DC8531F3D682800A2A8AF /* Products */;
-					ProjectRef = 8D0DC8391F3D4B6A00A2A8AF /* MGSwipeTableCell.xcodeproj */;
-				},
-			);
 			projectRoot = "";
 			targets = (
 				8D1107260486CEB800E47090 /* Flycut */,
@@ -614,37 +555,6 @@
 			);
 		};
 /* End PBXProject section */
-
-/* Begin PBXReferenceProxy section */
-		8D0DC8571F3D682800A2A8AF /* MGSwipeTableCell.framework */ = {
-			isa = PBXReferenceProxy;
-			fileType = wrapper.framework;
-			path = MGSwipeTableCell.framework;
-			remoteRef = 8D0DC8561F3D682800A2A8AF /* PBXContainerItemProxy */;
-			sourceTree = BUILT_PRODUCTS_DIR;
-		};
-		8D180E1D1F9FD3320001F912 /* libInAppSettingsKit.a */ = {
-			isa = PBXReferenceProxy;
-			fileType = archive.ar;
-			path = libInAppSettingsKit.a;
-			remoteRef = 8D180E1C1F9FD3320001F912 /* PBXContainerItemProxy */;
-			sourceTree = BUILT_PRODUCTS_DIR;
-		};
-		8D180E1F1F9FD3320001F912 /* InAppSettingsKitTests.xctest */ = {
-			isa = PBXReferenceProxy;
-			fileType = wrapper.cfbundle;
-			path = InAppSettingsKitTests.xctest;
-			remoteRef = 8D180E1E1F9FD3320001F912 /* PBXContainerItemProxy */;
-			sourceTree = BUILT_PRODUCTS_DIR;
-		};
-		8D180E211F9FD3320001F912 /* InAppSettingsKit.framework */ = {
-			isa = PBXReferenceProxy;
-			fileType = wrapper.framework;
-			path = InAppSettingsKit.framework;
-			remoteRef = 8D180E201F9FD3320001F912 /* PBXContainerItemProxy */;
-			sourceTree = BUILT_PRODUCTS_DIR;
-		};
-/* End PBXReferenceProxy section */
 
 /* Begin PBXResourcesBuildPhase section */
 		77192A2423D6EA7A00EDB9BC /* Resources */ = {
@@ -789,7 +699,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				INFOPLIST_FILE = FlycutHelper/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 10.7;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.generalarcade.flycuthelper;
@@ -832,7 +742,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				INFOPLIST_FILE = FlycutHelper/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 10.7;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.generalarcade.flycuthelper;
@@ -895,7 +805,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INSTALL_PATH = /Applications;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 10.7;
+				MACOSX_DEPLOYMENT_TARGET = 11.5;
 				MARKETING_VERSION = 1.9.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.generalarcade.flycut;
 				PRODUCT_NAME = Flycut;
@@ -932,7 +842,7 @@
 				INFOPLIST_FILE = Info.plist;
 				INSTALL_PATH = /Applications;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 10.7;
+				MACOSX_DEPLOYMENT_TARGET = 11.5;
 				MARKETING_VERSION = 1.9.6;
 				PRODUCT_BUNDLE_IDENTIFIER = com.generalarcade.flycut;
 				PRODUCT_NAME = Flycut;
