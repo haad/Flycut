@@ -23,7 +23,7 @@ static const float lineHeight = 16;
 			   showSource:(BOOL)showSource {
 
 	self = [super initWithContentRect:contentRect
-							styleMask:NSNonactivatingPanelMask | NSBorderlessWindowMask
+							styleMask:NSWindowStyleMaskNonactivatingPanel | NSWindowStyleMaskBorderless
 							backing:NSBackingStoreBuffered
 							defer:NO];
 	if ( self )
@@ -78,7 +78,7 @@ static const float lineHeight = 16;
             [sourceFieldApp.textField setTextColor:[NSColor whiteColor]];
             [sourceFieldApp.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.0)];
             [sourceFieldApp.textField setBordered:NO];
-            [sourceFieldApp.textField setAlignment:NSLeftTextAlignment];
+            [sourceFieldApp.textField setAlignment:NSTextAlignmentLeft];
 
             NSMutableParagraphStyle *textParagraph = [[NSMutableParagraphStyle alloc] init];
             [textParagraph setLineSpacing:100.0];
@@ -98,7 +98,7 @@ static const float lineHeight = 16;
             [sourceFieldDate.textField setTextColor:[NSColor whiteColor]];
             [sourceFieldDate.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.0)];
             [sourceFieldDate.textField setBordered:NO];
-            [sourceFieldDate.textField setAlignment:NSRightTextAlignment];
+            [sourceFieldDate.textField setAlignment:NSTextAlignmentRight];
             font = [sourceFieldDate.textField font];
             newFont = [NSFont fontWithName:[font fontName] size:font.pointSize*5/4];
             [sourceFieldDate.textField setFont:newFont];
@@ -126,7 +126,7 @@ static const float lineHeight = 16;
 			[textField.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.12, 0.12, 0.12, 0.8)];
 		}
 		[textField.textField setBordered:NO];
-		[textField.textField setAlignment:NSLeftTextAlignment];
+		[textField.textField setAlignment:NSTextAlignmentLeft];
 
 		NSRect charFrame = [self charFrame];
 		charField = [[RoundRecTextField alloc] initWithFrame:charFrame];
@@ -135,7 +135,7 @@ static const float lineHeight = 16;
 		[charField.textField setTextColor:[NSColor whiteColor]];
 		[charField.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.12, 0.12, 0.12, 0.8)];
 		[charField.textField setBordered:NO];
-		[charField.textField setAlignment:NSCenterTextAlignment];
+		[charField.textField setAlignment:NSTextAlignmentCenter];
         [charField.textField setStringValue:@"Empty"];
 		// Use Auto Layout for dynamic width.
 		charField.translatesAutoresizingMaskIntoConstraints = NO;
@@ -397,10 +397,10 @@ static const float lineHeight = 16;
 }
 
 - (void)flagsChanged:(NSEvent *)theEvent {
-	if ( !    ( [theEvent modifierFlags] & NSCommandKeyMask )
-		 && ! ( [theEvent modifierFlags] & NSAlternateKeyMask )
-		 && ! ( [theEvent modifierFlags] & NSControlKeyMask )
-		 && ! ( [theEvent modifierFlags] & NSShiftKeyMask )
+	if ( !    ( [theEvent modifierFlags] & NSEventModifierFlagCommand )
+		 && ! ( [theEvent modifierFlags] & NSEventModifierFlagOption )
+		 && ! ( [theEvent modifierFlags] & NSEventModifierFlagControl )
+		 && ! ( [theEvent modifierFlags] & NSEventModifierFlagShift )
 		 && [ self delegate ]
 		 )
 	{

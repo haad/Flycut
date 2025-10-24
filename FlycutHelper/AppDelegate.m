@@ -18,8 +18,17 @@
     NSArray *pathComponents = [[[NSBundle mainBundle] bundlePath] pathComponents];
     pathComponents = [pathComponents subarrayWithRange:NSMakeRange(0, [pathComponents count] - 4)];
     NSString *path = [NSString pathWithComponents:pathComponents];
-    [[NSWorkspace sharedWorkspace] launchApplication:path];
-    [NSApp terminate:nil];
+    NSURL *appURL = [NSURL fileURLWithPath:path];
+    
+    NSWorkspaceOpenConfiguration *configuration = [NSWorkspaceOpenConfiguration configuration];
+    [[NSWorkspace sharedWorkspace] openApplicationAtURL:appURL
+                                          configuration:configuration
+                                      completionHandler:^(NSRunningApplication * _Nullable app, NSError * _Nullable error) {
+        if (error) {
+            NSLog(@"Failed to launch application: %@", error.localizedDescription);
+        }
+        [NSApp terminate:nil];
+    }];
 }
 
 
