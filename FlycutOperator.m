@@ -285,7 +285,7 @@
             [panel setNameFieldStringValue:fileName];
             [panel setLevel:NSModalPanelWindowLevel];
             [panel setAllowedFileTypes:@[@"txt"]];
-            if ([panel runModal] == NSFileHandlingPanelOKButton)
+            if ([panel runModal] == NSModalResponseOK)
             {
                 fileNameWithPath = [panel URL].path;
             }
@@ -368,8 +368,8 @@
 
 -(NSString*)getClipFromCount:(int)indexInt
 {
-    NSString *pbFullText;
-    NSArray *pbTypes;
+//    NSString *pbFullText;å
+//    NSArray *pbTypes;
     if ( (indexInt + 1) > [clippingStore jcListCount] ) {
         // We're asking for a clipping that isn't there yet
 		// This only tends to happen immediately on startup when not saving, as the entire list is empty.
@@ -796,7 +796,7 @@
 						[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:NO]
 																 forKey:@"syncClippingsViaICloud"];
 						[newContent release];
-						[self registerOrDeregisterICloudSync];
+						//[self registerOrDeregisterICloudSync];
 						[self actionAfterListModification]; // To overwrite what sync put in the defaults.
 						return;
 					}
@@ -826,7 +826,7 @@
 								// This should be impossible, so cover it with disabling sync.
 								[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:NO] forKey:@"syncClippingsViaICloud"];
 								[newContent release];
-								[self registerOrDeregisterICloudSync];
+								//[self registerOrDeregisterICloudSync];
 								[self actionAfterListModification]; // To overwrite what sync put in the defaults.
 								return;
 							}

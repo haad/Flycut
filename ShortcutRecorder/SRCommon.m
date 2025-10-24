@@ -73,10 +73,10 @@ NSString * SRStringForCarbonModifierFlagsAndKeyCode( NSUInteger flags, NSInteger
 NSString * SRStringForCocoaModifierFlags( NSUInteger flags )
 {
     NSString *modifierFlagsString = [NSString stringWithFormat:@"%@%@%@%@", 
-		( flags & NSControlKeyMask ? [NSString stringWithFormat:@"%C", (unichar)KeyboardControlGlyph] : @"" ),
-		( flags & NSAlternateKeyMask ? [NSString stringWithFormat:@"%C", (unichar)KeyboardOptionGlyph] : @"" ),
-		( flags & NSShiftKeyMask ? [NSString stringWithFormat:@"%C", (unichar)KeyboardShiftGlyph] : @"" ),
-		( flags & NSCommandKeyMask ? [NSString stringWithFormat:@"%C", (unichar)KeyboardCommandGlyph] : @"" )];
+                                     ( flags & NSEventModifierFlagControl ? [NSString stringWithFormat:@"%C", (unichar)KeyboardControlGlyph] : @"" ),
+                                     ( flags & NSEventModifierFlagOption ? [NSString stringWithFormat:@"%C", (unichar)KeyboardOptionGlyph] : @"" ),
+                                     ( flags & NSEventModifierFlagShift ? [NSString stringWithFormat:@"%C", (unichar)KeyboardShiftGlyph] : @"" ),
+                                     ( flags & NSEventModifierFlagCommand ? [NSString stringWithFormat:@"%C", (unichar)KeyboardCommandGlyph] : @"" )];
 	
 	return modifierFlagsString;
 }
@@ -111,10 +111,10 @@ NSString * SRReadableStringForCarbonModifierFlagsAndKeyCode( NSUInteger flags, N
 NSString * SRReadableStringForCocoaModifierFlagsAndKeyCode( NSUInteger flags, NSInteger keyCode )
 {
     NSString *readableString = [NSString stringWithFormat:@"%@%@%@%@%@", 
-		(flags & NSCommandKeyMask ? SRLoc(@"Command + ") : @""),
-		(flags & NSAlternateKeyMask ? SRLoc(@"Option + ") : @""),
-		(flags & NSControlKeyMask ? SRLoc(@"Control + ") : @""),
-		(flags & NSShiftKeyMask ? SRLoc(@"Shift + ") : @""),
+                                (flags & NSEventModifierFlagCommand ? SRLoc(@"Command + ") : @""),
+                                (flags & NSEventModifierFlagOption ? SRLoc(@"Option + ") : @""),
+                                (flags & NSEventModifierFlagControl ? SRLoc(@"Control + ") : @""),
+                                (flags & NSEventModifierFlagShift ? SRLoc(@"Shift + ") : @""),
         SRStringForKeyCode( keyCode )];
 	return readableString;
 }
@@ -126,11 +126,11 @@ NSUInteger SRCarbonToCocoaFlags( NSUInteger carbonFlags )
 {
 	NSUInteger cocoaFlags = ShortcutRecorderEmptyFlags;
 	
-	if (carbonFlags & cmdKey) cocoaFlags |= NSCommandKeyMask;
-	if (carbonFlags & optionKey) cocoaFlags |= NSAlternateKeyMask;
-	if (carbonFlags & controlKey) cocoaFlags |= NSControlKeyMask;
-	if (carbonFlags & shiftKey) cocoaFlags |= NSShiftKeyMask;
-	if (carbonFlags & NSFunctionKeyMask) cocoaFlags += NSFunctionKeyMask;
+    if (carbonFlags & cmdKey) cocoaFlags |= NSEventModifierFlagCommand;
+    if (carbonFlags & optionKey) cocoaFlags |= NSEventModifierFlagOption;
+    if (carbonFlags & controlKey) cocoaFlags |= NSEventModifierFlagControl;
+    if (carbonFlags & shiftKey) cocoaFlags |= NSEventModifierFlagShift;
+    if (carbonFlags & NSEventModifierFlagFunction) cocoaFlags += NSEventModifierFlagFunction;
 	
 	return cocoaFlags;
 }
@@ -142,11 +142,11 @@ NSUInteger SRCocoaToCarbonFlags( NSUInteger cocoaFlags )
 {
 	NSUInteger carbonFlags = ShortcutRecorderEmptyFlags;
 	
-	if (cocoaFlags & NSCommandKeyMask) carbonFlags |= cmdKey;
-	if (cocoaFlags & NSAlternateKeyMask) carbonFlags |= optionKey;
-	if (cocoaFlags & NSControlKeyMask) carbonFlags |= controlKey;
-	if (cocoaFlags & NSShiftKeyMask) carbonFlags |= shiftKey;
-	if (cocoaFlags & NSFunctionKeyMask) carbonFlags |= NSFunctionKeyMask;
+    if (cocoaFlags & NSEventModifierFlagCommand) carbonFlags |= cmdKey;
+    if (cocoaFlags & NSEventModifierFlagOption) carbonFlags |= optionKey;
+    if (cocoaFlags & NSEventModifierFlagControl) carbonFlags |= controlKey;
+    if (cocoaFlags & NSEventModifierFlagShift) carbonFlags |= shiftKey;
+    if (cocoaFlags & NSEventModifierFlagFunction) carbonFlags |= NSEventModifierFlagFunction;
 	
 	return carbonFlags;
 }
@@ -187,8 +187,8 @@ NSString *SRCharacterForKeyCodeAndCocoaFlags(NSInteger keyCode, NSUInteger cocoa
 		return FailWithNaiveString;
 	
 	EventModifiers modifiers = 0;
-	if (cocoaFlags & NSAlternateKeyMask)	modifiers |= optionKey;
-	if (cocoaFlags & NSShiftKeyMask)		modifiers |= shiftKey;
+    if (cocoaFlags & NSEventModifierFlagOption)	modifiers |= optionKey;
+    if (cocoaFlags & NSEventModifierFlagShift)		modifiers |= shiftKey;
 	UniCharCount maxStringLength = 4, actualStringLength;
 	UniChar unicodeString[4];
 	err = UCKeyTranslate( keyLayout, (UInt16)keyCode, kUCKeyActionDisplay, modifiers, LMGetKbdType(), kUCKeyTranslateNoDeadKeysBit, &deadKeyState, maxStringLength, &actualStringLength, unicodeString );

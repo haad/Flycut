@@ -76,8 +76,7 @@
 // Save and load
 -(void) saveEngine;
 -(bool) loadEngineFromPList;
--(void) registerOrDeregisterICloudSync;
--(void) checkCloudKitUpdates;
+//-(void) registerOrDeregisterICloudSync;
 
 // Preference related
 -(void) willShowPreferences;

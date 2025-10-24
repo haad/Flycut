@@ -128,11 +128,11 @@
 - (void)showAccessibilityAlert {
     BOOL suppressAlert = [[NSUserDefaults standardUserDefaults] boolForKey:@"suppressAccessibilityAlert"];
     NSDictionary* options = @{(id) (kAXTrustedCheckOptionPrompt): @NO};
-    if (!suppressAlert && AXIsProcessTrustedWithOptions != NULL && !AXIsProcessTrustedWithOptions((CFDictionaryRef) (options))) {
+    if (!suppressAlert && &AXIsProcessTrustedWithOptions != NULL && !AXIsProcessTrustedWithOptions((CFDictionaryRef) (options))) {
         NSAlert *alert = [NSAlert alertWithMessageText:@"Flycut" defaultButton:@"OK" alternateButton:nil otherButton:nil informativeTextWithFormat:@"For correct functioning of the app please tick Flycut in Accessibility apps list"];
         alert.showsSuppressionButton = YES;
         [alert runModal];
-        if (alert.suppressionButton.state == NSOnState) {
+        if (alert.suppressionButton.state == NSControlStateValueOn) {
             [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:YES]
                                                      forKey:@"suppressAccessibilityAlert"];
         }
@@ -195,7 +195,7 @@
 
 	// Create our pasteboard interface
     jcPasteboard = [NSPasteboard generalPasteboard];
-    [jcPasteboard declareTypes:[NSArray arrayWithObject:NSStringPboardType] owner:nil];
+    [jcPasteboard declareTypes:[NSArray arrayWithObject:NSPasteboardTypeString] owner:nil];
     pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
 
 	// Build the statusbar menu
@@ -274,7 +274,7 @@
 -(void)menuWillOpen:(NSMenu *)menu
 {
     NSEvent *event = [NSApp currentEvent];
-    if([event modifierFlags] & NSAlternateKeyMask) {
+    if([event modifierFlags] & NSEventModifierFlagOption) {
         [menu cancelTracking];
         bool disableStore = [self toggleMenuIconDisabled];
         if (!disableStore)
@@ -419,7 +419,7 @@
                                     [[NSUserDefaults standardUserDefaults] floatForKey:@"bezelWidth"],
                                     [[NSUserDefaults standardUserDefaults] floatForKey:@"bezelHeight"]);
     bezel = [[BezelWindow alloc] initWithContentRect:windowFrame
-                                           styleMask:NSBorderlessWindowMask
+                                           styleMask:NSWindowStyleMaskBorderless
                                              backing:NSBackingStoreBuffered
                                                defer:NO
                                           showSource:[[NSUserDefaults standardUserDefaults] boolForKey:@"displayClippingSource"]];
@@ -533,10 +533,10 @@
 	[newRow setTitlePosition:NSNoTitle];
 	[newRow setBorderType:NSNoBorder];
 
-	[newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSNaturalTextAlignment andFrame:NSMakeRect(8, 25, 100, 25)]];
+    [newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSMakeRect(8, 25, 100, 25)]];
 
-	[newRow addSubview:[self preferencePanelSliderLabelForText:minText aligned:NSLeftTextAlignment andFrame:NSMakeRect(113, 0, 151, 25)]];
-	[newRow addSubview:[self preferencePanelSliderLabelForText:maxText aligned:NSRightTextAlignment andFrame:NSMakeRect(109+310-151-4, 0, 151, 25)]];
+    [newRow addSubview:[self preferencePanelSliderLabelForText:minText aligned:NSTextAlignmentLeft andFrame:NSMakeRect(113, 0, 151, 25)]];
+    [newRow addSubview:[self preferencePanelSliderLabelForText:maxText aligned:NSTextAlignmentRight andFrame:NSMakeRect(109+310-151-4, 0, 151, 25)]];
 
 	NSSlider *newControl = [[NSSlider alloc] initWithFrame:NSMakeRect(109, 29, 310, 25)];
 
@@ -564,7 +564,7 @@
 	[newRow setTitlePosition:NSNoTitle];
 	[newRow setBorderType:NSNoBorder];
 
-	[newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSNaturalTextAlignment andFrame:NSMakeRect(8, -2, 100, 25)]];
+    [newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSMakeRect(8, -2, 100, 25)]];
 
 	NSPopUpButton *newControl = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(109, 4, 150, 25) pullsDown:NO];
 
@@ -592,7 +592,7 @@
 
 	NSButton *newControl = [[NSButton alloc] initWithFrame:NSMakeRect(8, 4, panelFrame.size.width-20, 25)];
 
-	[newControl setButtonType:NSSwitchButton];
+    [newControl setButtonType:NSButtonTypeSwitch];
 	[newControl setTitle:title];
 
 	[self setBinding:@"value" forKey:keyPath andOrAction:action on:newControl];
@@ -908,7 +908,7 @@
 
 -(void)pollPB:(NSTimer *)timer
 {
-    NSString *type = [jcPasteboard availableTypeFromArray:[NSArray arrayWithObject:NSStringPboardType]];
+    NSString *type = [jcPasteboard availableTypeFromArray:[NSArray arrayWithObject:NSPasteboardTypeString]];
     if ( [pbCount intValue] != [jcPasteboard changeCount] && ![flycutOperator storeDisabled] ) {
         // Reload pbCount with the current changeCount
         // Probably poor coding technique, but pollPB should be the only thing messing with pbCount, so it should be okay
@@ -936,7 +936,7 @@
 				if (largeCopyRisk)
 					[self toggleMenuIconDisabled];
 
-				if ( contents == nil || [flycutOperator shouldSkip:contents ofType:[jcPasteboard availableTypeFromArray:[NSArray arrayWithObject:NSStringPboardType]] fromAvailableTypes:[jcPasteboard types]] ) {
+                if ( contents == nil || [flycutOperator shouldSkip:contents ofType:[jcPasteboard availableTypeFromArray:[NSArray arrayWithObject:NSPasteboardTypeString]] fromAvailableTypes:[jcPasteboard types]] ) {
                    DLog(@"Contents: Empty or skipped");
                } else if ( ! [pbCount isEqualTo:pbBlockCount] ) {
                    [flycutOperator addClipping:contents ofType:type fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path target:self clippingAddedSelector:@selector(updateMenu)];
@@ -949,9 +949,9 @@
 - (void)processBezelKeyDown:(NSEvent *)theEvent {
 	int newStackPosition;
 	// AppControl should only be getting these directly from bezel via delegation
-	if ([theEvent type] == NSKeyDown) {
+    if ([theEvent type] == NSEventTypeKeyDown) {
 		if ([theEvent keyCode] == [mainRecorder keyCombo].code ) {
-			if ([theEvent modifierFlags] & NSShiftKeyMask) [self stackUp];
+            if ([theEvent modifierFlags] & NSEventModifierFlagShift) [self stackUp];
 			 else [self stackDown];
 			return;
 		}
@@ -968,7 +968,7 @@
                 [self moveItemAtStackPositionToTopOfStack];
                 break;
             case 0x2C: // Comma
-                if ( modifiers & NSCommandKeyMask ) {
+                if ( modifiers & NSEventModifierFlagCommand ) {
                     [self showPreferencePanel:nil];
                 }
                 break;
@@ -1026,7 +1026,7 @@
                     [self restoreStashedStoreAndUpdate];
 
                     if ( success ) {
-                        if ( modifiers & NSShiftKeyMask ) {
+                        if ( modifiers & NSEventModifierFlagShift ) {
                             [flycutOperator clearItemAtStackPosition];
                             [self updateBezel];
                             [self updateMenu];
@@ -1061,13 +1061,13 @@
 }
 
 -(void) processBezelMouseEvents:(NSEvent *)theEvent {
-    if (theEvent.type == NSScrollWheel) {
+    if (theEvent.type == NSEventTypeScrollWheel) {
         if (theEvent.deltaY > 0.0f) {
             [self stackUp];
         } else if (theEvent.deltaY < 0.0f) {
             [self stackDown];
         }
-    } else if (theEvent.type == NSLeftMouseUp && theEvent.clickCount == 2) {
+    } else if (theEvent.type == NSEventTypeLeftMouseUp && theEvent.clickCount == 2) {
         [self pasteFromStack];
     }
 }
@@ -1203,8 +1203,6 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		[alert release];
 		// Add option to overwrite iCloud.
 	}
-
-	[self registerOrDeregisterICloudSync];
 }
 
 - (IBAction)toggleICloudSyncClippings:(id)sender
@@ -1229,7 +1227,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		}
 	}
 
-	[self registerOrDeregisterICloudSync];
+	//[self registerOrDeregisterICloudSync];
 }
 
 - (IBAction)setSavePreference:(id)sender
@@ -1268,7 +1266,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 	// Display the panel attached to the document's window.
 	[panel beginSheetModalForWindow:prefsPanel completionHandler:^(NSInteger result){
-		if (result == NSFileHandlingPanelOKButton) {
+        if (result == NSModalResponseOK) {
 			NSURL* url = [[panel URLs] firstObject];
 
 			[panel release];
