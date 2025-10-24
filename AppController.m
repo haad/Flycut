@@ -1031,8 +1031,8 @@
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification
 {
-	// Enable notification from CloudKit
-	[NSApp registerForRemoteNotificationTypes:NSRemoteNotificationTypeNone];// silent push notification!
+	// CloudKit notifications disabled - uncomment if you need CloudKit sync
+	// [NSApp registerForRemoteNotificationTypes:NSRemoteNotificationTypeNone];// silent push notification!
 
 	//Create our hot key
 	[self toggleMainHotKey:[NSNull null]];

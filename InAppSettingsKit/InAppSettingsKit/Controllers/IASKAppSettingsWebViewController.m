@@ -37,9 +37,10 @@
 }
 
 - (void)loadView {
-    self.webView = [[UIWebView alloc] init];
+    WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+    self.webView = [[WKWebView alloc] initWithFrame:CGRectZero configuration:configuration];
     self.webView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.webView.delegate = self;
+    self.webView.navigationDelegate = self;
     
     self.view = self.webView;
 }
@@ -48,18 +49,30 @@
 	[super viewWillAppear:animated];
 	
 	UIActivityIndicatorView *activityIndicatorView = [[UIActivityIndicatorView alloc] initWithFrame:CGRectMake(0, 0, 40, 20)];
-	activityIndicatorView.activityIndicatorViewStyle = UIActivityIndicatorViewStyleWhite;
+	if (@available(iOS 13.0, *)) {
+		activityIndicatorView.activityIndicatorViewStyle = UIActivityIndicatorViewStyleMedium;
+	} else {
+		activityIndicatorView.activityIndicatorViewStyle = UIActivityIndicatorViewStyleMedium;
+	}
 	[activityIndicatorView startAnimating];
 	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:activityIndicatorView];
 	[self.webView loadRequest:[NSURLRequest requestWithURL:self.url]];
 }
 
-- (void)webViewDidFinishLoad:(UIWebView *)webView {
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
 	self.navigationItem.rightBarButtonItem = nil;
-	self.title = self.customTitle.length ? self.customTitle : [self.webView stringByEvaluatingJavaScriptFromString:@"document.title"];
+	[self.webView evaluateJavaScript:@"document.title" completionHandler:^(id result, NSError *error) {
+		if (!error && result) {
+			NSString *pageTitle = (NSString *)result;
+			self.title = self.customTitle.length ? self.customTitle : pageTitle;
+		} else {
+			self.title = self.customTitle;
+		}
+	}];
 }
 
-- (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType {
+- (void)webView:(WKWebView *)webView decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
+	NSURLRequest *request = navigationAction.request;
 	NSURL *newURL = [request URL];
 	
 	// intercept mailto URL and send it to an in-app Mail compose view instead
@@ -67,7 +80,8 @@
 
 		NSArray *rawURLparts = [[newURL resourceSpecifier] componentsSeparatedByString:@"?"];
 		if (rawURLparts.count > 2) {
-			return NO; // invalid URL
+			decisionHandler(WKNavigationActionPolicyCancel);
+			return; // invalid URL
 		}
 		
 		MFMailComposeViewController *mailViewController = [[MFMailComposeViewController alloc] init];
@@ -125,19 +139,20 @@
 		IASK_IF_IOS7_OR_GREATER(mailViewController.navigationBar.tintColor = self.navigationController.navigationBar.tintColor;);
 		mailViewController.navigationBar.titleTextAttributes =  self.navigationController.navigationBar.titleTextAttributes;
 
-		UIStatusBarStyle savedStatusBarStyle = [UIApplication sharedApplication].statusBarStyle;
-		[self presentViewController:mailViewController animated:YES completion:^{
-			[UIApplication sharedApplication].statusBarStyle = savedStatusBarStyle;
-		}];
-		return NO;
+		// Note: statusBarStyle is deprecated in Mac Catalyst 13.1+
+		// For Mac Catalyst, the status bar appearance is managed by the system
+		[self presentViewController:mailViewController animated:YES completion:nil];
+		decisionHandler(WKNavigationActionPolicyCancel);
+		return;
 	}
 	
 	// open inline if host is the same, otherwise, pass to the system
 	if (![newURL host] || [[newURL host] isEqualToString:[self.url host]]) {
-		return YES;
+		decisionHandler(WKNavigationActionPolicyAllow);
+		return;
 	}
-	[[UIApplication sharedApplication] openURL:newURL];
-	return NO;
+	[[UIApplication sharedApplication] openURL:newURL options:@{} completionHandler:nil];
+	decisionHandler(WKNavigationActionPolicyCancel);
 }
 
 - (void)mailComposeController:(MFMailComposeViewController*)controller didFinishWithResult:(MFMailComposeResult)result error:(NSError*)error {

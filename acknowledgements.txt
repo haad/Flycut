@@ -1,7 +1,12 @@
-Support: https://github.com/TermiT/Flycut/issues
+Support: https://github.com/haad/Flycut.git/issues
 
-Flycut, developed by General Arcade (http://www.generalarcade.com/). Flycut is a fork of Jumpcut. Source code avilable on GitHub: http://github.com/TermiT/Flycut
+This version maintained by haad: https://github.com/haad/Flycut.git
+
+Flycut, developed by General Arcade (http://www.generalarcade.com/). Flycut is a fork of Jumpcut. Original source code avilable on GitHub: http://github.com/TermiT/Flycut
+This fork was updated by haad to compile on Tahoe 26.0 release of Mac OS.
+
 © General Arcade, 2011 - 2020.
+© Adam Hamsik, 2025 - 2026.
 
 Flycut macOS incorporates the following libraries, used with gratitude:
 	• ShortcutRecorder by Jesper et al. (<http://wafflesoftware.net/>)

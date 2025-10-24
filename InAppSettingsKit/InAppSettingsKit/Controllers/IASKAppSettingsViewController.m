@@ -121,7 +121,7 @@ CGRect IASKCGRectSwap(CGRect rect);
 - (BOOL)isPad {
 	BOOL isPad = NO;
 #if (__IPHONE_OS_VERSION_MAX_ALLOWED >= 30200)
-	isPad = UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad;
+	isPad = [[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad;
 #endif
 	return isPad;
 }
@@ -175,7 +175,7 @@ CGRect IASKCGRectSwap(CGRect rect);
 #if __IPHONE_OS_VERSION_MAX_ALLOWED >= 70000
         if (floor(NSFoundationVersionNumber) <= NSFoundationVersionNumber_iOS_6_1)	// don't use etched style on iOS 7
 #endif
-            self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLineEtched;
+            self.tableView.separatorStyle = UITableViewCellSeparatorStyleSingleLine;
     }
     UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(singleTapToEndEdit:)];   
     tapGesture.cancelsTouchesInView = NO;
@@ -790,7 +790,7 @@ CGRect IASKCGRectSwap(CGRect rect);
         
     } else if ([[specifier type] isEqualToString:kIASKOpenURLSpecifier]) {
         [tableView deselectRowAtIndexPath:indexPath animated:YES];
-		[[UIApplication sharedApplication] openURL:[NSURL URLWithString:[specifier localizedObjectForKey:kIASKFile]]];
+		[[UIApplication sharedApplication] openURL:[NSURL URLWithString:[specifier localizedObjectForKey:kIASKFile]] options:@{} completionHandler:nil];
     } else if ([[specifier type] isEqualToString:kIASKButtonSpecifier]) {
         [tableView deselectRowAtIndexPath:indexPath animated:YES];
         if ([self.delegate respondsToSelector:@selector(settingsViewController:buttonTappedForSpecifier:)]) {
@@ -862,10 +862,9 @@ CGRect IASKCGRectSwap(CGRect rect);
             
             mailViewController.mailComposeDelegate = vc;
             _currentChildViewController = mailViewController;
-            UIStatusBarStyle savedStatusBarStyle = [UIApplication sharedApplication].statusBarStyle;
-            [vc presentViewController:mailViewController animated:YES completion:^{
-			    [UIApplication sharedApplication].statusBarStyle = savedStatusBarStyle;
-            }];
+            // Note: statusBarStyle is deprecated in Mac Catalyst 13.1+
+            // For Mac Catalyst, the status bar appearance is managed by the system
+            [vc presentViewController:mailViewController animated:YES completion:nil];
 			
         } else {
 			IASK_IF_PRE_IOS8
