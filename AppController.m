@@ -1283,7 +1283,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 - (void)updateMenuContaining:(NSString*)search {
 	// Use GDC to prevent concurrent modification of the menu, since that would be messy.
-	dispatch_sync(menuQueue, ^{
+	dispatch_async(dispatch_get_main_queue(), ^{
 		[jcMenu setMenuChangedMessagesEnabled:NO];
 
 		NSArray *returnedDisplayStrings = [flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:search];
@@ -1296,36 +1296,24 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		// If we remove all of them and add all new ones, the menu won't redraw if the count is unchanged, so just reuse them by changing their title.
 		int oldItems = [menuItems count]-jcMenuBaseItemsCount;
 		int newItems = [clipStrings count];
-
-		if ( oldItems > newItems )
-		{
-			for ( int i = newItems; i < oldItems; i++ )
-				[jcMenu removeItemAtIndex:0];
-		}
-		else if ( newItems > oldItems )
-		{
-			for ( int i = oldItems; i < newItems; i++ )
-			{
-				NSMenuItem *item;
-				item = [[NSMenuItem alloc] initWithTitle:@"foo"
-												  action:@selector(processMenuClippingSelection:)
-										   keyEquivalent:@""];
-				[item setTarget:self];
-				[item setEnabled:YES];
-				[jcMenu insertItem:item atIndex:0];
-				// Way back in 0.2, failure to release the new item here was causing a quite atrocious memory leak.
-				[item release];
-			}
-		}
-
-		// Now set the correct titles for each menu item.
-		for(NSString *pbMenuTitle in clipStrings) {
-			newItems--;
-			NSMenuItem *item = [jcMenu itemAtIndex:newItems];
-			[item setTitle:pbMenuTitle];
-			[jcMenu itemChanged: item];
-		}
-	});
+        DLog(@"list=%@, oldItems=%d, newItems=%d", returnedDisplayStrings, oldItems, newItems);
+        
+        for ( int i = 0; i < oldItems; i++ )
+            [jcMenu removeItemAtIndex:0];
+        
+        for ( int i = 0; i < newItems; i++ )
+        {
+            NSMenuItem *item;
+            item = [[NSMenuItem alloc] initWithTitle:[clipStrings objectAtIndex:i]
+                                              action:@selector(processMenuClippingSelection:)
+                                       keyEquivalent:@""];
+            [item setTarget:self];
+            [item setEnabled:YES];
+            [jcMenu insertItem:item atIndex:0];
+            // Way back in 0.2, failure to release the new item here was causing a quite atrocious memory leak.
+            [item release];
+        }
+    });
 }
 
 -(IBAction)processMenuClippingSelection:(id)sender
