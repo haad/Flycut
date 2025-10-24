@@ -393,16 +393,24 @@
 {
     NSSize bezelSize = NSMakeSize([sender floatValue], bezel.frame.size.height);
 	NSRect windowFrame = NSMakeRect( 0, 0, bezelSize.width, bezelSize.height);
-	[bezel setFrame:windowFrame display:NO];
-    [bezel trueCenter];
+	
+	// Defer frame update to avoid layout recursion during preference changes
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[bezel setFrame:windowFrame display:NO];
+		[bezel trueCenter];
+	});
 }
 
 -(IBAction) setBezelHeight:(id)sender
 {
     NSSize bezelSize = NSMakeSize(bezel.frame.size.width, [sender floatValue]);
 	NSRect windowFrame = NSMakeRect( 0, 0, bezelSize.width, bezelSize.height);
-	[bezel setFrame:windowFrame display:NO];
-    [bezel trueCenter];
+	
+	// Defer frame update to avoid layout recursion during preference changes
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[bezel setFrame:windowFrame display:NO];
+		[bezel trueCenter];
+	});
 }
 
 -(IBAction) setupBezel:(id)sender
@@ -700,6 +708,17 @@
 	if ([prefsPanel respondsToSelector:@selector(setCollectionBehavior:)])
 		[prefsPanel setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces];
 	[NSApp activateIgnoringOtherApps: YES];
+    
+    // Make preferences window larger and more modern-looking
+    NSRect currentFrame = [prefsPanel frame];
+    NSSize newSize = NSMakeSize(620, 600); // Increased height for more content visibility
+    NSRect newFrame = NSMakeRect(currentFrame.origin.x, currentFrame.origin.y, newSize.width, newSize.height);
+    
+    // Adjust position to keep window centered
+    newFrame.origin.x = currentFrame.origin.x - (newSize.width - currentFrame.size.width) / 2;
+    newFrame.origin.y = currentFrame.origin.y - (newSize.height - currentFrame.size.height) / 2;
+    
+    [prefsPanel setFrame:newFrame display:YES animate:YES];
 	[prefsPanel makeKeyAndOrderFront:self];
 	NSString *fileRoot = [[NSBundle mainBundle] pathForResource:@"acknowledgements" ofType:@"txt"];
 	NSString *contents = [NSString stringWithContentsOfFile:fileRoot
@@ -1371,8 +1390,12 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(void) stackDown
 {
+	NSLog(@"stackDown: current position=%d, total count=%d", [flycutOperator stackPosition], [flycutOperator jcListCount]);
 	if ( [flycutOperator setStackPositionToOneLessRecent] ) {
+		NSLog(@"stackDown: moved to position=%d", [flycutOperator stackPosition]);
 		[self fillBezel];
+	} else {
+		NSLog(@"stackDown: could not move, at limit");
 	}
 }
 
@@ -1380,7 +1403,14 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 {
     FlycutClipping* clipping = [flycutOperator clippingAtStackPosition];
     [bezel setText:[NSString stringWithFormat:@"%@", [clipping contents]]];
-    [bezel setCharString:[NSString stringWithFormat:@"%d of %d", [flycutOperator stackPosition] + 1, [flycutOperator jcListCount]]];
+    
+    int currentPos = [flycutOperator stackPosition] + 1;
+    int totalCount = [flycutOperator jcListCount];
+    int displayNum = [[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"];
+    
+    NSLog(@"fillBezel: showing %d of %d (displayNum pref=%d)", currentPos, totalCount, displayNum);
+    [bezel setCharString:[NSString stringWithFormat:@"%d of %d", currentPos, totalCount]];
+    
     NSString *localizedName = [clipping appLocalizedName];
     if ( nil == localizedName )
         localizedName = @"";
@@ -1397,8 +1427,12 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(void) stackUp
 {
+	NSLog(@"stackUp: current position=%d, total count=%d", [flycutOperator stackPosition], [flycutOperator jcListCount]);
 	if ( [flycutOperator setStackPositionToOneMoreRecent] ) {
+		NSLog(@"stackUp: moved to position=%d", [flycutOperator stackPosition]);
 		[self fillBezel];
+	} else {
+		NSLog(@"stackUp: could not move, at limit");
 	}
 }
 

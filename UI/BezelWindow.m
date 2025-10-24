@@ -34,9 +34,16 @@ static const float lineHeight = 16;
 		[self setOpaque:NO];
 		[self setAlphaValue:1.0];
 		[self setOpaque:NO];
-		[self setHasShadow:NO];
+		[self setHasShadow:YES]; // Add subtle shadow like menu bar
 		[self setMovableByWindowBackground:NO];
         [self setColor:NO];
+        
+        // Use modern menu bar-like appearance when available
+        if (@available(macOS 10.14, *)) {
+            self.titlebarAppearsTransparent = YES;
+            self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+        }
+        
 		[self setBackgroundColor:[self backgroundColor]];
         showSourceField = showSource;
 
@@ -51,15 +58,17 @@ static const float lineHeight = 16;
             [sourceFieldBackground.textField setEditable:NO];
             [sourceFieldBackground.textField setTextColor:[NSColor whiteColor]];
             
-            // Modern Liquid Glass effect for source background
+            // Modern menu bar-like effect for source background
             if (@available(macOS 14.0, *)) {
-                NSGlassEffectView *glassView = [[NSGlassEffectView alloc] initWithFrame:sourceFieldBackground.bounds];
-                glassView.cornerRadius = 8.0;
-                glassView.tintColor = [[NSColor systemBlueColor] colorWithAlphaComponent:0.3];
-                [sourceFieldBackground addSubview:glassView positioned:NSWindowBelow relativeTo:nil];
+                NSVisualEffectView *sourceEffectView = [[NSVisualEffectView alloc] initWithFrame:sourceFieldBackground.bounds];
+                sourceEffectView.material = NSVisualEffectMaterialMenu;
+                sourceEffectView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+                sourceEffectView.state = NSVisualEffectStateActive;
+                sourceEffectView.layer.cornerRadius = 8.0;
+                [sourceFieldBackground addSubview:sourceEffectView positioned:NSWindowBelow relativeTo:nil];
             } else {
                 // Fallback for older macOS versions
-                [sourceFieldBackground.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.45)];
+                [sourceFieldBackground.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.12, 0.12, 0.12, 0.8)];
             }
             [sourceFieldBackground.textField setBordered:NO];
 
@@ -103,15 +112,18 @@ static const float lineHeight = 16;
 		//[[textField cell] setWraps:NO];
 		[textField.textField setTextColor:[NSColor whiteColor]];
 		
-		// Modern Liquid Glass effect for main text field
+		// Modern menu bar-like effect for main text field
 		if (@available(macOS 14.0, *)) {
-			NSGlassEffectView *textGlassView = [[NSGlassEffectView alloc] initWithFrame:textField.bounds];
-			textGlassView.cornerRadius = 12.0;
-			textGlassView.tintColor = [[NSColor controlAccentColor] colorWithAlphaComponent:0.2];
-			[textField addSubview:textGlassView positioned:NSWindowBelow relativeTo:nil];
+			// Use built-in visual effect view for modern appearance
+			NSVisualEffectView *textEffectView = [[NSVisualEffectView alloc] initWithFrame:textField.bounds];
+			textEffectView.material = NSVisualEffectMaterialMenu;
+			textEffectView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+			textEffectView.state = NSVisualEffectStateActive;
+			textEffectView.layer.cornerRadius = 12.0;
+			[textField addSubview:textEffectView positioned:NSWindowBelow relativeTo:nil];
 		} else {
-			// Fallback for older macOS versions
-			[textField.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.45)];
+			// Fallback for older macOS versions - use menu bar-like transparency
+			[textField.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.12, 0.12, 0.12, 0.8)];
 		}
 		[textField.textField setBordered:NO];
 		[textField.textField setAlignment:NSLeftTextAlignment];
@@ -121,7 +133,7 @@ static const float lineHeight = 16;
 		[[self contentView] addSubview:charField];
 		[charField.textField setEditable:NO];
 		[charField.textField setTextColor:[NSColor whiteColor]];
-		[charField.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.45)];
+		[charField.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.12, 0.12, 0.12, 0.8)];
 		[charField.textField setBordered:NO];
 		[charField.textField setAlignment:NSCenterTextAlignment];
         [charField.textField setStringValue:@"Empty"];
@@ -148,14 +160,18 @@ static const float lineHeight = 16;
     if (nil == sourceText || 0 == sourceText.length)
         showSourceField = false;
 
-    NSRect textFrame = [self textFrame];
-    [textField setFrame:textFrame];
-    NSRect charFrame = [self charFrame];
-    [charField setFrame:charFrame];
+    // Defer frame updates to avoid layout recursion
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSRect textFrame = [self textFrame];
+        [textField setFrame:textFrame];
+        NSRect charFrame = [self charFrame];
+        [charField setFrame:charFrame];
+    });
+    
     if (showSourceField)
-        [sourceFieldBackground.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.45)];
+        [sourceFieldBackground.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.12, 0.12, 0.12, 0.8)];
     else if ( nil != sourceFieldApp )
-        [sourceFieldBackground.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.0)];
+        [sourceFieldBackground.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.12, 0.12, 0.12, 0.0)];
     
     showSourceField = savedShowSourceField;
 
@@ -313,10 +329,15 @@ static const float lineHeight = 16;
 	// I'm not at all clear why this seems to work
 	NSRect dummyRect = NSMakeRect(0, 0, [bg size].width, [bg size].height);
 	NSBezierPath *roundedRec = [NSBezierPath bezierPathWithRoundRectInRect:dummyRect radius:radius];
-    if (color)
-        [[NSColor colorWithCalibratedRed:0.6 green:0.6 blue:0 alpha:alpha ] set];
-    else
-        [[NSColor colorWithCalibratedWhite:0.1 alpha:alpha] set];
+    
+    // Use transparent colors similar to menu bar for both normal and favorites modes
+    if (color) {
+        // Favorites mode - use a subtle accent color with high transparency
+        [[NSColor colorWithCalibratedWhite:0.15 alpha:alpha] set];
+    } else {
+        // Normal mode - use menu bar-like transparency
+        [[NSColor colorWithCalibratedWhite:0.12 alpha:alpha] set];
+    }
     [roundedRec fill];
 	[bg unlockFocus];
 	return [NSColor colorWithPatternImage:[bg autorelease]];
