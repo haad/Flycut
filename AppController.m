@@ -749,12 +749,15 @@
 
 - (void)pasteFromStack
 {
+	NSLog(@"pasteFromStack called");
 	NSString *content = [flycutOperator getPasteFromStackPosition];
 	if ( nil != content ) {
+		NSLog(@"Content found, adding to pasteboard and preparing to paste: %@", [content substringToIndex:MIN(content.length, 50)]);
 		[self addClipToPasteboard:content];
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
 		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.2];
 	} else {
+		NSLog(@"No content found in stack position");
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
 	}
     [self restoreStashedStoreAndUpdate];
@@ -789,6 +792,7 @@
 
 - (void)metaKeysReleased
 {
+	NSLog(@"metaKeysReleased called - isBezelPinned: %@", isBezelPinned ? @"YES" : @"NO");
 	if ( ! isBezelPinned ) {
 		[self pasteFromStack];
 	}
@@ -822,7 +826,27 @@
 }
 
 /*" +fakeCommandV synthesizes keyboard events for Cmd-v Paste shortcut. "*/
--(void)fakeCommandV { [self fakeKey:[srTransformer reverseTransformedValue:@"V"] withCommandFlag:TRUE]; }
+-(void)fakeCommandV { 
+    NSLog(@"fakeCommandV called - attempting to paste");
+    
+    // Check if we have accessibility permissions
+    BOOL accessibilityEnabled = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @YES});
+    
+    if (!accessibilityEnabled) {
+        NSLog(@"Accessibility permissions not granted - cannot simulate keystrokes");
+        // Show alert to user
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSAlert *alert = [[NSAlert alloc] init];
+            alert.messageText = @"Accessibility Access Required";
+            alert.informativeText = @"Flycut needs accessibility access to automatically paste. Please grant access in System Preferences > Security & Privacy > Privacy > Accessibility.";
+            [alert addButtonWithTitle:@"OK"];
+            [alert runModal];
+        });
+        return;
+    }
+    
+    [self fakeKey:[srTransformer reverseTransformedValue:@"V"] withCommandFlag:TRUE]; 
+}
 
 /*" +fakeDownArrow synthesizes keyboard events for the down-arrow key. "*/
 -(void)fakeDownArrow { [self fakeKey:@125 withCommandFlag:FALSE]; }

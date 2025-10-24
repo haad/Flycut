@@ -50,7 +50,17 @@ static const float lineHeight = 16;
             [[self contentView] addSubview:sourceFieldBackground];
             [sourceFieldBackground.textField setEditable:NO];
             [sourceFieldBackground.textField setTextColor:[NSColor whiteColor]];
-            [sourceFieldBackground.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.45)];
+            
+            // Modern Liquid Glass effect for source background
+            if (@available(macOS 14.0, *)) {
+                NSGlassEffectView *glassView = [[NSGlassEffectView alloc] initWithFrame:sourceFieldBackground.bounds];
+                glassView.cornerRadius = 8.0;
+                glassView.tintColor = [[NSColor systemBlueColor] colorWithAlphaComponent:0.3];
+                [sourceFieldBackground addSubview:glassView positioned:NSWindowBelow relativeTo:nil];
+            } else {
+                // Fallback for older macOS versions
+                [sourceFieldBackground.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.45)];
+            }
             [sourceFieldBackground.textField setBordered:NO];
 
             sourceFieldApp = [[RoundRecTextField alloc] initWithFrame:[self sourceFrameLeft]];
@@ -92,7 +102,17 @@ static const float lineHeight = 16;
 		//[[textField cell] setScrollable:YES];
 		//[[textField cell] setWraps:NO];
 		[textField.textField setTextColor:[NSColor whiteColor]];
-		[textField.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.45)];
+		
+		// Modern Liquid Glass effect for main text field
+		if (@available(macOS 14.0, *)) {
+			NSGlassEffectView *textGlassView = [[NSGlassEffectView alloc] initWithFrame:textField.bounds];
+			textGlassView.cornerRadius = 12.0;
+			textGlassView.tintColor = [[NSColor controlAccentColor] colorWithAlphaComponent:0.2];
+			[textField addSubview:textGlassView positioned:NSWindowBelow relativeTo:nil];
+		} else {
+			// Fallback for older macOS versions
+			[textField.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.45)];
+		}
 		[textField.textField setBordered:NO];
 		[textField.textField setAlignment:NSLeftTextAlignment];
 
