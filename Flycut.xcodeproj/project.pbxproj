@@ -78,6 +78,37 @@
 		E5334CA72DBF0A1D00AAEAEE /* FlycutClipping.h in Headers */ = {isa = PBXBuildFile; fileRef = E5334C9F2DBF0A1D00AAEAEE /* FlycutClipping.h */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		86B8CE5E2DCB548E00BD19A1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = E42ADA8F168202D700295D85;
+			remoteInfo = InAppSettingsKit;
+		};
+		86B8CE602DCB548E00BD19A1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = E42ADAA2168202D700295D85;
+			remoteInfo = InAppSettingsKitTests;
+		};
+		86B8CE622DCB548E00BD19A1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = DAC156231B54533D00655031;
+			remoteInfo = InAppSettingsKitFramework;
+		};
+		86B8CE652DCB548E00BD19A1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8D0DC8391F3D4B6A00A2A8AF /* MGSwipeTableCell.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = C63EE56B1BBA07ED008F46BB;
+			remoteInfo = MGSwipeTableCell;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXCopyFilesBuildPhase section */
 		77192A3923D6F45F00EDB9BC /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
@@ -410,6 +441,24 @@
 			path = SGHotKeysLib;
 			sourceTree = "<group>";
 		};
+		86B8CE572DCB548E00BD19A1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				86B8CE662DCB548E00BD19A1 /* MGSwipeTableCell.framework */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		86B8CE592DCB548E00BD19A1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				86B8CE5F2DCB548E00BD19A1 /* libInAppSettingsKit.a */,
+				86B8CE612DCB548E00BD19A1 /* InAppSettingsKitTests.xctest */,
+				86B8CE632DCB548E00BD19A1 /* InAppSettingsKit.framework */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 		E5334CA32DBF0A1D00AAEAEE /* FlycutEngine */ = {
 			isa = PBXGroup;
 			children = (
@@ -529,6 +578,9 @@
 							};
 						};
 					};
+					8D1107260486CEB800E47090 = {
+						ProvisioningStyle = Manual;
+					};
 				};
 			};
 			buildConfigurationList = C01FCF4E08A954540054247B /* Build configuration list for PBXProject "Flycut" */;
@@ -544,6 +596,16 @@
 			);
 			mainGroup = 29B97314FDCFA39411CA2CEA /* Jumpcut */;
 			projectDirPath = "";
+			projectReferences = (
+				{
+					ProductGroup = 86B8CE592DCB548E00BD19A1 /* Products */;
+					ProjectRef = 8D180E161F9FD3320001F912 /* InAppSettingsKit.xcodeproj */;
+				},
+				{
+					ProductGroup = 86B8CE572DCB548E00BD19A1 /* Products */;
+					ProjectRef = 8D0DC8391F3D4B6A00A2A8AF /* MGSwipeTableCell.xcodeproj */;
+				},
+			);
 			projectRoot = "";
 			targets = (
 				8D1107260486CEB800E47090 /* Flycut */,
@@ -552,6 +614,37 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXReferenceProxy section */
+		86B8CE5F2DCB548E00BD19A1 /* libInAppSettingsKit.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = libInAppSettingsKit.a;
+			remoteRef = 86B8CE5E2DCB548E00BD19A1 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		86B8CE612DCB548E00BD19A1 /* InAppSettingsKitTests.xctest */ = {
+			isa = PBXReferenceProxy;
+			fileType = wrapper.cfbundle;
+			path = InAppSettingsKitTests.xctest;
+			remoteRef = 86B8CE602DCB548E00BD19A1 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		86B8CE632DCB548E00BD19A1 /* InAppSettingsKit.framework */ = {
+			isa = PBXReferenceProxy;
+			fileType = wrapper.framework;
+			path = InAppSettingsKit.framework;
+			remoteRef = 86B8CE622DCB548E00BD19A1 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		86B8CE662DCB548E00BD19A1 /* MGSwipeTableCell.framework */ = {
+			isa = PBXReferenceProxy;
+			fileType = wrapper.framework;
+			path = MGSwipeTableCell.framework;
+			remoteRef = 86B8CE652DCB548E00BD19A1 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+/* End PBXReferenceProxy section */
 
 /* Begin PBXResourcesBuildPhase section */
 		77192A2423D6EA7A00EDB9BC /* Resources */ = {
