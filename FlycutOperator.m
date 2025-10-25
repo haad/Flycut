@@ -284,7 +284,7 @@
             NSSavePanel* panel = [NSSavePanel savePanel];
             [panel setNameFieldStringValue:fileName];
             [panel setLevel:NSModalPanelWindowLevel];
-            [panel setAllowedFileTypes:@[@"txt"]];
+            [panel  setAllowedFileTypes:@[@"txt"]];
             if ([panel runModal] == NSModalResponseOK)
             {
                 fileNameWithPath = [panel URL].path;

@@ -26,6 +26,8 @@
     BezelWindow					*bezel;
 	SGHotKey					*mainHotKey;
 	IBOutlet SRRecorderControl	*mainRecorder;
+	SGHotKey					*searchHotKey;
+	SRRecorderControl			*searchRecorder;
 	IBOutlet NSPanel			*prefsPanel;
 	IBOutlet NSTextView			*acknowledgementsView;
 	IBOutlet NSBox			  *appearancePanel;
@@ -35,6 +37,13 @@
 	BOOL						isBezelPinned; // Currently not used
 	NSString					*currentKeycodeCharacter;
     NSDateFormatter*            dateFormat;
+	
+	// Search window components
+	NSWindow					*searchWindow;
+	NSSearchField				*searchWindowSearchField;
+	NSTableView					*searchWindowTableView;
+	NSArray						*searchResults;
+	BOOL						isSearchWindowDisplayed;
 
     NSArray *settingsSyncList;
 
@@ -95,6 +104,15 @@
 
 // Hotkey related
 -(void)hitMainHotKey:(SGHotKey *)hotKey;
+-(void)hitSearchHotKey:(SGHotKey *)hotKey;
+-(IBAction)toggleSearchHotKey:(id)sender;
+
+// Search window related
+-(void) showSearchWindow;
+-(void) hideSearchWindow;
+-(void) buildSearchWindow;
+-(void) updateSearchResults;
+-(IBAction)searchWindowItemSelected:(id)sender;
 
 // Bezel related
 -(void) updateBezel;

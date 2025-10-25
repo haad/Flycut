@@ -40,6 +40,8 @@
 	[[NSUserDefaults standardUserDefaults] registerDefaults:[NSDictionary dictionaryWithObjectsAndKeys:
 		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:9],[NSNumber numberWithLong:1179648],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
 		@"ShortcutRecorder mainHotkey",
+		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:1],[NSNumber numberWithLong:1179648|NSEventModifierFlagShift],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
+		@"ShortcutRecorder searchHotkey",
 		[NSNumber numberWithInt:10],
 		@"displayNum",
 		[NSNumber numberWithInt:40],
@@ -171,6 +173,13 @@
 	if ( [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder mainHotkey"] ) {
 		[mainRecorder setKeyCombo:SRMakeKeyCombo([[[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder mainHotkey"] objectForKey:@"keyCode"] intValue],
 												 [[[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder mainHotkey"] objectForKey:@"modifierFlags"] intValue] )
+		];
+	};
+
+	// Set up search hotkey recorder
+	if ( [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder searchHotkey"] && searchRecorder ) {
+		[searchRecorder setKeyCombo:SRMakeKeyCombo([[[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder searchHotkey"] objectForKey:@"keyCode"] intValue],
+												   [[[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder searchHotkey"] objectForKey:@"modifierFlags"] intValue] )
 		];
 	};
 
@@ -343,16 +352,16 @@
     // Toggles the "disabled" look of the menu icon.  Returns if the icon looks disabled or not, allowing the caller to decide if anything is actually being disabled or if they just wanted the icon to be a status display.
     if (nil == statusItemText)
     {
-        statusItemText = [statusItem title];
-        statusItemImage = [statusItem image];
-        [statusItem setTitle: @""];
-        [statusItem setImage: [NSImage imageNamed:@"com.generalarcade.flycut.xout.16.png"]];
+        statusItemText = statusItem.button.title;
+        statusItemImage = statusItem.button.image;
+        statusItem.button.title = @"";
+        statusItem.button.image = [NSImage imageNamed:@"com.generalarcade.flycut.xout.16.png"];
         return true;
     }
     else
     {
-        [statusItem setTitle: statusItemText];
-        [statusItem setImage: statusItemImage];
+        statusItem.button.title = statusItemText;
+        statusItem.button.image = statusItemImage;
         statusItemText = nil;
         statusItemImage = nil;
     }
@@ -436,17 +445,17 @@
 -(void) switchMenuIconTo:(int)number
 {
     if (number == 1 ) {
-        [statusItem setTitle:@""];
-        [statusItem setImage:[NSImage imageNamed:@"com.generalarcade.flycut.black.16.png"]];
+        statusItem.button.title = @"";
+        statusItem.button.image = [NSImage imageNamed:@"com.generalarcade.flycut.black.16.png"];
     } else if (number == 2 ) {
-        [statusItem setImage:nil];
-        [statusItem setTitle:[NSString stringWithFormat:@"%C",0x2704]];
+        statusItem.button.image = nil;
+        statusItem.button.title = [NSString stringWithFormat:@"%C",0x2704];
     } else if ( number == 3 ) {
-        [statusItem setImage:nil];
-        [statusItem setTitle:[NSString stringWithFormat:@"%C",0x2702]];
+        statusItem.button.image = nil;
+        statusItem.button.title = [NSString stringWithFormat:@"%C",0x2702];
     } else {
-        [statusItem setTitle:@""];
-        [statusItem setImage:[NSImage imageNamed:@"com.generalarcade.flycut.16.png"]];
+        statusItem.button.title = @"";
+        statusItem.button.image = [NSImage imageNamed:@"com.generalarcade.flycut.16.png"];
     }
 }
 
@@ -531,7 +540,7 @@
 
 	NSBox *newRow = [[NSBox alloc] initWithFrame:NSMakeRect(0, frameMaxY-height, panelFrame.size.width-10, height)];
 	[newRow setTitlePosition:NSNoTitle];
-	[newRow setBorderType:NSNoBorder];
+	[newRow setTransparent:YES];
 
     [newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSMakeRect(8, 25, 100, 25)]];
 
@@ -562,7 +571,7 @@
 
 	NSBox *newRow = [[NSBox alloc] initWithFrame:NSMakeRect(0, frameMaxY-height+5, panelFrame.size.width-10, height)];
 	[newRow setTitlePosition:NSNoTitle];
-	[newRow setBorderType:NSNoBorder];
+	[newRow setTransparent:YES];
 
     [newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSMakeRect(8, -2, 100, 25)]];
 
@@ -588,7 +597,7 @@
 
 	NSBox *newRow = [[NSBox alloc] initWithFrame:NSMakeRect(0, frameMaxY-height+5, panelFrame.size.width-10, height)];
 	[newRow setTitlePosition:NSNoTitle];
-	[newRow setBorderType:NSNoBorder];
+	[newRow setTransparent:YES];
 
 	NSButton *newControl = [[NSButton alloc] initWithFrame:NSMakeRect(8, 4, panelFrame.size.width-20, 25)];
 
@@ -598,6 +607,28 @@
 	[self setBinding:@"value" forKey:keyPath andOrAction:action on:newControl];
 
 	[newRow addSubview:newControl];
+
+	return newRow;
+}
+
+-(NSBox*) preferencePanelHotkeyRowForText:(NSString*)title recorder:(SRRecorderControl**)recorder frameMaxY:(int)frameMaxY
+{
+	NSRect panelFrame = [appearancePanel frame];
+
+	if ( frameMaxY < 0 )
+		frameMaxY = panelFrame.size.height-8;
+
+	int height = 50; // Increased height for better hotkey recorder visibility
+
+	NSBox *newRow = [[NSBox alloc] initWithFrame:NSMakeRect(0, frameMaxY-height+5, panelFrame.size.width-10, height)];
+	[newRow setTitlePosition:NSNoTitle];
+	[newRow setTransparent:YES];
+
+    [newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSMakeRect(8, 15, 180, 25)]];
+
+	*recorder = [[SRRecorderControl alloc] initWithFrame:NSMakeRect(200, 12, 280, 25)]; // Wider recorder control
+	[*recorder setDelegate:self];
+	[newRow addSubview:*recorder];
 
 	return newRow;
 }
@@ -669,6 +700,11 @@
 	[appearancePanel addSubview:row];
 	nextYMax = row.frame.origin.y;
 
+	// Add search hotkey recorder - moved up for better visibility
+	row = [self preferencePanelHotkeyRowForText:@"Search clipboard hotkey:" recorder:&searchRecorder frameMaxY:nextYMax];
+	[appearancePanel addSubview:row];
+	nextYMax = row.frame.origin.y;
+
 //	row = [self preferencePanelCheckboxRowForText:@"Animate bezel appearance"
 //										frameMaxY:nextYMax
 //										  binding:@"popUpAnimation"
@@ -711,7 +747,7 @@
     
     // Make preferences window larger and more modern-looking
     NSRect currentFrame = [prefsPanel frame];
-    NSSize newSize = NSMakeSize(620, 600); // Increased height for more content visibility
+    NSSize newSize = NSMakeSize(720, 700); // Increased width and height for hotkey recorder visibility
     NSRect newFrame = NSMakeRect(currentFrame.origin.x, currentFrame.origin.y, newSize.width, newSize.height);
     
     // Adjust position to keep window centered
@@ -890,17 +926,49 @@
 // Catch keystrokes in the search field and look for arrows.
 -(BOOL)control:(NSControl *)control textView:(NSTextView *)fieldEditor doCommandBySelector:(SEL)commandSelector
 {
-    if( commandSelector == @selector(moveUp:) )
-    {
-        [[searchBox window] makeFirstResponder:menuFirstResponder];
-        [self fakeUpArrow];
-        return YES;    // We handled this command; don't pass it on
+    // Handle menu search box navigation
+    if (control == searchBox) {
+        if( commandSelector == @selector(moveUp:) )
+        {
+            [[searchBox window] makeFirstResponder:menuFirstResponder];
+            [self fakeUpArrow];
+            return YES;    // We handled this command; don't pass it on
+        }
+        if( commandSelector == @selector(moveDown:) )
+        {
+            [[searchBox window] makeFirstResponder:menuFirstResponder];
+            [self fakeDownArrow];
+            return YES;    // We handled this command; don't pass it on
+        }
     }
-    if( commandSelector == @selector(moveDown:) )
-    {
-        [[searchBox window] makeFirstResponder:menuFirstResponder];
-        [self fakeDownArrow];
-        return YES;    // We handled this command; don't pass it on
+    // Handle search window navigation
+    else if (control == searchWindowSearchField) {
+        if( commandSelector == @selector(moveUp:) )
+        {
+            NSInteger currentRow = [searchWindowTableView selectedRow];
+            NSInteger newRow = currentRow <= 0 ? [searchWindowTableView numberOfRows] - 1 : currentRow - 1;
+            [searchWindowTableView selectRowIndexes:[NSIndexSet indexSetWithIndex:newRow] byExtendingSelection:NO];
+            [searchWindowTableView scrollRowToVisible:newRow];
+            return YES;
+        }
+        if( commandSelector == @selector(moveDown:) )
+        {
+            NSInteger currentRow = [searchWindowTableView selectedRow];
+            NSInteger newRow = currentRow >= [searchWindowTableView numberOfRows] - 1 ? 0 : currentRow + 1;
+            [searchWindowTableView selectRowIndexes:[NSIndexSet indexSetWithIndex:newRow] byExtendingSelection:NO];
+            [searchWindowTableView scrollRowToVisible:newRow];
+            return YES;
+        }
+        if( commandSelector == @selector(insertNewline:) ) // Enter key
+        {
+            [self searchWindowItemSelected:nil];
+            return YES;
+        }
+        if( commandSelector == @selector(cancelOperation:) ) // Escape key
+        {
+            [self hideSearchWindow];
+            return YES;
+        }
     }
 
     return NO;    // Default handling of the command
@@ -1077,8 +1145,9 @@
 	// CloudKit notifications disabled - uncomment if you need CloudKit sync
 	// [NSApp registerForRemoteNotificationTypes:NSRemoteNotificationTypeNone];// silent push notification!
 
-	//Create our hot key
+	//Create our hot keys
 	[self toggleMainHotKey:[NSNull null]];
+	[self toggleSearchHotKey:[NSNull null]];
 }
 
 // Remote Notifications (APN, aka Push Notifications) are only available on apps distributed via the App Store.
@@ -1098,7 +1167,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 - (void)application:(NSApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo
 {
-	[flycutOperator checkCloudKitUpdates];
+	//[flycutOperator checkCloudKitUpdates];
 }
 
 - (void) updateBezel
@@ -1286,15 +1355,20 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 }
 
 -(IBAction)clearClippingList:(id)sender {
-    int choice;
+    NSInteger choice;
 	
 	[NSApp activateIgnoringOtherApps:YES];
-    choice = NSRunAlertPanel(@"Clear Clipping List", 
-							 @"Do you want to clear all recent clippings?",
-							 @"Clear", @"Cancel", nil);
+    
+    NSAlert *alert = [[NSAlert alloc] init];
+    [alert setMessageText:@"Clear Clipping List"];
+    [alert setInformativeText:@"Do you want to clear all recent clippings?"];
+    [alert addButtonWithTitle:@"Clear"];
+    [alert addButtonWithTitle:@"Cancel"];
+    choice = [alert runModal];
+    [alert release];
 	
     // on clear, zap the list and redraw the menu
-    if ( choice == NSAlertDefaultReturn ) {
+    if ( choice == NSAlertFirstButtonReturn ) {
         [self restoreStashedStoreAndUpdate]; // Only clear the clipping store.  Never the favorites.
         [flycutOperator clearList];
         [self updateMenu];
@@ -1435,11 +1509,21 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 }
 
 - (void)setHotKeyPreferenceForRecorder:(SRRecorderControl *)aRecorder {
-	if (aRecorder == mainRecorder) {
-		[[NSUserDefaults standardUserDefaults] setObject:
-			[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:[mainRecorder keyCombo].code],[NSNumber numberWithInt:[mainRecorder keyCombo].flags],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]]
-		forKey:@"ShortcutRecorder mainHotkey"];
-	}
+    if (aRecorder == mainRecorder) {
+        NSDictionary *hotKeyDict = @{
+            @"keyCode": @([mainRecorder keyCombo].code),
+            @"modifierFlags": @([mainRecorder keyCombo].flags)
+        };
+        [[NSUserDefaults standardUserDefaults] setObject:hotKeyDict
+                                                   forKey:@"ShortcutRecorder mainHotkey"];
+    } else if (aRecorder == searchRecorder) {
+        NSDictionary *hotKeyDict = @{
+            @"keyCode": @([searchRecorder keyCombo].code),
+            @"modifierFlags": @([searchRecorder keyCombo].flags)
+        };
+        [[NSUserDefaults standardUserDefaults] setObject:hotKeyDict
+                                                   forKey:@"ShortcutRecorder searchHotkey"];
+    }
 }
 
 - (BOOL)shortcutRecorder:(SRRecorderControl *)aRecorder isKeyCode:(NSInteger)keyCode andFlagsTaken:(NSUInteger)flags reason:(NSString **)aReason {
@@ -1447,11 +1531,16 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 }
 
 - (void)shortcutRecorder:(SRRecorderControl *)aRecorder keyComboDidChange:(KeyCombo)newKeyCombo {
+	NSLog(@"keyComboDidChange called for recorder: %p, code: %ld, flags: %lu", aRecorder, (long)newKeyCombo.code, (unsigned long)newKeyCombo.flags);
+	
 	if (aRecorder == mainRecorder) {
 		[self toggleMainHotKey: aRecorder];
 		[self setHotKeyPreferenceForRecorder: aRecorder];
+	} else if (aRecorder == searchRecorder) {
+		NSLog(@"Search recorder keyCombo changed");
+		[self toggleSearchHotKey: aRecorder];
+		[self setHotKeyPreferenceForRecorder: aRecorder];
 	}
-	DLog(@"code: %ld, flags: %lu", (long)newKeyCombo.code, (unsigned long)newKeyCombo.flags);
 }
 
 - (NSString*)alertWithMessageText:(NSString*)message informationText:(NSString*)information buttonsTexts:(NSArray*)buttons {
@@ -1515,11 +1604,15 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
 	[flycutOperator applicationWillTerminate];
-	//Unregister our hot key (not required)
+	//Unregister our hot keys (not required)
 	[[SGHotKeyCenter sharedCenter] unregisterHotKey: mainHotKey];
 	[mainHotKey release];
 	mainHotKey = nil;
+	[[SGHotKeyCenter sharedCenter] unregisterHotKey: searchHotKey];
+	[searchHotKey release];
+	searchHotKey = nil;
 	[self hideBezel];
+	[self hideSearchWindow];
 	[[NSDistributedNotificationCenter defaultCenter]
 		removeObserver:self
         		  name:@"AppleKeyboardPreferencesChangedNotification"
@@ -1530,9 +1623,259 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 				object:nil];
 }
 
+#pragma mark - Search Hotkey Methods
+
+- (IBAction)toggleSearchHotKey:(id)sender
+{
+	if (searchHotKey != nil)
+	{
+		[[SGHotKeyCenter sharedCenter] unregisterHotKey:searchHotKey];
+		[searchHotKey release];
+		searchHotKey = nil;
+	}
+	
+	// Only create hotkey if searchRecorder exists and has a valid combo
+	if (searchRecorder && [searchRecorder keyCombo].code != -1) {
+		searchHotKey = [[SGHotKey alloc] initWithIdentifier:@"searchHotKey"
+												   keyCombo:[SGKeyCombo keyComboWithKeyCode:[searchRecorder keyCombo].code
+																				  modifiers:[searchRecorder cocoaToCarbonFlags: [searchRecorder keyCombo].flags]]];
+		[searchHotKey setName: @"Search Clipboard HotKey"];
+		[searchHotKey setTarget: self];
+		[searchHotKey setAction: @selector(hitSearchHotKey:)];
+		[[SGHotKeyCenter sharedCenter] registerHotKey:searchHotKey];
+	}
+}
+
+- (void)hitSearchHotKey:(SGHotKey *)hotKey
+{
+	NSLog(@"hitSearchHotKey called! isSearchWindowDisplayed: %d", isSearchWindowDisplayed);
+	if ( ! isSearchWindowDisplayed ) {
+		[self showSearchWindow];
+	} else {
+		[self hideSearchWindow];
+	}
+}
+
+#pragma mark - Search Window Methods
+
+- (void)buildSearchWindow
+{
+	NSLog(@"buildSearchWindow called");
+	if (searchWindow) {
+		NSLog(@"Search window already exists, returning");
+		return; // Already built
+	}
+	
+	// Get appearance settings from user defaults
+	CGFloat bezelAlpha = [[NSUserDefaults standardUserDefaults] floatForKey:@"bezelAlpha"];
+	CGFloat bezelWidth = [[NSUserDefaults standardUserDefaults] floatForKey:@"bezelWidth"];
+	CGFloat bezelHeight = [[NSUserDefaults standardUserDefaults] floatForKey:@"bezelHeight"];
+	
+	// Use bezel dimensions as base, but ensure minimum size for search window
+	CGFloat windowWidth = MAX(bezelWidth + 100, 600);  // At least 600px wide
+	CGFloat windowHeight = MAX(bezelHeight + 150, 400); // At least 400px tall
+	
+	// Create the search window
+	NSRect windowFrame = NSMakeRect(0, 0, windowWidth, windowHeight);
+	searchWindow = [[NSWindow alloc] initWithContentRect:windowFrame
+												styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+												  backing:NSBackingStoreBuffered
+													defer:NO];
+	
+	[searchWindow setTitle:@"Search Clipboard"];
+	[searchWindow setLevel:NSFloatingWindowLevel];
+	[searchWindow setAlphaValue:1.0 - bezelAlpha + 0.2]; // Slightly more opaque than bezel
+	[searchWindow center];
+	
+	// Create a background view with bezel-like appearance
+	NSView *backgroundView = [[NSView alloc] initWithFrame:[[searchWindow contentView] bounds]];
+	[backgroundView setWantsLayer:YES];
+	backgroundView.layer.backgroundColor = [[NSColor colorWithCalibratedWhite:0.2 alpha:bezelAlpha] CGColor];
+	backgroundView.layer.cornerRadius = 10.0;
+	[[searchWindow contentView] addSubview:backgroundView];
+	[backgroundView release];
+	
+	// Create the search field
+	CGFloat fieldY = windowHeight - 50;
+	searchWindowSearchField = [[NSSearchField alloc] initWithFrame:NSMakeRect(20, fieldY, windowWidth - 40, 25)];
+	[searchWindowSearchField setTarget:self];
+	[searchWindowSearchField setAction:@selector(searchWindowSearchFieldChanged:)];
+	[searchWindowSearchField setFont:[NSFont systemFontOfSize:13]];
+	[searchWindowSearchField setDelegate:self];  // Set delegate for keyboard handling
+	[[searchWindow contentView] addSubview:searchWindowSearchField];
+	
+	// Create the table view
+	CGFloat tableHeight = fieldY - 40;
+	NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(20, 20, windowWidth - 40, tableHeight)];
+	[scrollView setHasVerticalScroller:YES];
+	[scrollView setAutohidesScrollers:YES];
+	[scrollView setBorderType:NSNoBorder];
+	[scrollView setDrawsBackground:NO];
+	
+	searchWindowTableView = [[NSTableView alloc] init];
+	[searchWindowTableView setDelegate:self];
+	[searchWindowTableView setDataSource:self];
+	[searchWindowTableView setTarget:self];
+	[searchWindowTableView setDoubleAction:@selector(searchWindowItemSelected:)];
+	[searchWindowTableView setBackgroundColor:[NSColor clearColor]];
+	[searchWindowTableView setGridStyleMask:NSTableViewGridNone];
+	[searchWindowTableView setRowHeight:24];
+	[searchWindowTableView setIntercellSpacing:NSMakeSize(0, 2)];
+	
+	// Add a single column
+	NSTableColumn *column = [[NSTableColumn alloc] initWithIdentifier:@"content"];
+	[column setTitle:@"Clipboard Content"];
+	[column setWidth:windowWidth - 60];
+	[searchWindowTableView addTableColumn:column];
+	[column release];
+	
+	[scrollView setDocumentView:searchWindowTableView];
+	[[searchWindow contentView] addSubview:scrollView];
+	[scrollView release];
+	
+	// Set up window delegate
+	[searchWindow setDelegate:self];
+}
+
+- (void)showSearchWindow
+{
+	// Rebuild window if appearance settings changed (but don't leak memory)
+	if (searchWindow) {
+		[searchResults release];
+		searchResults = nil;
+		[searchWindow orderOut:nil];
+		[searchWindow release];
+		searchWindow = nil;
+		searchWindowSearchField = nil;  // Don't release this, it's owned by the window
+		searchWindowTableView = nil;   // Don't release this, it's owned by the scroll view
+	}
+	
+	if (!searchWindow) {
+		[self buildSearchWindow];
+	}
+	
+	[self updateSearchResults];
+	[searchWindow makeKeyAndOrderFront:self];
+	[searchWindow makeFirstResponder:searchWindowSearchField];
+	isSearchWindowDisplayed = YES;
+}
+
+- (void)hideSearchWindow
+{
+	if (searchWindow) {
+		[searchWindow orderOut:nil];
+	}
+	isSearchWindowDisplayed = NO;
+}
+
+- (IBAction)searchWindowSearchFieldChanged:(id)sender
+{
+	[self updateSearchResults];
+}
+
+- (void)updateSearchResults
+{
+	NSString *searchText = [searchWindowSearchField stringValue];
+	
+	// Release previous results
+	[searchResults release];
+	
+	if (!searchText || [searchText length] == 0) {
+		// Show all items
+		searchResults = [flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:nil];
+	} else {
+		// Search for matching items
+		searchResults = [flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:searchText];
+	}
+	
+	[searchResults retain];
+	[searchWindowTableView reloadData];
+	
+	// Auto-select first row for keyboard navigation
+	if ([searchResults count] > 0) {
+		[searchWindowTableView selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+	}
+}
+
+- (IBAction)searchWindowItemSelected:(id)sender
+{
+	NSInteger selectedRow = [searchWindowTableView selectedRow];
+	if (selectedRow < 0) {
+		selectedRow = 0; // Default to first item if none selected
+	}
+	
+	if (selectedRow < [searchResults count]) {
+		// Get the content and paste it like bezel does
+		NSString* searchText = [searchWindowSearchField stringValue];
+		NSArray *mapping = nil;
+		int position = (int)selectedRow;
+		
+		if (searchText && [searchText length] > 0) {
+			mapping = [flycutOperator previousIndexes:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:searchText];
+			position = [mapping[selectedRow] intValue];
+		}
+		
+		NSString *content = [flycutOperator getPasteFromIndex:position];
+		if (content) {
+			[self addClipToPasteboard:content];
+			[self updateMenu]; // Update menu like bezel does
+			[self hideSearchWindow];
+			
+			// Always paste immediately (like bezel behavior), ignore menuSelectionPastes preference
+			[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.2];
+		}
+	}
+}
+
+#pragma mark - Search Window Table View Data Source & Delegate
+
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView
+{
+	if (tableView == searchWindowTableView) {
+		return searchResults ? [searchResults count] : 0;
+	}
+	return 0;
+}
+
+- (id)tableView:(NSTableView *)tableView objectValueForTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row
+{
+	if (tableView == searchWindowTableView && searchResults && row < [searchResults count]) {
+		return [searchResults objectAtIndex:row];
+	}
+	return nil;
+}
+
+- (void)tableView:(NSTableView *)tableView willDisplayCell:(id)cell forTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row
+{
+	if (tableView == searchWindowTableView) {
+		// Customize cell appearance to match bezel style
+		NSTextFieldCell *textCell = (NSTextFieldCell *)cell;
+		[textCell setTextColor:[NSColor whiteColor]];
+		[textCell setFont:[NSFont systemFontOfSize:12]];
+	}
+}
+
+- (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row
+{
+	// Allow selection for keyboard navigation
+	return YES;
+}
+
+#pragma mark - Search Window Delegate
+
+- (void)windowWillClose:(NSNotification *)notification
+{
+	if ([notification object] == searchWindow) {
+		isSearchWindowDisplayed = NO;
+	}
+}
+
 - (void) dealloc {
 	[bezel release];
 	[srTransformer release];
+	[searchRecorder release];
+	[searchWindow release]; // This will release its subviews automatically
+	[searchResults release];
 	[super dealloc];
 }
 
