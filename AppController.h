@@ -22,7 +22,7 @@
 
 @class SGHotKey;
 
-@interface AppController : NSObject <NSMenuDelegate, NSApplicationDelegate, FlycutStoreDelegate, FlycutOperatorDelegate, BezelWindowDelegate> {
+@interface AppController : NSResponder <NSMenuDelegate, NSApplicationDelegate, FlycutStoreDelegate, FlycutOperatorDelegate, BezelWindowDelegate> {
     BezelWindow					*bezel;
 	SGHotKey					*mainHotKey;
 	IBOutlet SRRecorderControl	*mainRecorder;
@@ -113,6 +113,8 @@
 -(void) buildSearchWindow;
 -(void) updateSearchResults;
 -(IBAction)searchWindowItemSelected:(id)sender;
+-(void) cancelOperation:(id)sender;
+-(void) performClose:(id)sender;
 
 // Bezel related
 -(void) updateBezel;

@@ -24,6 +24,36 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <ServiceManagement/ServiceManagement.h>
 
+// Custom search window that handles Cmd-W properly
+@interface SearchWindow : NSWindow
+@property (weak) AppController *appController;
+@end
+
+@implementation SearchWindow
+
+- (void)performClose:(id)sender {
+    if (self.appController) {
+        [self.appController hideSearchWindow];
+    }
+}
+
+- (BOOL)performKeyEquivalent:(NSEvent *)theEvent {
+    // Handle Cmd-W specifically
+    if ([theEvent type] == NSEventTypeKeyDown) {
+        NSString *characters = [theEvent charactersIgnoringModifiers];
+        NSUInteger modifierFlags = [theEvent modifierFlags];
+        
+        if ([characters isEqualToString:@"w"] && (modifierFlags & NSEventModifierFlagCommand)) {
+            [self performClose:nil];
+            return YES;
+        }
+    }
+    
+    return [super performKeyEquivalent:theEvent];
+}
+
+@end
+
 @implementation AppController
 
 /// Determines, through a hack of sorts, if the app is running sandboxed. The SANDBOXING define has no direct connection to being sandboxed, but this method identifies the state by looking for a directory which will have at least eight path components if sandboxed and is quite unlikely to have that many if not sandboxed. Of course, if this doesn't work for your unique case, just do a custom build with this method returning NO.
@@ -105,6 +135,13 @@
 
 	menuQueue = dispatch_queue_create(@"com.Flycut.menuUpdateQueue", DISPATCH_QUEUE_SERIAL);
 
+	// Initialize search window pointers to nil
+	searchWindow = nil;
+	searchWindowSearchField = nil;
+	searchWindowTableView = nil;
+	searchResults = nil;
+	isSearchWindowDisplayed = NO;
+
 	return [super init];
 }
 
@@ -131,13 +168,17 @@
     BOOL suppressAlert = [[NSUserDefaults standardUserDefaults] boolForKey:@"suppressAccessibilityAlert"];
     NSDictionary* options = @{(id) (kAXTrustedCheckOptionPrompt): @NO};
     if (!suppressAlert && &AXIsProcessTrustedWithOptions != NULL && !AXIsProcessTrustedWithOptions((CFDictionaryRef) (options))) {
-        NSAlert *alert = [NSAlert alertWithMessageText:@"Flycut" defaultButton:@"OK" alternateButton:nil otherButton:nil informativeTextWithFormat:@"For correct functioning of the app please tick Flycut in Accessibility apps list"];
+        NSAlert *alert = [[NSAlert alloc] init];
+        [alert setMessageText:@"Flycut"];
+        [alert setInformativeText:@"For correct functioning of the app please tick Flycut in Accessibility apps list"];
+        [alert addButtonWithTitle:@"OK"];
         alert.showsSuppressionButton = YES;
         [alert runModal];
         if (alert.suppressionButton.state == NSControlStateValueOn) {
             [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:YES]
                                                      forKey:@"suppressAccessibilityAlert"];
         }
+        [alert release];
         NSString *urlString = @"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
         [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:urlString]];
     }
@@ -151,13 +192,17 @@
     if (ver.majorVersion == 10 && ver.minorVersion <= 13) {
         BOOL suppressAlert = [[NSUserDefaults standardUserDefaults] boolForKey:@"suppressOldOSXAlert"];
         if (!suppressAlert) {
-            NSAlert *alert = [NSAlert alertWithMessageText:@"Flycut" defaultButton:@"OK" alternateButton:nil otherButton:nil informativeTextWithFormat:@"Unfortunatly due to some app sandbox security restrictions from Apple Flycut may not correctly function on MacOSX 10.13 or lower. You can download non sandboxed version here: https://github.com/TermiT/Flycut/releases"];
+            NSAlert *alert = [[NSAlert alloc] init];
+            [alert setMessageText:@"Flycut"];
+            [alert setInformativeText:@"Unfortunately due to some app sandbox security restrictions from Apple Flycut may not correctly function on MacOSX 10.13 or lower. You can download non sandboxed version here: https://github.com/TermiT/Flycut/releases"];
+            [alert addButtonWithTitle:@"OK"];
             alert.showsSuppressionButton = YES;
             [alert runModal];
-            if (alert.suppressionButton.state == NSOnState) {
+            if (alert.suppressionButton.state == NSControlStateValueOn) {
                 [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:YES]
                                                          forKey:@"suppressOldOSXAlert"];
             }
+            [alert release];
         }
     }
 #endif
@@ -290,7 +335,7 @@
         {
             // Update the pbCount so we don't enable and have it immediately copy the thing the user was trying to avoid.
             // Code copied from pollPB, which is disabled at this point, so the "should be okay" should still be okay.
-            
+
             // Reload pbCount with the current changeCount
             // Probably poor coding technique, but pollPB should be the only thing messing with pbCount, so it should be okay
             [pbCount release];
@@ -298,53 +343,13 @@
         }
         [flycutOperator setDisableStoreTo:disableStore];
     }
-    else
-    {
-        // We need to do a little trick to get the search box functional.  Figure out what is currently active.
-        NSString *currRunningApp = @"";
-        NSRunningApplication *currApp = nil;
-        for (currApp in [[NSWorkspace sharedWorkspace] runningApplications])
-            if ([currApp isActive])
-            {
-                currRunningApp = [currApp localizedName];
-                break;
-            }
-
-        if ( [currRunningApp rangeOfString:@"Flycut"].location == NSNotFound )
-        {
-            // We haven't activated Flycut yet.
-            currentRunningApplication = [currApp retain]; // Remember what app we came from.
-            menuOpenEvent = [event retain]; // So we can send it again to open the menu.
-            [menu cancelTracking]; // Prevent the menu from displaying, since activateIgnoringOtherApps would close it anyway.
-            [NSApp activateIgnoringOtherApps: YES]; // Required to make the search field firstResponder any good.
-            [self performSelector:@selector(reopenMenu) withObject:nil afterDelay:0.2 inModes:[NSArray arrayWithObject:NSRunLoopCommonModes]]; // Because we really do want the menu open.
-        }
-        else
-        {
-            // Flycut is now active, so set the first responder once the menu opens.
-            [self performSelector:@selector(activateSearchBox) withObject:nil afterDelay:0.2 inModes:[NSArray arrayWithObject:NSRunLoopCommonModes]];
-        }
-    }
+    // Note: Removed the search box activation code. The search box in the menu is for manual use only.
+    // Users should use the dedicated search window (cmd-shift-s) for keyboard-driven search.
 }
 
 -(void)menuDidClose:(NSMenu *)menu
 {
-    // The method the menu triggers may clear currentRunningApplication, but that method won't be called until after the menu has closed.  Queue a call to the reactivate method that will come up after the method resulting from the menu.
-    [self performSelector:@selector(reactivateCurrentRunningApplication) withObject:nil afterDelay:0.0 inModes:[NSArray arrayWithObject:NSRunLoopCommonModes]];
-}
-
--(void)reactivateCurrentRunningApplication
-{
-    // Return focus to application that the menu search box stole from.
-    if ( nil != currentRunningApplication )
-    {
-        // But only if the bezel hasn't opened since the menu closed.  This happens if the bezel hotkey is pressed while the menu is open.  The bezel won't display until the menu closes, but will then display.
-        if (!isBezelDisplayed)
-            [currentRunningApplication activateWithOptions: NSApplicationActivateIgnoringOtherApps];
-        // Paste from the bezel in this scenario works fine, so release and forget this resource in both cases.
-        [currentRunningApplication release];
-        currentRunningApplication = nil;
-    }
+    // Menu closed - no special handling needed now that we removed search box activation
 }
 
 -(bool)toggleMenuIconDisabled
@@ -744,17 +749,16 @@
 	if ([prefsPanel respondsToSelector:@selector(setCollectionBehavior:)])
 		[prefsPanel setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces];
 	[NSApp activateIgnoringOtherApps: YES];
-    
-    // Make preferences window larger and more modern-looking
+
+    // Set minimum width but let UKPrefsPanel control the height based on tab content
     NSRect currentFrame = [prefsPanel frame];
-    NSSize newSize = NSMakeSize(720, 700); // Increased width and height for hotkey recorder visibility
-    NSRect newFrame = NSMakeRect(currentFrame.origin.x, currentFrame.origin.y, newSize.width, newSize.height);
-    
-    // Adjust position to keep window centered
-    newFrame.origin.x = currentFrame.origin.x - (newSize.width - currentFrame.size.width) / 2;
-    newFrame.origin.y = currentFrame.origin.y - (newSize.height - currentFrame.size.height) / 2;
-    
-    [prefsPanel setFrame:newFrame display:YES animate:YES];
+    if (currentFrame.size.width < 700) {
+        NSRect newFrame = currentFrame;
+        newFrame.size.width = 720;
+        // Adjust position to keep window centered horizontally
+        newFrame.origin.x = currentFrame.origin.x - (newFrame.size.width - currentFrame.size.width) / 2;
+        [prefsPanel setFrame:newFrame display:NO animate:NO];
+    }
 	[prefsPanel makeKeyAndOrderFront:self];
 	NSString *fileRoot = [[NSBundle mainBundle] pathForResource:@"acknowledgements" ofType:@"txt"];
 	NSString *contents = [NSString stringWithContentsOfFile:fileRoot
@@ -896,6 +900,7 @@
             alert.informativeText = @"Flycut needs accessibility access to automatically paste. Please grant access in System Preferences > Security & Privacy > Privacy > Accessibility.";
             [alert addButtonWithTitle:@"OK"];
             [alert runModal];
+            [alert release];
         });
         return;
     }
@@ -965,6 +970,11 @@
             return YES;
         }
         if( commandSelector == @selector(cancelOperation:) ) // Escape key
+        {
+            [self hideSearchWindow];
+            return YES;
+        }
+        if( commandSelector == @selector(performClose:) ) // Cmd-W
         {
             [self hideSearchWindow];
             return YES;
@@ -1326,7 +1336,6 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 - (IBAction)selectSaveLocation:(id)sender {
 	// Create and configure the panel.
 	NSOpenPanel* panel = [NSOpenPanel openPanel];
-	[panel retain];
 	[panel setCanChooseFiles:NO];
 	[panel setCanChooseDirectories:YES];
 	[panel setCanCreateDirectories:YES];
@@ -1337,8 +1346,6 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	[panel beginSheetModalForWindow:prefsPanel completionHandler:^(NSInteger result){
         if (result == NSModalResponseOK) {
 			NSURL* url = [[panel URLs] firstObject];
-
-			[panel release];
 
 			if (!url) { return; }
 
@@ -1665,98 +1672,79 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		NSLog(@"Search window already exists, returning");
 		return; // Already built
 	}
-	
-	// Get appearance settings from user defaults
-	CGFloat bezelAlpha = [[NSUserDefaults standardUserDefaults] floatForKey:@"bezelAlpha"];
-	CGFloat bezelWidth = [[NSUserDefaults standardUserDefaults] floatForKey:@"bezelWidth"];
-	CGFloat bezelHeight = [[NSUserDefaults standardUserDefaults] floatForKey:@"bezelHeight"];
-	
-	// Use bezel dimensions as base, but ensure minimum size for search window
-	CGFloat windowWidth = MAX(bezelWidth + 100, 600);  // At least 600px wide
-	CGFloat windowHeight = MAX(bezelHeight + 150, 400); // At least 400px tall
-	
-	// Create the search window
+
+	// Create a normal window with standard controls
+	CGFloat windowWidth = 600;
+	CGFloat windowHeight = 400;
+
 	NSRect windowFrame = NSMakeRect(0, 0, windowWidth, windowHeight);
-	searchWindow = [[NSWindow alloc] initWithContentRect:windowFrame
-												styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
-												  backing:NSBackingStoreBuffered
-													defer:NO];
-	
+	searchWindow = [[SearchWindow alloc] initWithContentRect:windowFrame
+													styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+													  backing:NSBackingStoreBuffered
+														defer:NO];
+	((SearchWindow *)searchWindow).appController = self;
+
 	[searchWindow setTitle:@"Search Clipboard"];
 	[searchWindow setLevel:NSFloatingWindowLevel];
-	[searchWindow setAlphaValue:1.0 - bezelAlpha + 0.2]; // Slightly more opaque than bezel
 	[searchWindow center];
-	
-	// Create a background view with bezel-like appearance
-	NSView *backgroundView = [[NSView alloc] initWithFrame:[[searchWindow contentView] bounds]];
-	[backgroundView setWantsLayer:YES];
-	backgroundView.layer.backgroundColor = [[NSColor colorWithCalibratedWhite:0.2 alpha:bezelAlpha] CGColor];
-	backgroundView.layer.cornerRadius = 10.0;
-	[[searchWindow contentView] addSubview:backgroundView];
-	[backgroundView release];
-	
-	// Create the search field
-	CGFloat fieldY = windowHeight - 50;
+
+	// Create the search field at the top
+	CGFloat fieldY = windowHeight - 60;
 	searchWindowSearchField = [[NSSearchField alloc] initWithFrame:NSMakeRect(20, fieldY, windowWidth - 40, 25)];
 	[searchWindowSearchField setTarget:self];
 	[searchWindowSearchField setAction:@selector(searchWindowSearchFieldChanged:)];
 	[searchWindowSearchField setFont:[NSFont systemFontOfSize:13]];
 	[searchWindowSearchField setDelegate:self];  // Set delegate for keyboard handling
 	[[searchWindow contentView] addSubview:searchWindowSearchField];
-	
+
 	// Create the table view
-	CGFloat tableHeight = fieldY - 40;
+	CGFloat tableHeight = fieldY - 20;
 	NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSMakeRect(20, 20, windowWidth - 40, tableHeight)];
 	[scrollView setHasVerticalScroller:YES];
 	[scrollView setAutohidesScrollers:YES];
-	[scrollView setBorderType:NSNoBorder];
-	[scrollView setDrawsBackground:NO];
-	
+	[scrollView setBorderType:NSBezelBorder];
+
 	searchWindowTableView = [[NSTableView alloc] init];
 	[searchWindowTableView setDelegate:self];
 	[searchWindowTableView setDataSource:self];
 	[searchWindowTableView setTarget:self];
 	[searchWindowTableView setDoubleAction:@selector(searchWindowItemSelected:)];
-	[searchWindowTableView setBackgroundColor:[NSColor clearColor]];
-	[searchWindowTableView setGridStyleMask:NSTableViewGridNone];
 	[searchWindowTableView setRowHeight:24];
-	[searchWindowTableView setIntercellSpacing:NSMakeSize(0, 2)];
-	
+	[searchWindowTableView setIntercellSpacing:NSMakeSize(3, 2)];
+
 	// Add a single column
 	NSTableColumn *column = [[NSTableColumn alloc] initWithIdentifier:@"content"];
 	[column setTitle:@"Clipboard Content"];
 	[column setWidth:windowWidth - 60];
 	[searchWindowTableView addTableColumn:column];
 	[column release];
-	
+
 	[scrollView setDocumentView:searchWindowTableView];
 	[[searchWindow contentView] addSubview:scrollView];
 	[scrollView release];
-	
+
 	// Set up window delegate
 	[searchWindow setDelegate:self];
+
+	// Set initial first responder for proper focus
+	[searchWindow setInitialFirstResponder:searchWindowSearchField];
 }
 
 - (void)showSearchWindow
 {
-	// Rebuild window if appearance settings changed (but don't leak memory)
-	if (searchWindow) {
-		[searchResults release];
-		searchResults = nil;
-		[searchWindow orderOut:nil];
-		[searchWindow release];
-		searchWindow = nil;
-		searchWindowSearchField = nil;  // Don't release this, it's owned by the window
-		searchWindowTableView = nil;   // Don't release this, it's owned by the scroll view
-	}
-	
 	if (!searchWindow) {
 		[self buildSearchWindow];
 	}
-	
+
 	[self updateSearchResults];
+
+	// Activate app and show window
+	[NSApp activateIgnoringOtherApps:YES];
 	[searchWindow makeKeyAndOrderFront:self];
+
+	// Set focus on search field
 	[searchWindow makeFirstResponder:searchWindowSearchField];
+
 	isSearchWindowDisplayed = YES;
 }
 
@@ -1764,7 +1752,16 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 {
 	if (searchWindow) {
 		[searchWindow orderOut:nil];
+		// Clear the search field for next time
+		[searchWindowSearchField setStringValue:@""];
 	}
+
+	// Clean up search results
+	if (searchResults) {
+		[searchResults release];
+		searchResults = nil;
+	}
+
 	isSearchWindowDisplayed = NO;
 }
 
@@ -1776,23 +1773,25 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 - (void)updateSearchResults
 {
 	NSString *searchText = [searchWindowSearchField stringValue];
-	
-	// Release previous results
-	[searchResults release];
-	
+
+	// Release previous results if they exist
+	if (searchResults) {
+		[searchResults release];
+		searchResults = nil;
+	}
+
 	if (!searchText || [searchText length] == 0) {
 		// Show all items
-		searchResults = [flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:nil];
+		searchResults = [[flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:nil] retain];
 	} else {
 		// Search for matching items
-		searchResults = [flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:searchText];
+		searchResults = [[flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:searchText] retain];
 	}
-	
-	[searchResults retain];
+
 	[searchWindowTableView reloadData];
-	
+
 	// Auto-select first row for keyboard navigation
-	if ([searchResults count] > 0) {
+	if (searchResults && [searchResults count] > 0) {
 		[searchWindowTableView selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
 	}
 }
@@ -1848,9 +1847,13 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 - (void)tableView:(NSTableView *)tableView willDisplayCell:(id)cell forTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row
 {
 	if (tableView == searchWindowTableView) {
-		// Customize cell appearance to match bezel style
+		// Customize cell appearance to match bezel style with modern system colors
 		NSTextFieldCell *textCell = (NSTextFieldCell *)cell;
-		[textCell setTextColor:[NSColor whiteColor]];
+		if (@available(macOS 10.14, *)) {
+			[textCell setTextColor:[NSColor labelColor]];
+		} else {
+			[textCell setTextColor:[NSColor whiteColor]];
+		}
 		[textCell setFont:[NSFont systemFontOfSize:12]];
 	}
 }
@@ -1867,6 +1870,33 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 {
 	if ([notification object] == searchWindow) {
 		isSearchWindowDisplayed = NO;
+	}
+}
+
+- (BOOL)windowShouldClose:(NSWindow *)sender
+{
+	if (sender == searchWindow) {
+		[self hideSearchWindow];
+		return NO; // We handle the closing ourselves
+	}
+	return YES;
+}
+
+- (void)cancelOperation:(id)sender
+{
+	// Handle ESC key for search window
+	NSLog(@"cancelOperation called, isSearchWindowDisplayed: %d", isSearchWindowDisplayed);
+	if (isSearchWindowDisplayed) {
+		[self hideSearchWindow];
+	}
+}
+
+- (void)performClose:(id)sender
+{
+	// Handle cmd-W for search window
+	NSLog(@"performClose called, isSearchWindowDisplayed: %d", isSearchWindowDisplayed);
+	if (isSearchWindowDisplayed) {
+		[self hideSearchWindow];
 	}
 }
 

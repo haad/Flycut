@@ -11,6 +11,7 @@
 
 #import "BezelWindow.h"
 #import <AppKit/AppKit.h>
+#import <QuartzCore/QuartzCore.h>
 
 static const float lineHeight = 16;
 
@@ -34,16 +35,23 @@ static const float lineHeight = 16;
 		[self setOpaque:NO];
 		[self setAlphaValue:1.0];
 		[self setOpaque:NO];
-		[self setHasShadow:YES]; // Add subtle shadow like menu bar
 		[self setMovableByWindowBackground:NO];
         [self setColor:NO];
-        
-        // Use modern menu bar-like appearance when available
+
+        // Modern translucent appearance with proper vibrancy
         if (@available(macOS 10.14, *)) {
             self.titlebarAppearsTransparent = YES;
+            // Support both light and dark mode dynamically
             self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
         }
-        
+
+        // Modern shadow with blur radius for depth
+        NSShadow *shadow = [[NSShadow alloc] init];
+        shadow.shadowBlurRadius = 24.0;
+        shadow.shadowOffset = NSMakeSize(0, -8);
+        shadow.shadowColor = [[NSColor blackColor] colorWithAlphaComponent:0.3];
+        [self setHasShadow:YES];
+
 		[self setBackgroundColor:[self backgroundColor]];
         showSourceField = showSource;
 
@@ -56,15 +64,27 @@ static const float lineHeight = 16;
             sourceFieldBackground = [[RoundRecTextField alloc] initWithFrame:[self sourceFrame]];
             [[self contentView] addSubview:sourceFieldBackground];
             [sourceFieldBackground.textField setEditable:NO];
-            [sourceFieldBackground.textField setTextColor:[NSColor whiteColor]];
-            
-            // Modern menu bar-like effect for source background
-            if (@available(macOS 14.0, *)) {
+
+            // Use system label color for proper dark mode support
+            if (@available(macOS 10.14, *)) {
+                [sourceFieldBackground.textField setTextColor:[NSColor labelColor]];
+            } else {
+                [sourceFieldBackground.textField setTextColor:[NSColor whiteColor]];
+            }
+
+            // Modern liquid glass effect for source background
+            if (@available(macOS 10.14, *)) {
                 NSVisualEffectView *sourceEffectView = [[NSVisualEffectView alloc] initWithFrame:sourceFieldBackground.bounds];
-                sourceEffectView.material = NSVisualEffectMaterialMenu;
+                sourceEffectView.material = NSVisualEffectMaterialHUDWindow;
                 sourceEffectView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
                 sourceEffectView.state = NSVisualEffectStateActive;
-                sourceEffectView.layer.cornerRadius = 8.0;
+                sourceEffectView.wantsLayer = YES;
+                sourceEffectView.layer.cornerRadius = 10.0;
+                // Use continuous corner curve for smoother, more modern appearance
+                if (@available(macOS 10.15, *)) {
+                    sourceEffectView.layer.cornerCurve = @"continuous";
+                }
+                sourceEffectView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
                 [sourceFieldBackground addSubview:sourceEffectView positioned:NSWindowBelow relativeTo:nil];
             } else {
                 // Fallback for older macOS versions
@@ -75,7 +95,13 @@ static const float lineHeight = 16;
             sourceFieldApp = [[RoundRecTextField alloc] initWithFrame:[self sourceFrameLeft]];
             [[self contentView] addSubview:sourceFieldApp];
             [sourceFieldApp.textField setEditable:NO];
-            [sourceFieldApp.textField setTextColor:[NSColor whiteColor]];
+
+            // Use secondary label color for hierarchy
+            if (@available(macOS 10.14, *)) {
+                [sourceFieldApp.textField setTextColor:[NSColor secondaryLabelColor]];
+            } else {
+                [sourceFieldApp.textField setTextColor:[NSColor whiteColor]];
+            }
             [sourceFieldApp.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.0)];
             [sourceFieldApp.textField setBordered:NO];
             [sourceFieldApp.textField setAlignment:NSTextAlignmentLeft];
@@ -95,7 +121,13 @@ static const float lineHeight = 16;
             sourceFieldDate = [[RoundRecTextField alloc] initWithFrame:[self sourceFrameRight]];
             [[self contentView] addSubview:sourceFieldDate];
             [sourceFieldDate.textField setEditable:NO];
-            [sourceFieldDate.textField setTextColor:[NSColor whiteColor]];
+
+            // Use tertiary label color for less prominent text
+            if (@available(macOS 10.14, *)) {
+                [sourceFieldDate.textField setTextColor:[NSColor tertiaryLabelColor]];
+            } else {
+                [sourceFieldDate.textField setTextColor:[NSColor whiteColor]];
+            }
             [sourceFieldDate.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.1, 0.1, 0.1, 0.0)];
             [sourceFieldDate.textField setBordered:NO];
             [sourceFieldDate.textField setAlignment:NSTextAlignmentRight];
@@ -110,19 +142,31 @@ static const float lineHeight = 16;
 		[textField.textField setEditable:NO];
 		//[[textField cell] setScrollable:YES];
 		//[[textField cell] setWraps:NO];
-		[textField.textField setTextColor:[NSColor whiteColor]];
-		
-		// Modern menu bar-like effect for main text field
-		if (@available(macOS 14.0, *)) {
-			// Use built-in visual effect view for modern appearance
+
+		// Use system label color for proper dark mode support
+		if (@available(macOS 10.14, *)) {
+			[textField.textField setTextColor:[NSColor labelColor]];
+		} else {
+			[textField.textField setTextColor:[NSColor whiteColor]];
+		}
+
+		// Modern liquid glass effect for main text field
+		if (@available(macOS 10.14, *)) {
+			// Use HUD material for that frosted glass translucent effect
 			NSVisualEffectView *textEffectView = [[NSVisualEffectView alloc] initWithFrame:textField.bounds];
-			textEffectView.material = NSVisualEffectMaterialMenu;
+			textEffectView.material = NSVisualEffectMaterialHUDWindow;
 			textEffectView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
 			textEffectView.state = NSVisualEffectStateActive;
-			textEffectView.layer.cornerRadius = 12.0;
+			textEffectView.wantsLayer = YES;
+			textEffectView.layer.cornerRadius = 14.0;
+			// Use continuous corner curve for that smooth, modern iOS/macOS look
+			if (@available(macOS 10.15, *)) {
+				textEffectView.layer.cornerCurve = @"continuous";
+			}
+			textEffectView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 			[textField addSubview:textEffectView positioned:NSWindowBelow relativeTo:nil];
 		} else {
-			// Fallback for older macOS versions - use menu bar-like transparency
+			// Fallback for older macOS versions
 			[textField.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.12, 0.12, 0.12, 0.8)];
 		}
 		[textField.textField setBordered:NO];
@@ -132,7 +176,13 @@ static const float lineHeight = 16;
 		charField = [[RoundRecTextField alloc] initWithFrame:charFrame];
 		[[self contentView] addSubview:charField];
 		[charField.textField setEditable:NO];
-		[charField.textField setTextColor:[NSColor whiteColor]];
+
+		// Use secondary label color for status text
+		if (@available(macOS 10.14, *)) {
+			[charField.textField setTextColor:[NSColor secondaryLabelColor]];
+		} else {
+			[charField.textField setTextColor:[NSColor whiteColor]];
+		}
 		[charField.background.layer setBackgroundColor:CGColorCreateGenericRGB(0.12, 0.12, 0.12, 0.8)];
 		[charField.textField setBordered:NO];
 		[charField.textField setAlignment:NSTextAlignmentCenter];
@@ -226,7 +276,8 @@ static const float lineHeight = 16;
 
 -(NSColor*) backgroundColor
 {
-    return [self sizedBezelBackgroundWithRadius:25.0 withAlpha:[[NSUserDefaults standardUserDefaults] floatForKey:@"bezelAlpha"]];
+    // Larger corner radius for modern appearance (like Spotlight or Control Center)
+    return [self sizedBezelBackgroundWithRadius:28.0 withAlpha:[[NSUserDefaults standardUserDefaults] floatForKey:@"bezelAlpha"]];
 }
 
 - (void) setAlpha:(float)newValue
@@ -326,17 +377,16 @@ static const float lineHeight = 16;
 {
 	NSImage *bg = [[NSImage alloc] initWithSize:bgRect.size];
 	[bg lockFocus];
-	// I'm not at all clear why this seems to work
 	NSRect dummyRect = NSMakeRect(0, 0, [bg size].width, [bg size].height);
 	NSBezierPath *roundedRec = [NSBezierPath bezierPathWithRoundRectInRect:dummyRect radius:radius];
-    
-    // Use transparent colors similar to menu bar for both normal and favorites modes
+
+    // Modern translucent colors that adapt to the system appearance
     if (color) {
-        // Favorites mode - use a subtle accent color with high transparency
-        [[NSColor colorWithCalibratedWhite:0.15 alpha:alpha] set];
+        // Favorites mode - subtle warm accent with liquid glass effect
+        [[NSColor colorWithCalibratedRed:0.18 green:0.16 blue:0.14 alpha:alpha * 0.85] set];
     } else {
-        // Normal mode - use menu bar-like transparency
-        [[NSColor colorWithCalibratedWhite:0.12 alpha:alpha] set];
+        // Normal mode - cool dark translucent for that liquid glass look
+        [[NSColor colorWithCalibratedRed:0.10 green:0.10 blue:0.12 alpha:alpha * 0.85] set];
     }
     [roundedRec fill];
 	[bg unlockFocus];
