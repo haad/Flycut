@@ -59,6 +59,8 @@
 		77A4F3B3139BD72300F39666 /* SGKeyCombo.h in Headers */ = {isa = PBXBuildFile; fileRef = 77A4F3AB139BD72300F39666 /* SGKeyCombo.h */; };
 		77A4F3B4139BD72300F39666 /* SGKeyCombo.m in Sources */ = {isa = PBXBuildFile; fileRef = 77A4F3AC139BD72300F39666 /* SGKeyCombo.m */; };
 		77AE72BD23CAE81A00F6A44B /* ApplicationServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 77AE72BC23CAE81A00F6A44B /* ApplicationServices.framework */; };
+		86C3A52B2EAE34DE00F5074D /* Debug.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = 86C3A52A2EAE34DE00F5074D /* Debug.xcconfig */; };
+		86C3A52D2EAE34E600F5074D /* Release.xcconfig in Resources */ = {isa = PBXBuildFile; fileRef = 86C3A52C2EAE34E600F5074D /* Release.xcconfig */; };
 		8D0C119F1F147E250046FAA0 /* FlycutOperator.m in Sources */ = {isa = PBXBuildFile; fileRef = 8D0C119E1F147E250046FAA0 /* FlycutOperator.m */; };
 		8D11072A0486CEB800E47090 /* MainMenu.nib in Resources */ = {isa = PBXBuildFile; fileRef = 29B97318FDCFA39411CA2CEA /* MainMenu.nib */; };
 		8D11072D0486CEB800E47090 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 29B97316FDCFA39411CA2CEA /* main.m */; settings = {ATTRIBUTES = (); }; };
@@ -198,6 +200,10 @@
 		77A4F3AB139BD72300F39666 /* SGKeyCombo.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SGKeyCombo.h; sourceTree = "<group>"; };
 		77A4F3AC139BD72300F39666 /* SGKeyCombo.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SGKeyCombo.m; sourceTree = "<group>"; };
 		77AE72BC23CAE81A00F6A44B /* ApplicationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ApplicationServices.framework; path = System/Library/Frameworks/ApplicationServices.framework; sourceTree = SDKROOT; };
+		86C3A5252EAE341F00F5074D /* FlycutDebug 2.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "FlycutDebug 2.entitlements"; sourceTree = "<group>"; };
+		86C3A52A2EAE34DE00F5074D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		86C3A52C2EAE34E600F5074D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		86C3A52E2EAE34ED00F5074D /* Flycut 2.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Flycut 2.entitlements"; sourceTree = "<group>"; };
 		8D0C119E1F147E250046FAA0 /* FlycutOperator.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FlycutOperator.m; sourceTree = "<group>"; };
 		8D0C11A01F147E3C0046FAA0 /* FlycutOperator.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FlycutOperator.h; sourceTree = "<group>"; };
 		8D0C11D41F1720070046FAA0 /* Flycut-iOS-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Flycut-iOS-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -305,6 +311,10 @@
 				77192A2723D6EA7A00EDB9BC /* FlycutHelper */,
 				29B97323FDCFA39411CA2CEA /* Frameworks */,
 				19C28FACFE9D520D11CA2CBB /* Products */,
+				86C3A5252EAE341F00F5074D /* FlycutDebug 2.entitlements */,
+				86C3A52A2EAE34DE00F5074D /* Debug.xcconfig */,
+				86C3A52C2EAE34E600F5074D /* Release.xcconfig */,
+				86C3A52E2EAE34ED00F5074D /* Flycut 2.entitlements */,
 			);
 			name = Jumpcut;
 			sourceTree = "<group>";
@@ -666,9 +676,11 @@
 				7761C8DC139BE06B000FB3AB /* com.generalarcade.flycut.32.png in Resources */,
 				7761C8DF139BE06B000FB3AB /* jumpcut.icns in Resources */,
 				8D2E28891B0669F500AE62C8 /* com.generalarcade.flycut.xout.32.png in Resources */,
+				86C3A52D2EAE34E600F5074D /* Release.xcconfig in Resources */,
 				7761C8E0139BE06B000FB3AB /* net.sf.jumpcut.ghost_scissors_small.png in Resources */,
 				7761C8E1139BE06B000FB3AB /* net.sf.jumpcut.preferences.acknowledgements.tiff in Resources */,
 				8D2E28871B0669F500AE62C8 /* com.generalarcade.flycut.black.32.png in Resources */,
+				86C3A52B2EAE34DE00F5074D /* Debug.xcconfig in Resources */,
 				7761C8E2139BE06B000FB3AB /* net.sf.jumpcut.preferences.appearance.tiff in Resources */,
 				7761C8E3139BE06B000FB3AB /* net.sf.jumpcut.preferences.general.tiff in Resources */,
 				8D2E28881B0669F500AE62C8 /* com.generalarcade.flycut.xout.16.png in Resources */,

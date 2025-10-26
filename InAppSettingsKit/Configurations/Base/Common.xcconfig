@@ -176,6 +176,10 @@ RUN_CLANG_STATIC_ANALYZER = YES
 // Don't treat unknown warnings as errors, and disable GCC compatibility warnings and unused static const variable warnings
 WARNING_CFLAGS = -Wno-error=unknown-warning-option -Wno-gcc-compat -Wno-unused-const-variable -Wno-nullability-completeness
 
+// Allow entitlements modification during build to fix code signing issues
+// This prevents the error: "Entitlements file was modified during the build"
+CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION = YES
+
 // This setting is on for new projects as of Xcode ~6.3, though it is still not
 // the default. It warns if the same variable is declared in two binaries that
 // are linked together.

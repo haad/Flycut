@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- For macOS clipboard manager app -->
+    
+    <!-- App Sandbox - Enable for Mac App Store distribution -->
+    <!-- Uncomment if distributing through Mac App Store -->
+    <!-- <key>com.apple.security.app-sandbox</key>
+    <true/> -->
+    
+    <!-- Hardened Runtime - Required for notarization -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+    <key>com.apple.security.cs.disable-executable-page-protection</key>
+    <false/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <false/>
+    
+    <!-- Accessibility - Required for clipboard monitoring -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+    
+    <!-- If using App Sandbox, uncomment these for clipboard access -->
+    <!-- <key>com.apple.security.files.user-selected.read-write</key>
+    <true/> -->
+    <!-- <key>com.apple.security.network.client</key>
+    <true/> -->
+</dict>
+</plist>

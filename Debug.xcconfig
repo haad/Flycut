@@ -1,0 +1,42 @@
+//
+// Debug configuration for Flycut
+// This configuration should be used for development and debugging
+//
+
+// Include common settings
+#include "Common.xcconfig"
+
+// Build configuration name
+CONFIGURATION = Debug
+
+// Optimization level - no optimization for debugging
+GCC_OPTIMIZATION_LEVEL = 0
+
+// Generate debugging symbols
+DEBUG_INFORMATION_FORMAT = dwarf
+
+// Enable assertions and debug code
+ENABLE_NS_ASSERTIONS = YES
+ENABLE_TESTABILITY = YES
+
+// Preprocessor macros for debug builds
+GCC_PREPROCESSOR_DEFINITIONS = DEBUG=1 $(inherited)
+
+// Code signing entitlements for debug
+CODE_SIGN_ENTITLEMENTS = FlycutDebug.entitlements
+
+// Product name with debug suffix (optional)
+PRODUCT_NAME = $(TARGET_NAME)
+
+// Swift compilation settings for debug
+SWIFT_OPTIMIZATION_LEVEL = -Onone
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG $(inherited)
+
+// Enable all warnings for development
+GCC_TREAT_WARNINGS_AS_ERRORS = NO
+
+// Disable dead code stripping to aid debugging
+DEAD_CODE_STRIPPING = NO
+
+// Enable zombies and other debugging aids
+ENABLE_NS_ASSERTIONS = YES

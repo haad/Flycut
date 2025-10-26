@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Add any specific entitlements your app needs -->
+    <!-- Example: App Sandbox (if needed) -->
+    <!-- <key>com.apple.security.app-sandbox</key>
+    <true/> -->
+    
+    <!-- Example: Network access (if needed) -->
+    <!-- <key>com.apple.security.network.client</key>
+    <true/> -->
+    
+    <!-- Example: Accessibility (if your app needs it) -->
+    <!-- <key>com.apple.security.automation.apple-events</key>
+    <true/> -->
+</dict>
+</plist>

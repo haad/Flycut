@@ -1,0 +1,49 @@
+//
+// Release configuration for Flycut
+// This configuration should be used for production builds
+//
+
+// Include common settings
+#include "Common.xcconfig"
+
+// Build configuration name
+CONFIGURATION = Release
+
+// Optimization level - optimize for speed
+GCC_OPTIMIZATION_LEVEL = s
+
+// Generate debugging symbols but use dwarf-with-dsym for better performance
+DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
+
+// Disable assertions and debug code
+ENABLE_NS_ASSERTIONS = NO
+ENABLE_TESTABILITY = NO
+
+// No debug preprocessor macros
+GCC_PREPROCESSOR_DEFINITIONS = $(inherited)
+
+// Code signing entitlements for release (create separate file if needed)
+CODE_SIGN_ENTITLEMENTS = Flycut.entitlements
+
+// Product name
+PRODUCT_NAME = $(TARGET_NAME)
+
+// Swift compilation settings for release
+SWIFT_OPTIMIZATION_LEVEL = -O
+SWIFT_COMPILATION_MODE = wholemodule
+
+// Treat warnings as errors in release builds
+GCC_TREAT_WARNINGS_AS_ERRORS = YES
+
+// Enable dead code stripping for smaller binary size
+DEAD_CODE_STRIPPING = YES
+
+// Strip debug symbols from the final binary
+STRIP_INSTALLED_PRODUCT = YES
+STRIP_STYLE = all
+
+// Disable runtime checks for better performance
+ENABLE_NS_ASSERTIONS = NO
+
+// Deployment postprocessing (includes stripping symbols)
+DEPLOYMENT_POSTPROCESSING = YES
