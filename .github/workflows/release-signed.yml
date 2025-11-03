@@ -26,8 +26,22 @@ jobs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Version: $VERSION"
 
+    - name: Check for signing certificates
+      id: check_secrets
+      run: |
+        if [ -n "${{ secrets.CERTIFICATES_P12 }}" ]; then
+          echo "has_certs=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_certs=false" >> $GITHUB_OUTPUT
+        fi
+        if [ -n "${{ secrets.NOTARIZATION_PASSWORD }}" ]; then
+          echo "has_notarization=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_notarization=false" >> $GITHUB_OUTPUT
+        fi
+
     - name: Import Code Signing Certificates
-      if: ${{ secrets.CERTIFICATES_P12 != '' }}
+      if: steps.check_secrets.outputs.has_certs == 'true'
       env:
         CERTIFICATES_P12: ${{ secrets.CERTIFICATES_P12 }}
         CERTIFICATES_PASSWORD: ${{ secrets.CERTIFICATES_PASSWORD }}
@@ -62,7 +76,7 @@ jobs:
       run: xcodebuild -list -project Flycut.xcodeproj
 
     - name: Build and Archive (Signed)
-      if: ${{ secrets.CERTIFICATES_P12 != '' }}
+      if: steps.check_secrets.outputs.has_certs == 'true'
       run: |
         xcodebuild \
           -project Flycut.xcodeproj \
@@ -74,7 +88,7 @@ jobs:
           CODE_SIGN_STYLE=Manual
 
     - name: Build and Archive (Unsigned)
-      if: ${{ secrets.CERTIFICATES_P12 == '' }}
+      if: steps.check_secrets.outputs.has_certs != 'true'
       run: |
         echo "Building without code signing (no certificates provided)"
         xcodebuild \
@@ -129,7 +143,7 @@ jobs:
           -exportOptionsPlist build/ExportOptions.plist
 
     - name: Notarize App
-      if: ${{ secrets.CERTIFICATES_P12 != '' && secrets.NOTARIZATION_PASSWORD != '' }}
+      if: steps.check_secrets.outputs.has_certs == 'true' && steps.check_secrets.outputs.has_notarization == 'true'
       env:
         NOTARIZATION_USERNAME: ${{ secrets.NOTARIZATION_USERNAME }}
         NOTARIZATION_PASSWORD: ${{ secrets.NOTARIZATION_PASSWORD }}
@@ -176,7 +190,7 @@ jobs:
       id: create_dmg
 
     - name: Clean up keychain
-      if: always() && secrets.CERTIFICATES_P12 != ''
+      if: always() && steps.check_secrets.outputs.has_certs == 'true'
       run: |
         KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
         security delete-keychain "$KEYCHAIN_PATH" || true
