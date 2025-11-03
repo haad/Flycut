@@ -19,6 +19,25 @@ jobs:
       with:
         xcode-version: latest-stable
 
+    - name: Verify System Tools
+      run: |
+        echo "=== System Information ==="
+        sw_vers
+        echo ""
+        echo "=== Checking for hdiutil ==="
+        which hdiutil || echo "hdiutil not found in PATH"
+        hdiutil --version || echo "hdiutil command failed"
+        echo ""
+        echo "=== Checking for other DMG tools ==="
+        which create-dmg || echo "create-dmg not found"
+        echo ""
+        echo "=== Current PATH ==="
+        echo $PATH
+        echo ""
+        echo "=== Available disk utilities ==="
+        ls -la /usr/bin/*disk* || true
+        ls -la /usr/bin/hdiutil || true
+
     - name: Extract version from tag
       id: get_version
       run: |
@@ -142,6 +161,22 @@ jobs:
           -exportPath build/Export \
           -exportOptionsPlist build/ExportOptions.plist
 
+    - name: Verify Export
+      run: |
+        echo "Checking build directory structure:"
+        ls -la build/
+        echo ""
+        echo "Checking archive contents:"
+        ls -la build/Flycut.xcarchive/ || true
+        ls -la build/Flycut.xcarchive/Products/ || true
+        ls -la build/Flycut.xcarchive/Products/Applications/ || true
+        echo ""
+        echo "Checking export directory:"
+        ls -la build/Export/ || true
+        echo ""
+        echo "Looking for .app bundles:"
+        find build -name "*.app" -type d
+
     - name: Notarize App
       if: steps.check_secrets.outputs.has_certs == 'true' && steps.check_secrets.outputs.has_notarization == 'true'
       env:
@@ -149,40 +184,116 @@ jobs:
         NOTARIZATION_PASSWORD: ${{ secrets.NOTARIZATION_PASSWORD }}
         NOTARIZATION_TEAM_ID: ${{ secrets.NOTARIZATION_TEAM_ID }}
       run: |
-        echo "Notarizing app..."
-        xcrun notarytool submit build/Export/Flycut.app \
+        # Find the app bundle
+        APP_PATH=$(find build -name "Flycut.app" -type d | head -1)
+
+        if [ -z "$APP_PATH" ]; then
+          echo "Error: Could not find Flycut.app for notarization"
+          exit 1
+        fi
+
+        echo "Notarizing app at: $APP_PATH"
+        xcrun notarytool submit "$APP_PATH" \
           --apple-id "$NOTARIZATION_USERNAME" \
           --password "$NOTARIZATION_PASSWORD" \
           --team-id "$NOTARIZATION_TEAM_ID" \
           --wait
 
         echo "Stapling notarization ticket..."
-        xcrun stapler staple build/Export/Flycut.app
+        xcrun stapler staple "$APP_PATH"
 
     - name: Create DMG
       run: |
+        # Ensure build directory exists first
+        mkdir -p build
+
+        # Verify hdiutil is available
+        if ! command -v hdiutil &> /dev/null; then
+          echo "Warning: hdiutil command not found in PATH"
+          echo "Installing create-dmg as alternative..."
+          brew install create-dmg
+        else
+          echo "hdiutil is available at: $(which hdiutil)"
+          hdiutil help create 2>&1 | head -5 || true
+        fi
+
+        # Find the app bundle
+        APP_PATH=$(find build -name "Flycut.app" -type d | head -1)
+
+        if [ -z "$APP_PATH" ]; then
+          echo "Error: Could not find Flycut.app"
+          echo "Build directory contents:"
+          find build -type d
+          exit 1
+        fi
+
+        echo "Found app at: $APP_PATH"
+
         # Create a staging directory for DMG contents
         mkdir -p build/dmg-staging
 
         # Copy the app to staging
-        cp -R build/Export/Flycut.app build/dmg-staging/
+        echo "Copying app to staging directory..."
+        cp -R "$APP_PATH" build/dmg-staging/
+
+        # Verify copy
+        if [ ! -d "build/dmg-staging/Flycut.app" ]; then
+          echo "Error: Failed to copy app to staging directory"
+          ls -la build/dmg-staging/
+          exit 1
+        fi
 
         # Create a symbolic link to Applications folder
         ln -s /Applications build/dmg-staging/Applications
 
+        # Verify staging directory contents before creating DMG
+        echo "Staging directory contents:"
+        ls -la build/dmg-staging/
+
         # Create the DMG
         DMG_NAME="Flycut-${{ steps.get_version.outputs.version }}.dmg"
+
+        # Use absolute paths
+        WORKSPACE_DIR="$(pwd)"
+        SOURCE_DIR="${WORKSPACE_DIR}/build/dmg-staging"
+        DMG_PATH="${WORKSPACE_DIR}/build/${DMG_NAME}"
+
+        echo "Creating DMG: $DMG_NAME"
+        echo "Working directory: $WORKSPACE_DIR"
+        echo "Source folder: $SOURCE_DIR"
+        echo "Destination: $DMG_PATH"
+
+        # Verify source folder exists
+        if [ ! -d "$SOURCE_DIR" ]; then
+          echo "Error: Source folder $SOURCE_DIR does not exist"
+          exit 1
+        fi
+
+        # Create DMG with absolute paths
+        echo "Running hdiutil..."
         hdiutil create \
           -volname "Flycut ${{ steps.get_version.outputs.version }}" \
-          -srcfolder build/dmg-staging \
+          -srcfolder "$SOURCE_DIR" \
           -ov \
           -format UDZO \
-          "build/$DMG_NAME"
+          "$DMG_PATH" || {
+            echo "hdiutil failed with exit code $?"
+            echo "Trying alternative approach with create-dmg..."
+            brew install create-dmg
+            create-dmg \
+              --volname "Flycut ${{ steps.get_version.outputs.version }}" \
+              --window-pos 200 120 \
+              --window-size 800 400 \
+              --icon-size 100 \
+              --app-drop-link 600 185 \
+              "$DMG_PATH" \
+              "$SOURCE_DIR"
+          }
 
         # Sign the DMG if we have a signing identity
         if [ -n "$SIGNING_IDENTITY" ]; then
           echo "Signing DMG..."
-          codesign --force --sign "$SIGNING_IDENTITY" "build/$DMG_NAME"
+          codesign --force --sign "$SIGNING_IDENTITY" "$DMG_PATH"
         fi
 
         echo "dmg_name=$DMG_NAME" >> $GITHUB_OUTPUT
