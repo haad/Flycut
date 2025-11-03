@@ -2,6 +2,9 @@
 <Workspace
    version = "1.0">
    <FileRef
-      location = "self:Flycut.xcodeproj">
+      location = "self:">
+   </FileRef>
+   <FileRef
+      location = "group:RELEASE_SETUP.md">
    </FileRef>
 </Workspace>

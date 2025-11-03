@@ -1,0 +1,142 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
+
+    - name: Extract version from tag
+      id: get_version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Version: $VERSION"
+
+    - name: List available schemes
+      run: xcodebuild -list -project Flycut.xcodeproj
+
+    - name: Build and Archive
+      run: |
+        xcodebuild \
+          -project Flycut.xcodeproj \
+          -scheme Flycut \
+          -configuration Release \
+          -archivePath build/Flycut.xcarchive \
+          archive \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGNING_ALLOWED=NO
+
+    - name: Export App
+      run: |
+        # Create export options
+        cat > build/ExportOptions.plist <<EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>method</key>
+            <string>mac-application</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+        </dict>
+        </plist>
+        EOF
+
+        # Export the app
+        xcodebuild \
+          -exportArchive \
+          -archivePath build/Flycut.xcarchive \
+          -exportPath build/Export \
+          -exportOptionsPlist build/ExportOptions.plist
+
+    - name: Create DMG
+      run: |
+        # Create a staging directory for DMG contents
+        mkdir -p build/dmg-staging
+
+        # Copy the app to staging
+        cp -R build/Export/Flycut.app build/dmg-staging/
+
+        # Create a symbolic link to Applications folder
+        ln -s /Applications build/dmg-staging/Applications
+
+        # Create the DMG
+        DMG_NAME="Flycut-${{ steps.get_version.outputs.version }}.dmg"
+        hdiutil create \
+          -volname "Flycut ${{ steps.get_version.outputs.version }}" \
+          -srcfolder build/dmg-staging \
+          -ov \
+          -format UDZO \
+          "build/$DMG_NAME"
+
+        echo "dmg_name=$DMG_NAME" >> $GITHUB_OUTPUT
+        ls -lh "build/$DMG_NAME"
+      id: create_dmg
+
+    - name: Generate Release Notes
+      id: release_notes
+      run: |
+        # Get commits since last tag
+        PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+        if [ -z "$PREV_TAG" ]; then
+          # First release, get all commits
+          COMMITS=$(git log --pretty=format:"- %s (%h)" --reverse)
+        else
+          # Get commits since previous tag
+          COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --reverse)
+        fi
+
+        # Create release notes
+        cat > release_notes.md <<EOF
+        ## Changes in this release
+
+        $COMMITS
+
+        ## Installation
+
+        1. Download the DMG file below
+        2. Open the DMG
+        3. Drag Flycut.app to your Applications folder
+        4. Launch Flycut from Applications
+
+        ## Requirements
+
+        - macOS 10.13 or later
+        EOF
+
+        cat release_notes.md
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: build/${{ steps.create_dmg.outputs.dmg_name }}
+        body_path: release_notes.md
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: build-artifacts
+        path: |
+          build/
+          !build/dmg-staging/
+        retention-days: 7
