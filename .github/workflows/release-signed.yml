@@ -41,9 +41,15 @@ jobs:
     - name: Extract version from tag
       id: get_version
       run: |
-        VERSION=${GITHUB_REF#refs/tags/v}
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${VERSION#v}  # Remove 'v' prefix if present
+        else
+          VERSION=$(git describe --tags --always 2>/dev/null || echo "dev")
+        fi
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Version: $VERSION"
+        echo "GITHUB_REF: $GITHUB_REF"
 
     - name: Check for signing certificates
       id: check_secrets
@@ -251,7 +257,7 @@ jobs:
         ls -la build/dmg-staging/
 
         # Create the DMG
-        DMG_NAME="Flycut-${{ steps.get_version.outputs.version }}.dmg"
+        DMG_NAME="Flycut.dmg"
 
         # Use absolute paths
         WORKSPACE_DIR="$(pwd)"
@@ -272,7 +278,7 @@ jobs:
         # Create DMG with absolute paths
         echo "Running hdiutil..."
         hdiutil create \
-          -volname "Flycut ${{ steps.get_version.outputs.version }}" \
+          -volname "Flycut" \
           -srcfolder "$SOURCE_DIR" \
           -ov \
           -format UDZO \
@@ -281,7 +287,7 @@ jobs:
             echo "Trying alternative approach with create-dmg..."
             brew install create-dmg
             create-dmg \
-              --volname "Flycut ${{ steps.get_version.outputs.version }}" \
+              --volname "Flycut" \
               --window-pos 200 120 \
               --window-size 800 400 \
               --icon-size 100 \
@@ -296,8 +302,17 @@ jobs:
           codesign --force --sign "$SIGNING_IDENTITY" "$DMG_PATH"
         fi
 
-        echo "dmg_name=$DMG_NAME" >> $GITHUB_OUTPUT
-        ls -lh "build/$DMG_NAME"
+        # Verify DMG was created
+        if [ -f "$DMG_PATH" ]; then
+          echo "DMG created successfully!"
+          ls -lh "$DMG_PATH"
+          echo "dmg_name=$DMG_NAME" >> $GITHUB_OUTPUT
+        else
+          echo "Error: DMG file not found at $DMG_PATH"
+          echo "Searching for DMG files..."
+          find . -name "*.dmg" -type f
+          exit 1
+        fi
       id: create_dmg
 
     - name: Clean up keychain
@@ -354,7 +369,7 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        files: build/${{ steps.create_dmg.outputs.dmg_name }}
+        files: build/Flycut.dmg
         body_path: release_notes.md
         draft: false
         prerelease: false
