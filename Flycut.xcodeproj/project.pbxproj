@@ -905,7 +905,7 @@
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2.0.0;
+				CURRENT_PROJECT_VERSION = 2.0.1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = YES;
@@ -931,7 +931,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.3;
-				MARKETING_VERSION = 2.0.0.latest;
+				MARKETING_VERSION = 2.0.1.latest;
 				PRODUCT_BUNDLE_IDENTIFIER = com.generalarcade.flycut;
 				PRODUCT_NAME = Flycut;
 				PROVISIONING_PROFILE = "";
@@ -954,7 +954,7 @@
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 2.0.0;
+				CURRENT_PROJECT_VERSION = 2.0.1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_APP_SANDBOX = YES;
@@ -977,7 +977,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.3;
-				MARKETING_VERSION = 2.0.0.latest;
+				MARKETING_VERSION = 2.0.1.latest;
 				PRODUCT_BUNDLE_IDENTIFIER = com.generalarcade.flycut;
 				PRODUCT_NAME = Flycut;
 				PROVISIONING_PROFILE = "";

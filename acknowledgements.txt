@@ -12,10 +12,6 @@ Flycut macOS incorporates the following libraries, used with gratitude:
 	• ShortcutRecorder by Jesper et al. (<http://wafflesoftware.net/>)
 	• a modified version of UKPrefsPanel by Uli Kusterer (<http://www.zathras.de/>)
 	• SGHotKeysLib by Justin Williams (<https://github.com/agilebits/SGHotKeysLib>)
-Flycut iOS incorporates the following libraries, used with gratitude:
-	• MGSwipeTableCell by Imanol Fernandez (<https://github.com/MortimerGoro/MGSwipeTableCell>)
-	• a modified version of InAppSettingsKit by Luc Vandal and Ortwin Gentz (<https://github.com/futuretap/InAppSettingsKit>)
-Flycut macOS & iOS incorporates the following libraries, used with gratitude:
 	• MJCloudKitUserDefaultsSync by Mark Jerde (<https://github.com/MarkJerde/MJCloudKitUserDefaultsSync>)
 
 Jumpcut is open source code built with open source code. Jumpcut incorporates the

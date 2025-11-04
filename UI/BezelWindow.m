@@ -159,7 +159,7 @@ static const float lineHeight = 16;
 			textEffectView.state = NSVisualEffectStateActive;
 			textEffectView.wantsLayer = YES;
 			textEffectView.layer.cornerRadius = 14.0;
-			// Use continuous corner curve for that smooth, modern iOS/macOS look
+			// Use continuous corner curve for that smooth, modern macOS look
 			if (@available(macOS 10.15, *)) {
 				textEffectView.layer.cornerCurve = @"continuous";
 			}
