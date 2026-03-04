@@ -164,13 +164,24 @@
 //	[flycutOperator registerOrDeregisterICloudSync];
 //}
 
+- (void)openAccessibilitySettings {
+    NSString *urlString;
+    NSOperatingSystemVersion ver = [[NSProcessInfo processInfo] operatingSystemVersion];
+    if (ver.majorVersion >= 13) {
+        urlString = @"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility";
+    } else {
+        urlString = @"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+    }
+    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:urlString]];
+}
+
 - (void)showAccessibilityAlert {
     BOOL suppressAlert = [[NSUserDefaults standardUserDefaults] boolForKey:@"suppressAccessibilityAlert"];
     NSDictionary* options = @{(id) (kAXTrustedCheckOptionPrompt): @NO};
     if (!suppressAlert && &AXIsProcessTrustedWithOptions != NULL && !AXIsProcessTrustedWithOptions((CFDictionaryRef) (options))) {
         NSAlert *alert = [[NSAlert alloc] init];
         [alert setMessageText:@"Flycut"];
-        [alert setInformativeText:@"For correct functioning of the app please tick Flycut in Accessibility apps list"];
+        [alert setInformativeText:@"For correct functioning of the app please tick Flycut in Accessibility apps list.\n\nIf Flycut is already listed but paste doesn't work, remove it from the list, then add it again and restart Flycut."];
         [alert addButtonWithTitle:@"OK"];
         alert.showsSuppressionButton = YES;
         [alert runModal];
@@ -179,8 +190,7 @@
                                                      forKey:@"suppressAccessibilityAlert"];
         }
         [alert release];
-        NSString *urlString = @"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
-        [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:urlString]];
+        [self openAccessibilitySettings];
     }
 }
 
@@ -814,7 +824,7 @@
 		NSLog(@"Content found, adding to pasteboard and preparing to paste: %@", [content substringToIndex:MIN(content.length, 50)]);
 		[self addClipToPasteboard:content];
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
-		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.2];
+		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.5];
 	} else {
 		NSLog(@"No content found in stack position");
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
@@ -885,27 +895,31 @@
 }
 
 /*" +fakeCommandV synthesizes keyboard events for Cmd-v Paste shortcut. "*/
--(void)fakeCommandV { 
+-(void)fakeCommandV {
     NSLog(@"fakeCommandV called - attempting to paste");
-    
-    // Check if we have accessibility permissions
-    BOOL accessibilityEnabled = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @YES});
-    
+
+    // Check accessibility without prompting - the startup alert handles prompting.
+    // Using @YES here would trigger a system dialog that steals focus and breaks paste.
+    BOOL accessibilityEnabled = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @NO});
+
     if (!accessibilityEnabled) {
         NSLog(@"Accessibility permissions not granted - cannot simulate keystrokes");
-        // Show alert to user
         dispatch_async(dispatch_get_main_queue(), ^{
             NSAlert *alert = [[NSAlert alloc] init];
             alert.messageText = @"Accessibility Access Required";
-            alert.informativeText = @"Flycut needs accessibility access to automatically paste. Please grant access in System Preferences > Security & Privacy > Privacy > Accessibility.";
-            [alert addButtonWithTitle:@"OK"];
-            [alert runModal];
+            alert.informativeText = @"Flycut needs accessibility access to paste.\n\nIf you already granted permission, try removing Flycut from the Accessibility list, adding it again, and restarting the app.";
+            [alert addButtonWithTitle:@"Open Settings"];
+            [alert addButtonWithTitle:@"Cancel"];
+            NSModalResponse response = [alert runModal];
             [alert release];
+            if (response == NSAlertFirstButtonReturn) {
+                [self openAccessibilitySettings];
+            }
         });
         return;
     }
-    
-    [self fakeKey:[srTransformer reverseTransformedValue:@"V"] withCommandFlag:TRUE]; 
+
+    [self fakeKey:[srTransformer reverseTransformedValue:@"V"] withCommandFlag:TRUE];
 }
 
 /*" +fakeDownArrow synthesizes keyboard events for the down-arrow key. "*/
@@ -1445,7 +1459,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"menuSelectionPastes"] ) {
 		[self performSelector:@selector(hideApp) withObject:nil];
-		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.2];
+		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
 	}
 }
 
@@ -1821,7 +1835,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 			[self hideSearchWindow];
 			
 			// Always paste immediately (like bezel behavior), ignore menuSelectionPastes preference
-			[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.2];
+			[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
 		}
 	}
 }
