@@ -221,8 +221,48 @@
 
 
 
+- (void)checkAndPerformSandboxDataMigration
+{
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+
+	// Already offered migration once — don't ask again.
+	if ([defaults boolForKey:@"sandboxMigrationCompleted"])
+		return;
+
+	NSString *oldPlistPath = [NSHomeDirectory() stringByAppendingPathComponent:
+		@"Library/Containers/com.generalarcade.flycut/Data/Library/Preferences/com.generalarcade.flycut.plist"];
+
+	if (![[NSFileManager defaultManager] fileExistsAtPath:oldPlistPath])
+		return;
+
+	// Don't overwrite if the user already has data in the new location.
+	if ([defaults objectForKey:@"store"] != nil) {
+		[defaults setBool:YES forKey:@"sandboxMigrationCompleted"];
+		return;
+	}
+
+	NSString *choice = [self alertWithMessageText:@"Migrate Previous Data?"
+								 informationText:@"Flycut found settings and clipboard history from a previous version. Would you like to import them?"
+									buttonsTexts:@[@"Migrate", @"Don't Migrate"]];
+
+	if ([choice isEqualToString:@"Migrate"]) {
+		NSDictionary *oldData = [NSDictionary dictionaryWithContentsOfFile:oldPlistPath];
+		if (oldData) {
+			for (NSString *key in oldData) {
+				[defaults setObject:oldData[key] forKey:key];
+			}
+			[defaults synchronize];
+			NSLog(@"[Flycut] Sandbox data migration completed — %lu keys imported.", (unsigned long)[oldData count]);
+		}
+	}
+
+	[defaults setBool:YES forKey:@"sandboxMigrationCompleted"];
+}
+
 - (void)awakeFromNib
 {
+	[self checkAndPerformSandboxDataMigration];
+
 	// Log startup diagnostics for accessibility troubleshooting
 	NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
 	NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
