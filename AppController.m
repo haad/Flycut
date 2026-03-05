@@ -16,7 +16,6 @@
 #import "SGHotKey.h"
 #import "SGHotKeyCenter.h"
 #import "SRRecorderCell.h"
-#import "UKLoginItemRegistry.h"
 #import "NSWindow+TrueCenter.h"
 #import "NSWindow+ULIZoomEffect.h"
 //#import "MJCloudKitUserDefaultsSync/MJCloudKitUserDefaultsSync.h"
@@ -56,14 +55,6 @@
 
 @implementation AppController
 
-/// Determines, through a hack of sorts, if the app is running sandboxed. The SANDBOXING define has no direct connection to being sandboxed, but this method identifies the state by looking for a directory which will have at least eight path components if sandboxed and is quite unlikely to have that many if not sandboxed. Of course, if this doesn't work for your unique case, just do a custom build with this method returning NO.
-+ (BOOL)isAppSandboxed {
-	// Get the Desktop directory:
-	NSArray *paths = NSSearchPathForDirectoriesInDomains
-	(NSDesktopDirectory, NSUserDomainMask, YES);
-	NSString *desktopDirectory = [paths objectAtIndex:0];
-	return ((NSArray*)[desktopDirectory componentsSeparatedByString:@"/"]).count >= 8;
-}
 
 - (id)init
 {
@@ -99,11 +90,7 @@
         @"displayClippingSource",
         [NSNumber numberWithBool:NO],
         @"saveForgottenClippings",
-#ifdef SANDBOXING
-        [NSNumber numberWithBool:NO],
-#else
         [NSNumber numberWithBool:YES],
-#endif
         @"saveForgottenFavorites",
         [NSNumber numberWithBool:NO],
         @"suppressAccessibilityAlert",
@@ -175,53 +162,77 @@
     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:urlString]];
 }
 
+- (void)requestAccessibilityWithPrompt {
+    // This method WILL trigger the system prompt if permissions are not granted
+    NSLog(@"[Accessibility] User requested system prompt for accessibility permissions");
+    
+    NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
+    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    
+    NSDictionary* options = @{(id) (kAXTrustedCheckOptionPrompt): @YES};
+    BOOL trusted = AXIsProcessTrustedWithOptions((CFDictionaryRef) (options));
+    
+    NSLog(@"[Accessibility] After prompt request - Bundle: %@, ID: %@, Trusted: %@", 
+          bundlePath, bundleID, trusted ? @"YES" : @"NO");
+    
+    if (!trusted) {
+        // Give the system a moment to show the prompt, then open settings
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self openAccessibilitySettings];
+        });
+    }
+}
+
 - (void)showAccessibilityAlert {
     BOOL suppressAlert = [[NSUserDefaults standardUserDefaults] boolForKey:@"suppressAccessibilityAlert"];
     NSDictionary* options = @{(id) (kAXTrustedCheckOptionPrompt): @NO};
-    if (!suppressAlert && &AXIsProcessTrustedWithOptions != NULL && !AXIsProcessTrustedWithOptions((CFDictionaryRef) (options))) {
+    BOOL trusted = AXIsProcessTrustedWithOptions((CFDictionaryRef) (options));
+    
+    // Log context for diagnostics
+    NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
+    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    NSLog(@"[Accessibility] Alert check - Bundle: %@, ID: %@, Trusted: %@, Suppressed: %@", 
+          bundlePath, bundleID, trusted ? @"YES" : @"NO", suppressAlert ? @"YES" : @"NO");
+    
+    if (!suppressAlert && &AXIsProcessTrustedWithOptions != NULL && !trusted) {
         NSAlert *alert = [[NSAlert alloc] init];
         [alert setMessageText:@"Flycut"];
         [alert setInformativeText:@"For correct functioning of the app please tick Flycut in Accessibility apps list.\n\nIf Flycut is already listed but paste doesn't work, remove it from the list, then add it again and restart Flycut."];
-        [alert addButtonWithTitle:@"OK"];
+        [alert addButtonWithTitle:@"Open Settings"];
+        [alert addButtonWithTitle:@"Request System Prompt"];
         alert.showsSuppressionButton = YES;
-        [alert runModal];
+        NSModalResponse response = [alert runModal];
+        
         if (alert.suppressionButton.state == NSControlStateValueOn) {
             [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:YES]
                                                      forKey:@"suppressAccessibilityAlert"];
         }
         [alert release];
-        [self openAccessibilitySettings];
-    }
-}
-
-
-- (void)showOldOSXAlert {
-    // FIXME: Should ask Gennadii if the "#ifdef SANDBOXING" should be removed and replaced with "if (![AppController isAppSandboxed]) { return; }"
-#ifdef SANDBOXING
-    NSOperatingSystemVersion ver = [[NSProcessInfo processInfo] operatingSystemVersion];
-    if (ver.majorVersion == 10 && ver.minorVersion <= 13) {
-        BOOL suppressAlert = [[NSUserDefaults standardUserDefaults] boolForKey:@"suppressOldOSXAlert"];
-        if (!suppressAlert) {
-            NSAlert *alert = [[NSAlert alloc] init];
-            [alert setMessageText:@"Flycut"];
-            [alert setInformativeText:@"Unfortunately due to some app sandbox security restrictions from Apple Flycut may not correctly function on MacOSX 10.13 or lower. You can download non sandboxed version here: https://github.com/TermiT/Flycut/releases"];
-            [alert addButtonWithTitle:@"OK"];
-            alert.showsSuppressionButton = YES;
-            [alert runModal];
-            if (alert.suppressionButton.state == NSControlStateValueOn) {
-                [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:YES]
-                                                         forKey:@"suppressOldOSXAlert"];
-            }
-            [alert release];
+        
+        if (response == NSAlertFirstButtonReturn) {
+            [self openAccessibilitySettings];
+        } else if (response == NSAlertSecondButtonReturn) {
+            [self requestAccessibilityWithPrompt];
         }
     }
-#endif
 }
+
+
 
 
 
 - (void)awakeFromNib
 {
+	// Log startup diagnostics for accessibility troubleshooting
+	NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
+	NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+	NSDictionary* options = @{(id) (kAXTrustedCheckOptionPrompt): @NO};
+	BOOL initialTrustState = AXIsProcessTrustedWithOptions((CFDictionaryRef) (options));
+	
+	NSLog(@"[Flycut Startup] Bundle Path: %@", bundlePath);
+	NSLog(@"[Flycut Startup] Bundle ID: %@", bundleID);
+	NSLog(@"[Flycut Startup] Initial Accessibility Trust State: %@", initialTrustState ? @"TRUSTED" : @"NOT TRUSTED");
+	
 	[self buildAppearancesPreferencePanel];
 
 	// We no longer get autosave from ShortcutRecorder, so let's set the recorder by hand
@@ -295,36 +306,17 @@
     [pollPBTimer fire];
     
     
-    // The load-on-startup check can be really slow, so this will be dispatched out so our thread isn't blocked.
-    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
-    dispatch_async(queue, ^{
-        // FIXME: Should ask Gennadii if the "#ifdef SANDBOXING" should be removed and replaced with "if ([AppController isAppSandboxed])"
-#ifdef SANDBOXING
-        NSPredicate *predicate = [NSPredicate predicateWithFormat:@"bundleIdentifier == %@", kFlycutHelperId];
-        NSArray *helperApp = [[[NSWorkspace sharedWorkspace] runningApplications] filteredArrayUsingPredicate:predicate];
-        BOOL helperLaunched = ([helperApp count] != 0);
-        [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:helperLaunched]
-                                                            forKey:@"loadOnStartup"];
-#else
-
-        // This can take five seconds, perhaps more, so do it in the background instead of holding up opening of the preference panel.
-        int checkLoginRegistry = [UKLoginItemRegistry indexForLoginItemWithPath:[[NSBundle mainBundle] bundlePath]];
-        if ( checkLoginRegistry >= 1 ) {
-            [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:YES]
-                                                     forKey:@"loadOnStartup"];
-        } else {
-            [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:NO]
-                                                     forKey:@"loadOnStartup"];
-        }
-#endif
-    });
+    // Check if the app is registered as a login item
+    SMAppService *loginItem = [SMAppService mainAppService];
+    BOOL isEnabled = (loginItem.status == SMAppServiceStatusEnabled);
+    [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:isEnabled]
+                                             forKey:@"loadOnStartup"];
 //    [self registerOrDeregisterICloudSync];
 
     [NSApp activateIgnoringOtherApps: YES];
     
     // Check if the app has Accessibility permission
     [self showAccessibilityAlert];
-    [self showOldOSXAlert];
 }
 
 -(void)savePreferencesOnDict:(NSMutableDictionary *)saveDict
@@ -733,23 +725,25 @@
                                            action:@selector(setupBezel:)];
     [appearancePanel addSubview:row];
     nextYMax = row.frame.origin.y;
-#ifdef SANDBOXING
-    // Hide the Save Clippings preferences. These work fine when sandboxed. They just save to somwehere under ~/Library/Containers. If SANDBOXING isn't set, automatic saving of forgotten clippings will go somewhere under ~/Library/Containers while manual saving (s or S in the bezel) will open an NSSavePanel to prompt the user to pick.
-    forgottenItemLabel.hidden = YES;
-    forgottenClippingsCheckbox.hidden = YES;
-    forgottenFavoritesCheckbox.hidden = YES;
-    savingSectionLabel.hidden = YES;
-    saveToLocationButton.hidden = YES;
-    autoSaveToLocationButton.hidden = YES;
-    saveFromBezelToLabel.hidden = YES;
-#endif
-    if ([AppController isAppSandboxed]) {
-        // Saving to a prior-selected location while sandboxed would be unpleasant, so these really should be disabled always when sandboxed but can still show where the saves happen so the user knows what to expect.
-        saveToLocationButton.enabled = NO;
-        [saveToLocationButton setTitle:@"Ask User"];
-        autoSaveToLocationButton.enabled = NO;
-        [autoSaveToLocationButton setTitle:@"App Sandbox"];
-    }
+    
+    // Add Accessibility Check button
+    NSRect panelFrame = [appearancePanel frame];
+    int height = 40;
+    NSBox *accessibilityRow = [[NSBox alloc] initWithFrame:NSMakeRect(0, nextYMax - height + 5, panelFrame.size.width - 10, height)];
+    [accessibilityRow setTitlePosition:NSNoTitle];
+    [accessibilityRow setTransparent:YES];
+    
+    NSButton *accessibilityButton = [[NSButton alloc] initWithFrame:NSMakeRect(8, 4, 250, 25)];
+    [accessibilityButton setTitle:@"Check Accessibility Permissions"];
+    [accessibilityButton setButtonType:NSButtonTypeMomentaryPushIn];
+    [accessibilityButton setBezelStyle:NSBezelStyleRounded];
+    [accessibilityButton setTarget:self];
+    [accessibilityButton setAction:@selector(recheckAccessibility:)];
+    
+    [accessibilityRow addSubview:accessibilityButton];
+    [appearancePanel addSubview:accessibilityRow];
+    nextYMax = accessibilityRow.frame.origin.y;
+    
 }
 
 -(IBAction) showPreferencePanel:(id)sender
@@ -775,37 +769,67 @@
 												   encoding:NSUTF8StringEncoding
 													  error:NULL];
 	[acknowledgementsView setString:contents];
-	if (![AppController isAppSandboxed]) {
-		NSURL* saveToLocation = [[NSUserDefaults standardUserDefaults] URLForKey:@"saveToLocation"];
-		if (saveToLocation) {
-			[saveToLocationButton setTitle:[saveToLocation lastPathComponent]];
-		}
-		NSURL* autoSaveToLocation = [[NSUserDefaults standardUserDefaults] URLForKey:@"autoSaveToLocation"];
-		if (autoSaveToLocation) {
-			[autoSaveToLocationButton setTitle:[autoSaveToLocation lastPathComponent]];
-		}
+	NSURL* saveToLocation = [[NSUserDefaults standardUserDefaults] URLForKey:@"saveToLocation"];
+	if (saveToLocation) {
+		[saveToLocationButton setTitle:[saveToLocation lastPathComponent]];
+	}
+	NSURL* autoSaveToLocation = [[NSUserDefaults standardUserDefaults] URLForKey:@"autoSaveToLocation"];
+	if (autoSaveToLocation) {
+		[autoSaveToLocationButton setTitle:[autoSaveToLocation lastPathComponent]];
 	}
 	[flycutOperator willShowPreferences];
 }
 
 -(IBAction)toggleLoadOnStartup:(id)sender {
 	// Since the control in Interface Builder is bound to User Defaults and sends this action, this method is called after User Defaults already reflects the newly-selected state and merely conveys that value to the relevant mechanisms rather than acting to negate the User Defaults state.
+	SMAppService *loginItem = [SMAppService mainAppService];
+	NSError *error = nil;
 	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"loadOnStartup"] ) {
-        // FIXME: Should ask Gennadii if the "#ifdef SANDBOXING" should be removed and replaced with "if ([AppController isAppSandboxed])"
-#ifdef SANDBOXING
-        SMLoginItemSetEnabled((__bridge CFStringRef)kFlycutHelperId, YES);
-#else
-    [UKLoginItemRegistry addLoginItemWithPath:[[NSBundle mainBundle] bundlePath] hideIt:NO];
-#endif
+		if (![loginItem registerAndReturnError:&error]) {
+			NSLog(@"Failed to enable login item: %@", error);
+		}
 	} else {
-        // FIXME: Should ask Gennadii if the "#ifdef SANDBOXING" should be removed and replaced with "if ([AppController isAppSandboxed])"
-#ifdef SANDBOXING
-        SMLoginItemSetEnabled((__bridge CFStringRef)kFlycutHelperId, NO);
-#else
-		[UKLoginItemRegistry removeLoginItemWithPath:[[NSBundle mainBundle] bundlePath]];
-#endif
+		if (![loginItem unregisterAndReturnError:&error]) {
+			NSLog(@"Failed to disable login item: %@", error);
+		}
 	}
 }
+
+-(IBAction)recheckAccessibility:(id)sender {
+    // Re-check accessibility state and offer to trigger system prompt
+    NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
+    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    NSDictionary* options = @{(id) (kAXTrustedCheckOptionPrompt): @NO};
+    BOOL trusted = AXIsProcessTrustedWithOptions((CFDictionaryRef) (options));
+    
+    NSLog(@"[Accessibility] Manual recheck - Bundle: %@, ID: %@, Trusted: %@", 
+          bundlePath, bundleID, trusted ? @"YES" : @"NO");
+    
+    if (trusted) {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Accessibility Access Granted";
+        alert.informativeText = [NSString stringWithFormat:@"Flycut has accessibility permissions.\n\nBundle: %@\nBundle ID: %@", bundlePath, bundleID];
+        [alert addButtonWithTitle:@"OK"];
+        [alert runModal];
+        [alert release];
+    } else {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Accessibility Access Required";
+        alert.informativeText = [NSString stringWithFormat:@"Flycut does not have accessibility permissions.\n\nBundle: %@\nBundle ID: %@\n\nYou can request the system prompt or open Settings to grant access manually.", bundlePath, bundleID];
+        [alert addButtonWithTitle:@"Request System Prompt"];
+        [alert addButtonWithTitle:@"Open Settings"];
+        [alert addButtonWithTitle:@"Cancel"];
+        NSModalResponse response = [alert runModal];
+        [alert release];
+        
+        if (response == NSAlertFirstButtonReturn) {
+            [self requestAccessibilityWithPrompt];
+        } else if (response == NSAlertSecondButtonReturn) {
+            [self openAccessibilitySettings];
+        }
+    }
+}
+
 
 - (void)restoreStashedStoreAndUpdate
 {
@@ -903,7 +927,11 @@
     BOOL accessibilityEnabled = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @NO});
 
     if (!accessibilityEnabled) {
-        NSLog(@"Accessibility permissions not granted - cannot simulate keystrokes");
+        // Consolidated failure log with all relevant context
+        NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSLog(@"[Accessibility FAILURE] Cannot simulate Cmd-V paste. Bundle: %@, ID: %@, Trusted: NO. User must grant Accessibility permission in System Settings.", bundlePath, bundleID);
+        
         dispatch_async(dispatch_get_main_queue(), ^{
             NSAlert *alert = [[NSAlert alloc] init];
             alert.messageText = @"Accessibility Access Required";

@@ -88,8 +88,6 @@
 	BOOL needMenuUpdate;
 }
 
-+ (BOOL)isAppSandboxed;
-
 // Basic functionality
 -(void) pollPB:(NSTimer *)timer;
 -(void) addClipToPasteboard:(NSString*)pbFullText;
@@ -141,6 +139,7 @@
 -(IBAction) switchMenuIcon:(id)sender;
 -(IBAction) toggleLoadOnStartup:(id)sender;
 -(IBAction) toggleMainHotKey:(id)sender;
+-(IBAction) recheckAccessibility:(id)sender;
 -(IBAction) toggleICloudSyncSettings:(id)sender;
 -(IBAction) toggleICloudSyncClippings:(id)sender;
 -(IBAction) setSavePreference:(id)sender;

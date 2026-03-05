@@ -239,10 +239,6 @@
 
 - (bool)saveFromStore:(FlycutStore*)store atIndex:(int)index withPrefix:(NSString*) prefix
 {
-#ifdef SANDBOXING
-    // This works fine when sandboxed. It just saves to ~/Library/Containers/.....
-    return NO;
-# else
     if ( [store jcListCount] > index ) {
         // Get text from clipping store.
         NSString *pbFullText = [self clippingStringWithCount:index inStore:store];
@@ -277,29 +273,15 @@
         NSString *fileNameWithPath = nil;
 
 #ifdef FLYCUT_MAC
-        if ([AppController isAppSandboxed] && ![prefix isEqualToString:@"Autosave "]) {
-            // Since the app is sandboxed and this is not an auto-save, the user might want to say where to save it rather than just put it in ~/Library/Containers/..., so show a save dialog.
-
-            // Set the default name for the file and show the panel.
-            NSSavePanel* panel = [NSSavePanel savePanel];
-            [panel setNameFieldStringValue:fileName];
-            [panel setLevel:NSModalPanelWindowLevel];
-            [panel  setAllowedFileTypes:@[@"txt"]];
-            if ([panel runModal] == NSModalResponseOK)
-            {
-                fileNameWithPath = [panel URL].path;
+        if ([prefix isEqualToString:@"Autosave "]) {
+            NSURL* autoSaveToLocation = [[NSUserDefaults standardUserDefaults] URLForKey:@"autoSaveToLocation"];
+            if (autoSaveToLocation) {
+                baseDirectoryString = autoSaveToLocation.path;
             }
         } else {
-            if ([prefix isEqualToString:@"Autosave "]) {
-                NSURL* autoSaveToLocation = [[NSUserDefaults standardUserDefaults] URLForKey:@"autoSaveToLocation"];
-                if (autoSaveToLocation) {
-                    baseDirectoryString = autoSaveToLocation.path;
-                }
-            } else {
-                NSURL* saveToLocation = [[NSUserDefaults standardUserDefaults] URLForKey:@"saveToLocation"];
-                if (saveToLocation) {
-                    baseDirectoryString = saveToLocation.path;
-                }
+            NSURL* saveToLocation = [[NSUserDefaults standardUserDefaults] URLForKey:@"saveToLocation"];
+            if (saveToLocation) {
+                baseDirectoryString = saveToLocation.path;
             }
         }
 #endif
@@ -340,7 +322,6 @@
         return YES;
     }
     return NO;
-#endif
 }
 
 - (bool)saveFromStackToFavorites
