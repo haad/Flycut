@@ -63,48 +63,24 @@ jobs:
           -configuration Release \
           -archivePath build/Flycut.xcarchive \
           archive \
-          CODE_SIGN_IDENTITY="" \
-          CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGN_IDENTITY="-"
 
     - name: Export App
       run: |
-        # Create export options
-        cat > build/ExportOptions.plist <<EOF
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>method</key>
-            <string>mac-application</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-        </dict>
-        </plist>
-        EOF
+        # Copy app directly from archive (ad-hoc signed builds don't need exportArchive)
+        mkdir -p build/Export
+        cp -R build/Flycut.xcarchive/Products/Applications/Flycut.app build/Export/
 
-        # Export the app
-        xcodebuild \
-          -exportArchive \
-          -archivePath build/Flycut.xcarchive \
-          -exportPath build/Export \
-          -exportOptionsPlist build/ExportOptions.plist
-
-    - name: Verify Export
+    - name: Verify Code Signing
       run: |
-        echo "Checking build directory structure:"
-        ls -la build/
+        echo "=== Verifying code signature ==="
+        codesign -dv --verbose=2 build/Export/Flycut.app
         echo ""
-        echo "Checking archive contents:"
-        ls -la build/Flycut.xcarchive/ || true
-        ls -la build/Flycut.xcarchive/Products/ || true
-        ls -la build/Flycut.xcarchive/Products/Applications/ || true
+        echo "=== Verifying signature validity ==="
+        codesign --verify --verbose build/Export/Flycut.app
         echo ""
-        echo "Checking export directory:"
-        ls -la build/Export/ || true
-        echo ""
-        echo "Looking for .app bundles:"
-        find build -name "*.app" -type d
+        echo "=== App bundle contents ==="
+        ls -la build/Export/
 
     - name: Create DMG
       run: |
@@ -233,10 +209,17 @@ jobs:
         2. Open the DMG
         3. Drag Flycut.app to your Applications folder
         4. Launch Flycut from Applications
+        5. Grant Accessibility permission when prompted (System Settings > Privacy & Security > Accessibility)
+
+        **Note:** If upgrading from a previous version and paste stops working, reset the accessibility permission:
+        \`\`\`
+        tccutil reset Accessibility com.generalarcade.flycut
+        \`\`\`
+        Then re-grant permission to Flycut.
 
         ## Requirements
 
-        - macOS 10.13 or later
+        - macOS 12.3 or later
         EOF
 
         cat release_notes.md
