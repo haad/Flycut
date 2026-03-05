@@ -50,7 +50,6 @@
 		77A4F3B3139BD72300F39666 /* SGKeyCombo.h in Headers */ = {isa = PBXBuildFile; fileRef = 77A4F3AB139BD72300F39666 /* SGKeyCombo.h */; };
 		77A4F3B4139BD72300F39666 /* SGKeyCombo.m in Sources */ = {isa = PBXBuildFile; fileRef = 77A4F3AC139BD72300F39666 /* SGKeyCombo.m */; };
 		77AE72BD23CAE81A00F6A44B /* ApplicationServices.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 77AE72BC23CAE81A00F6A44B /* ApplicationServices.framework */; };
-		868028522F59886B008B090D /* ACCESSIBILITY_IMPROVEMENTS.md in Resources */ = {isa = PBXBuildFile; fileRef = 868028512F59886B008B090D /* ACCESSIBILITY_IMPROVEMENTS.md */; };
 		8D0C119F1F147E250046FAA0 /* FlycutOperator.m in Sources */ = {isa = PBXBuildFile; fileRef = 8D0C119E1F147E250046FAA0 /* FlycutOperator.m */; };
 		8D11072A0486CEB800E47090 /* MainMenu.nib in Resources */ = {isa = PBXBuildFile; fileRef = 29B97318FDCFA39411CA2CEA /* MainMenu.nib */; };
 		8D11072D0486CEB800E47090 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 29B97316FDCFA39411CA2CEA /* main.m */; settings = {ATTRIBUTES = (); }; };
@@ -153,7 +152,6 @@
 		77A4F3AB139BD72300F39666 /* SGKeyCombo.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SGKeyCombo.h; sourceTree = "<group>"; };
 		77A4F3AC139BD72300F39666 /* SGKeyCombo.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SGKeyCombo.m; sourceTree = "<group>"; };
 		77AE72BC23CAE81A00F6A44B /* ApplicationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ApplicationServices.framework; path = System/Library/Frameworks/ApplicationServices.framework; sourceTree = SDKROOT; };
-		868028512F59886B008B090D /* ACCESSIBILITY_IMPROVEMENTS.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ACCESSIBILITY_IMPROVEMENTS.md; sourceTree = "<group>"; };
 		86C3A52A2EAE34DE00F5074D /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		86C3A52C2EAE34E600F5074D /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		8D0C119E1F147E250046FAA0 /* FlycutOperator.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FlycutOperator.m; sourceTree = "<group>"; };
@@ -203,7 +201,6 @@
 				7761C889139BDEAF000FB3AB /* UI */,
 				77A4F3A4139BD72300F39666 /* SGHotKeysLib */,
 				E5334CA32DBF0A1D00AAEAEE /* FlycutEngine */,
-				868028512F59886B008B090D /* ACCESSIBILITY_IMPROVEMENTS.md */,
 			);
 			name = Classes;
 			sourceTree = "<group>";
@@ -489,7 +486,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				868028522F59886B008B090D /* ACCESSIBILITY_IMPROVEMENTS.md in Resources */,
 				8D11072A0486CEB800E47090 /* MainMenu.nib in Resources */,
 				7761C8DB139BE06B000FB3AB /* com.generalarcade.flycut.16.png in Resources */,
 				7761C8DC139BE06B000FB3AB /* com.generalarcade.flycut.32.png in Resources */,
