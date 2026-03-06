@@ -32,7 +32,7 @@ jobs:
         echo "Version: $VERSION"
 
     - name: Import Code Signing Certificate
-      if: ${{ secrets.CERTIFICATES_P12 != '' }}
+      if: secrets.CERTIFICATES_P12 != ''
       env:
         CERTIFICATES_P12: ${{ secrets.CERTIFICATES_P12 }}
         CERTIFICATES_PASSWORD: ${{ secrets.CERTIFICATES_PASSWORD }}
