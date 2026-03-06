@@ -6,7 +6,6 @@ on:
       - 'v*'
   workflow_dispatch:
 
-
 jobs:
   build:
     runs-on: macos-latest
@@ -20,184 +19,111 @@ jobs:
       with:
         xcode-version: latest-stable
 
-    - name: Verify System Tools
-      run: |
-        echo "=== System Information ==="
-        sw_vers
-        echo ""
-        echo "=== Checking for hdiutil ==="
-        which hdiutil || echo "hdiutil not found in PATH"
-        hdiutil --version || echo "hdiutil command failed"
-        echo ""
-        echo "=== Checking for other DMG tools ==="
-        which create-dmg || echo "create-dmg not found"
-        echo ""
-        echo "=== Current PATH ==="
-        echo $PATH
-        echo ""
-        echo "=== Available disk utilities ==="
-        ls -la /usr/bin/*disk* || true
-        ls -la /usr/bin/hdiutil || true
-
     - name: Extract version from tag
       id: get_version
       run: |
         if [[ $GITHUB_REF == refs/tags/* ]]; then
           VERSION=${GITHUB_REF#refs/tags/}
-          VERSION=${VERSION#v}  # Remove 'v' prefix if present
+          VERSION=${VERSION#v}
         else
           VERSION=$(git describe --tags --always 2>/dev/null || echo "dev")
         fi
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Version: $VERSION"
-        echo "GITHUB_REF: $GITHUB_REF"
 
-    - name: List available schemes
-      run: xcodebuild -list -project Flycut.xcodeproj
+    - name: Import Code Signing Certificate
+      if: ${{ secrets.CERTIFICATES_P12 != '' }}
+      env:
+        CERTIFICATES_P12: ${{ secrets.CERTIFICATES_P12 }}
+        CERTIFICATES_PASSWORD: ${{ secrets.CERTIFICATES_PASSWORD }}
+      run: |
+        KEYCHAIN_PATH=$RUNNER_TEMP/build.keychain
+        KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+        security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+        echo "$CERTIFICATES_P12" | base64 --decode > certificate.p12
+        security import certificate.p12 \
+          -k "$KEYCHAIN_PATH" \
+          -P "$CERTIFICATES_PASSWORD" \
+          -T /usr/bin/codesign \
+          -T /usr/bin/productsign
+
+        security list-keychain -d user -s "$KEYCHAIN_PATH"
+        security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        rm certificate.p12
+
+        # Find the imported signing identity
+        IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | head -1 | sed -E 's/.*"(.*)"/\1/')
+        echo "SIGNING_IDENTITY=$IDENTITY" >> $GITHUB_ENV
+        echo "Using identity: $IDENTITY"
 
     - name: Build and Archive
       run: |
+        SIGN_IDENTITY="${SIGNING_IDENTITY:--}"
+        echo "Building with signing identity: $SIGN_IDENTITY"
         xcodebuild \
           -project Flycut.xcodeproj \
           -scheme Flycut \
           -configuration Release \
           -archivePath build/Flycut.xcarchive \
           archive \
-          CODE_SIGN_IDENTITY="-"
+          CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
+          CODE_SIGN_STYLE=Manual \
+          DEVELOPMENT_TEAM=""
 
     - name: Export App
       run: |
-        # Copy app directly from archive (ad-hoc signed builds don't need exportArchive)
         mkdir -p build/Export
         cp -R build/Flycut.xcarchive/Products/Applications/Flycut.app build/Export/
 
     - name: Verify Code Signing
       run: |
-        echo "=== Verifying code signature ==="
+        echo "=== Code signature ==="
         codesign -dv --verbose=2 build/Export/Flycut.app
         echo ""
-        echo "=== Verifying signature validity ==="
         codesign --verify --verbose build/Export/Flycut.app
-        echo ""
-        echo "=== App bundle contents ==="
-        ls -la build/Export/
 
     - name: Create DMG
       run: |
-        # Ensure build directory exists first
-        mkdir -p build
-
-        # Verify hdiutil is available
-        if ! command -v hdiutil &> /dev/null; then
-          echo "Warning: hdiutil command not found in PATH"
-          echo "Installing create-dmg as alternative..."
-          brew install create-dmg
-        else
-          echo "hdiutil is available at: $(which hdiutil)"
-          hdiutil help create 2>&1 | head -5 || true
-        fi
-
-        # Find the app bundle
-        APP_PATH=$(find build -name "Flycut.app" -type d | head -1)
-
-        if [ -z "$APP_PATH" ]; then
-          echo "Error: Could not find Flycut.app"
-          echo "Build directory contents:"
-          find build -type d
-          exit 1
-        fi
-
-        echo "Found app at: $APP_PATH"
-
-        # Create a staging directory for DMG contents
         mkdir -p build/dmg-staging
-
-        # Copy the app to staging
-        echo "Copying app to staging directory..."
-        cp -R "$APP_PATH" build/dmg-staging/
-
-        # Verify copy
-        if [ ! -d "build/dmg-staging/Flycut.app" ]; then
-          echo "Error: Failed to copy app to staging directory"
-          ls -la build/dmg-staging/
-          exit 1
-        fi
-
-        # Create a symbolic link to Applications folder
+        cp -R build/Export/Flycut.app build/dmg-staging/
         ln -s /Applications build/dmg-staging/Applications
 
-        # Verify staging directory contents before creating DMG
-        echo "Staging directory contents:"
-        ls -la build/dmg-staging/
+        DMG_PATH="$(pwd)/build/Flycut.dmg"
 
-        # Create the DMG
-        DMG_NAME="Flycut.dmg"
-
-        # Use absolute paths
-        WORKSPACE_DIR="$(pwd)"
-        SOURCE_DIR="${WORKSPACE_DIR}/build/dmg-staging"
-        DMG_PATH="${WORKSPACE_DIR}/build/${DMG_NAME}"
-
-        echo "Creating DMG: $DMG_NAME"
-        echo "Working directory: $WORKSPACE_DIR"
-        echo "Source folder: $SOURCE_DIR"
-        echo "Destination: $DMG_PATH"
-
-        # Verify source folder exists
-        if [ ! -d "$SOURCE_DIR" ]; then
-          echo "Error: Source folder $SOURCE_DIR does not exist"
-          exit 1
-        fi
-
-        # Create DMG with absolute paths
-        echo "Running hdiutil..."
         hdiutil create \
           -volname "Flycut" \
-          -srcfolder "$SOURCE_DIR" \
+          -srcfolder build/dmg-staging \
           -ov \
           -format UDZO \
-          "$DMG_PATH" || {
-            echo "hdiutil failed with exit code $?"
-            echo "Trying alternative approach with create-dmg..."
-            brew install create-dmg
-            create-dmg \
-              --volname "Flycut" \
-              --window-pos 200 120 \
-              --window-size 800 400 \
-              --icon-size 100 \
-              --app-drop-link 600 185 \
-              "$DMG_PATH" \
-              "$SOURCE_DIR"
-          }
+          "$DMG_PATH"
 
-        # Verify DMG was created
-        if [ -f "$DMG_PATH" ]; then
-          echo "DMG created successfully!"
-          ls -lh "$DMG_PATH"
-          echo "dmg_name=$DMG_NAME" >> $GITHUB_OUTPUT
-        else
-          echo "Error: DMG file not found at $DMG_PATH"
-          echo "Searching for DMG files..."
-          find . -name "*.dmg" -type f
-          exit 1
-        fi
-      id: create_dmg
+        ls -lh "$DMG_PATH"
+
+    - name: Clean up keychain
+      if: always()
+      run: |
+        security delete-keychain "$RUNNER_TEMP/build.keychain" 2>/dev/null || true
 
     - name: Generate Release Notes
-      id: release_notes
       run: |
-        # Get commits since last tag
         PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 
         if [ -z "$PREV_TAG" ]; then
-          # First release, get all commits
           COMMITS=$(git log --pretty=format:"- %s (%h)" --reverse)
         else
-          # Get commits since previous tag
           COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --reverse)
         fi
 
-        # Create release notes
+        if [ -n "$SIGNING_IDENTITY" ]; then
+          SIGNED_STATUS="signed ($SIGNING_IDENTITY)"
+        else
+          SIGNED_STATUS="ad-hoc signed"
+        fi
+
         cat > release_notes.md <<EOF
         ## Changes in this release
 
@@ -206,23 +132,21 @@ jobs:
         ## Installation
 
         1. Download the DMG file below
-        2. Open the DMG
-        3. Drag Flycut.app to your Applications folder
-        4. Launch Flycut from Applications
-        5. Grant Accessibility permission when prompted (System Settings > Privacy & Security > Accessibility)
+        2. Open the DMG and drag Flycut.app to Applications
+        3. Launch Flycut
+        4. Grant Accessibility permission when prompted (System Settings > Privacy & Security > Accessibility)
 
-        **Note:** If upgrading from a previous version and paste stops working, reset the accessibility permission:
+        **Upgrading?** If paste stops working after updating, reset the accessibility permission:
         \`\`\`
         tccutil reset Accessibility com.generalarcade.flycut
         \`\`\`
-        Then re-grant permission to Flycut.
+        Then re-grant permission to Flycut and restart the app.
 
-        ## Requirements
+        ## Build Info
 
-        - macOS 12.3 or later
+        - Signing: $SIGNED_STATUS
+        - Requires: macOS 13.5+
         EOF
-
-        cat release_notes.md
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1

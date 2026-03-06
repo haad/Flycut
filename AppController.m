@@ -932,7 +932,7 @@
 }
 
 - (void)windowDidResignKey:(NSNotification *)notification {
-	if ( isBezelPinned ) {
+	if ( isBezelDisplayed ) {
 		[self hideApp];
 	}
 }
