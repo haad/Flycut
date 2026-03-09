@@ -71,7 +71,7 @@
 		@"menuIcon",
 		[NSNumber numberWithFloat:.25],
 		@"bezelAlpha",
-		[NSNumber numberWithBool:YES],
+		[NSNumber numberWithBool:NO],
 		@"stickyBezel",
 		[NSNumber numberWithBool:NO],
 		@"wraparoundBezel",
@@ -931,23 +931,9 @@
 	}
 }
 
-- (void)startBezelClickMonitor {
-	if ( bezelClickMonitor )
-		return;
-	bezelClickMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown handler:^(NSEvent *event) {
-		if ( isBezelDisplayed ) {
-			NSPoint clickLocation = [NSEvent mouseLocation];
-			if ( !NSPointInRect(clickLocation, [bezel frame]) ) {
-				[self hideApp];
-			}
-		}
-	}];
-}
-
-- (void)stopBezelClickMonitor {
-	if ( bezelClickMonitor ) {
-		[NSEvent removeMonitor:bezelClickMonitor];
-		bezelClickMonitor = nil;
+- (void)windowDidResignKey:(NSNotification *)notification {
+	if ( isBezelPinned ) {
+		[self hideApp];
 	}
 }
 
@@ -1315,12 +1301,10 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 //	else
     [bezel makeKeyAndOrderFront:self];
 	isBezelDisplayed = YES;
-	[self startBezelClickMonitor];
 }
 
 - (void) hideBezel
 {
-	[self stopBezelClickMonitor];
 	[bezel orderOut:nil];
 	[bezel setCharString:@"Empty"];
 	isBezelDisplayed = NO;

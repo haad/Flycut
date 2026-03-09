@@ -35,7 +35,6 @@
 	SRKeyCodeTransformer        *srTransformer;
 	BOOL						isBezelDisplayed;
 	BOOL						isBezelPinned;
-	id							bezelClickMonitor;
 	NSString					*currentKeycodeCharacter;
     NSDateFormatter*            dateFormat;
 	
@@ -122,8 +121,7 @@
 -(void) processBezelKeyDown:(NSEvent *)theEvent;
 -(void) processBezelMouseEvents:(NSEvent *)theEvent;
 -(void) metaKeysReleased;
--(void) startBezelClickMonitor;
--(void) stopBezelClickMonitor;
+-(void) windowDidResignKey:(NSNotification *)notification;
 
 // Menu related
 -(void) updateMenu;
