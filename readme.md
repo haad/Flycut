@@ -12,10 +12,12 @@ Every time you copy a code piece, Flycut stores it in history. Later, you can pa
 
 ## Install
 
-***For macOS 10.14 and later don't forget to give Flycut access in System Preferences -> Security & Privacy -> Privacy -> Accessibility. If you had a previous version of Flycut installed, you might need to remove it from Accessibility first and add it again.***
-
-**Download:**
-Download the latest version [here](https://github.com/haad/Flycut/releases)
+1. Download the latest `.dmg` from [Releases](https://github.com/haad/Flycut/releases)
+2. Open the `.dmg` and drag Flycut to your Applications folder
+3. Launch Flycut — macOS will show a warning because the app is not from the App Store
+4. Go to **System Settings -> Privacy & Security**, scroll down and click **Open Anyway**
+5. Launch Flycut again
+6. Go to **System Settings -> Privacy & Security -> Accessibility** and enable Flycut — this is required for Flycut to paste on your behalf
 
 ## Keyboard Shortcuts
 
