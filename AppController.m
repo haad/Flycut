@@ -1098,8 +1098,15 @@
 
                 if ( contents == nil || [flycutOperator shouldSkip:contents ofType:[jcPasteboard availableTypeFromArray:[NSArray arrayWithObject:NSPasteboardTypeString]] fromAvailableTypes:[jcPasteboard types]] ) {
                    DLog(@"Contents: Empty or skipped");
-               } else if ( ! [pbCount isEqualTo:pbBlockCount] ) {
-                   [flycutOperator addClipping:contents ofType:type fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path target:self clippingAddedSelector:@selector(updateMenu)];
+               } else {
+                   // Dispatch back to main queue to safely modify the clipping store and update UI.
+                   // jcList (NSMutableArray) is not thread-safe, and concurrent access from this
+                   // background queue and the main thread (e.g. showing the bezel) causes crashes.
+                   dispatch_async(dispatch_get_main_queue(), ^{
+                       if ( ! [pbCount isEqualTo:pbBlockCount] ) {
+                           [flycutOperator addClipping:contents ofType:type fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path target:self clippingAddedSelector:@selector(updateMenu)];
+                       }
+                   });
                }
             });
         } 
