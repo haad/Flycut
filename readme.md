@@ -59,6 +59,17 @@ Download the latest version [here](https://github.com/haad/Flycut/releases)
 |----------|--------|
 | Option+Click menu icon | Toggle clipboard tracking on/off |
 
+## Why Flycut?
+
+Flycut is a free, open-source alternative to paid clipboard managers for macOS:
+
+- [Maccy](https://maccy.app) - $9.99 on the App Store
+- [Paste](https://pasteapp.io) - $29.99/year subscription
+- [PastePal](https://indiegoodies.com/pastepal) - $17.99
+- [PasteBot](https://tapbots.com/pastebot/) - $12.99
+
+Flycut provides the same core clipboard history functionality with keyboard-driven navigation, search, and favorites — completely free.
+
 ## Documentation
 
 See the full [Help File](help.md) for more details.
