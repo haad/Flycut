@@ -437,6 +437,14 @@ static const float lineHeight = 16;
     }
 }
 
+- (void)rightMouseUp:(NSEvent *)theEvent
+{
+    if ( [self delegate] )
+    {
+        [delegate performSelector:@selector(processBezelMouseEvents:) withObject:theEvent];
+    }
+}
+
 
 
 - (void)keyDown:(NSEvent *)theEvent {

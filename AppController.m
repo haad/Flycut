@@ -1219,6 +1219,11 @@
 
                 [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
                 break;
+            case ' ':
+                isBezelPinned = YES;
+                [bezel setCharString:[NSString stringWithFormat:@"%d of %d (pinned)",
+                    [flycutOperator stackPosition] + 1, [flycutOperator jcListCount]]];
+                break;
             default: // It's not a navigation/application-defined thing, so let's figure out what to do with it.
 				DLog(@"PRESSED %d", pressed);
 				DLog(@"CODE %ld", (long)[mainRecorder keyCombo].code);
@@ -1236,6 +1241,10 @@
         }
     } else if (theEvent.type == NSEventTypeLeftMouseUp && theEvent.clickCount == 2) {
         [self pasteFromStack];
+    } else if (theEvent.type == NSEventTypeRightMouseUp) {
+        isBezelPinned = YES;
+        [bezel setCharString:[NSString stringWithFormat:@"%d of %d (pinned)",
+            [flycutOperator stackPosition] + 1, [flycutOperator jcListCount]]];
     }
 }
 
@@ -1301,10 +1310,26 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 //	else
     [bezel makeKeyAndOrderFront:self];
 	isBezelDisplayed = YES;
+	if ( !bezelEventMonitor ) {
+		bezelEventMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged handler:^(NSEvent *event) {
+			if ( isBezelDisplayed
+				 && !([event modifierFlags] & NSEventModifierFlagCommand)
+				 && !([event modifierFlags] & NSEventModifierFlagControl)
+				 && !([event modifierFlags] & NSEventModifierFlagOption)
+				 && !([event modifierFlags] & NSEventModifierFlagShift) )
+			{
+				[self metaKeysReleased];
+			}
+		}];
+	}
 }
 
 - (void) hideBezel
 {
+	if ( bezelEventMonitor ) {
+		[NSEvent removeMonitor:bezelEventMonitor];
+		bezelEventMonitor = nil;
+	}
 	[bezel orderOut:nil];
 	[bezel setCharString:@"Empty"];
 	isBezelDisplayed = NO;

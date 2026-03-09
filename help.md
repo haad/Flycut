@@ -60,6 +60,10 @@ Here's a complete list of keys you can use in the Bezel.
 
 **Shift-F**: Save the clipboard history item currently displayed to the favorites store, deleting it from the main clipboard history store and closing the Bezel.
 
+**Space**: Pin the bezel open so it stays visible after releasing modifier keys. You can then browse freely and press Return to paste or Escape to cancel.
+
+**Right-Click**: Same as Space — pins the bezel open.
+
 **Search Window**
 
 Press the Search Hotkey (Shift-Command-B, by default) to open the search window. Type to filter your clipboard history. Use the arrow keys to navigate results and press Return to paste the selected item.

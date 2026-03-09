@@ -54,6 +54,8 @@ Every time you copy a code piece, Flycut stores it in history. Later, you can pa
 | Shift+S | Save to Desktop and delete |
 | F | Toggle favorites store |
 | Shift+F | Move item to favorites |
+| Space | Pin bezel open (sticky mode) |
+| Right-Click | Pin bezel open (sticky mode) |
 
 ### Menu Bar
 
