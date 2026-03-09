@@ -1,42 +1,72 @@
 # Flycut
-<a href="https://github.com/TermiT/Flycut/releases"><img src="http://a3.mzstatic.com/us/r1000/047/Purple/fb/53/f2/mzi.mcaxwyjm.175x175-75.png" /></a>
+<a href="https://github.com/haad/Flycut/releases"><img src="http://a3.mzstatic.com/us/r1000/047/Purple/fb/53/f2/mzi.mcaxwyjm.175x175-75.png" /></a>
 <a href="https://macdownload.informer.com/flycut/"><img src="award-2021.png" /></a>
 <a href="https://macdownload.informer.com/flycut/"><img src="award-2022.png" /></a>
 <br />
-**Description:**
-Flycut is a clean and simple clipboard manager for developers. It's based on an open source app called Jumpcut.
 
-On the Mac, every time you copy a code piece, Flycut stores it in history. Later, you can paste it using Shift-Command-V even if you have something different in your current clipboard. You can change the hotkey and other settings in preferences.
+Flycut is a clean and simple clipboard manager for developers. Based on the open source app [Jumpcut](https://github.com/snark/jumpcut).
 
-On iOS, every time you open Flycut, it checks for a new clipping and stores it in history. Later, you can tap any item in the history list to place it on the clipboard. You can also swipe web links in the history to open them without placing them on the clipboard.
+This is an actively maintained fork, updated to work on the latest macOS versions.
 
-Developed by developers for developers.
-
-**Donation:**
-If you like Flycut, you can donate [here](https://paypal.me/flycut)
+Every time you copy a code piece, Flycut stores it in history. Later, you can paste it using Shift-Command-V even if you have something different in your current clipboard. You can change the hotkey and other settings in preferences.
 
 ## Install
 
-***For OSX 10.13 and older use DRM-Free version***
+***For macOS 10.14 and later don't forget to give Flycut access in System Preferences -> Security & Privacy -> Privacy -> Accessibility. If you had a previous version of Flycut installed, you might need to remove it from Accessibility first and add it again.***
 
-***For OSX 10.14 and later use either App Store or DRM-Free versions. But don't forget to give Flycut access in System Preferences -> Security & Privacy -> Privacy -> Accessibility. If you had previous version of Flycut installed, you might need to remove it from Accessibility first and add it again.***
+**Download:**
+Download the latest version [here](https://github.com/haad/Flycut/releases)
 
-**Mac App Store:**
-Download from the App Store [here](http://itunes.apple.com/us/app/flycut-clipboard-manager/id442160987?mt=12)
+## Keyboard Shortcuts
 
-**DRM-Free:**
-Download latest DRM-Free version [here](https://github.com/TermiT/Flycut/releases)
+### Global
 
-**iOS App Store:**
-Download from the App Store [here](https://itunes.apple.com/us/app/flycut/id1273639655?mt=8)
+| Shortcut | Action |
+|----------|--------|
+| Shift+Command+V | Open clipboard history (bezel) |
+| Shift+Command+B | Open search window |
 
-## Use
-**Documentation:**
-[Mac Help File](help.md) / [iOS Help File](help.iOS.md)
+### Bezel Navigation
+
+| Shortcut | Action |
+|----------|--------|
+| Up/Left Arrow or K | Move to newer item |
+| Down/Right Arrow or J | Move to older item |
+| Home | Jump to most recent item |
+| End | Jump to oldest item |
+| Page Up / Page Down | Move 10 items forward/back |
+| 1-9, 0 | Jump to position (0 = 10th) |
+| Scroll Wheel | Navigate history |
+
+### Bezel Actions
+
+| Shortcut | Action |
+|----------|--------|
+| Return | Paste selected item |
+| Fn+Return | Move item to top of history |
+| Backspace/Delete | Delete selected item |
+| Escape | Close without pasting |
+| Double-Click | Paste item |
+| Command+, | Open preferences |
+| S | Save item to Desktop |
+| Shift+S | Save to Desktop and delete |
+| F | Toggle favorites store |
+| Shift+F | Move item to favorites |
+
+### Menu Bar
+
+| Shortcut | Action |
+|----------|--------|
+| Option+Click menu icon | Toggle clipboard tracking on/off |
+
+## Documentation
+
+See the full [Help File](help.md) for more details.
 
 ## Develop
+
 **Contributors:**
-Check the list of contributors [here](https://github.com/TermiT/Flycut/graphs/contributors)
+Check the list of contributors [here](https://github.com/haad/Flycut/graphs/contributors)
 
 **License:**
 MIT
