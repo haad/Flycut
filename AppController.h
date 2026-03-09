@@ -34,7 +34,8 @@
 	int							mainHotkeyModifiers;
 	SRKeyCodeTransformer        *srTransformer;
 	BOOL						isBezelDisplayed;
-	BOOL						isBezelPinned; // Currently not used
+	BOOL						isBezelPinned;
+	id							bezelClickMonitor;
 	NSString					*currentKeycodeCharacter;
     NSDateFormatter*            dateFormat;
 	
@@ -121,7 +122,8 @@
 -(void) processBezelKeyDown:(NSEvent *)theEvent;
 -(void) processBezelMouseEvents:(NSEvent *)theEvent;
 -(void) metaKeysReleased;
--(void) windowDidResignKey:(NSNotification *)notification;
+-(void) startBezelClickMonitor;
+-(void) stopBezelClickMonitor;
 
 // Menu related
 -(void) updateMenu;
