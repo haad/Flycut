@@ -932,9 +932,7 @@
 }
 
 - (void)windowDidResignKey:(NSNotification *)notification {
-	if ( isBezelPinned ) {
-		[self hideApp];
-	}
+	[self hideApp];
 }
 
 -(void)fakeKey:(NSNumber*) keyCode withCommandFlag:(BOOL) setFlag
@@ -1310,26 +1308,10 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 //	else
     [bezel makeKeyAndOrderFront:self];
 	isBezelDisplayed = YES;
-	if ( !bezelEventMonitor ) {
-		bezelEventMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskFlagsChanged handler:^(NSEvent *event) {
-			if ( isBezelDisplayed
-				 && !([event modifierFlags] & NSEventModifierFlagCommand)
-				 && !([event modifierFlags] & NSEventModifierFlagControl)
-				 && !([event modifierFlags] & NSEventModifierFlagOption)
-				 && !([event modifierFlags] & NSEventModifierFlagShift) )
-			{
-				[self metaKeysReleased];
-			}
-		}];
-	}
 }
 
 - (void) hideBezel
 {
-	if ( bezelEventMonitor ) {
-		[NSEvent removeMonitor:bezelEventMonitor];
-		bezelEventMonitor = nil;
-	}
 	[bezel orderOut:nil];
 	[bezel setCharString:@"Empty"];
 	isBezelDisplayed = NO;
