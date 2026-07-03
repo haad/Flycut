@@ -1525,11 +1525,11 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 			if ( [alert runModal] == NSAlertFirstButtonReturn )
 			{
-				[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:NO]];
+				[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:NO] forKey:@"syncClippingsViaICloud"];
 			}
 			else
 			{
-				[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithInt:2]];
+				[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithInt:2] forKey:@"savePreference"];
 			}
 			[alert release];
 		}
