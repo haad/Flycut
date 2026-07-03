@@ -920,9 +920,10 @@
         if ([clipping isImageClipping]) {
             [self addImageClipToPasteboard:clipping];
         } else {
+            NSDictionary *richData = [flycutOperator getRichDataFromStackPosition];
             NSString *content = [flycutOperator getPasteFromStackPosition];
             if (content) {
-                [self addClipToPasteboard:content];
+                [self addClipToPasteboard:content withRichData:richData];
             }
         }
         [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
@@ -959,10 +960,11 @@
         }
         [self updateMenu];
     } else {
+        NSDictionary *richData = [flycutOperator getRichDataFromIndex: position];
         NSString *content = [flycutOperator getPasteFromIndex: position];
         if ( nil != content )
         {
-            [self addClipToPasteboard:content];
+            [self addClipToPasteboard:content withRichData:richData];
             [self updateMenu];
         }
     }
@@ -1151,9 +1153,30 @@
                 if ( contents == nil || [flycutOperator shouldSkip:contents ofType:[jcPasteboard availableTypeFromArray:@[NSPasteboardTypeString]] fromAvailableTypes:[jcPasteboard types]] ) {
                    DLog(@"Contents: Empty or skipped");
                } else {
+                   // Capture rich representations of the text so pasting an older clipping
+                   // can keep its formatting.  Only done after the skip checks above so
+                   // concealed/transient clippings never have their rich data read.
+                   NSMutableDictionary *richData = nil;
+                   if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"preserveTextFormatting"] ) {
+                       for ( NSString *richType in [NSArray arrayWithObjects:NSPasteboardTypeRTF, NSPasteboardTypeHTML, nil] ) {
+                           if ( nil != [jcPasteboard availableTypeFromArray:[NSArray arrayWithObject:richType]] ) {
+                               NSData *data = [jcPasteboard dataForType:richType];
+                               // Cap the size so one giant rich clipping can't bloat the saved store.
+                               if ( nil != data && [data length] > 0 && [data length] <= 1048576 ) {
+                                   if ( nil == richData )
+                                       richData = [NSMutableDictionary dictionaryWithCapacity:2];
+                                   [richData setObject:data forKey:richType];
+                               }
+                           }
+                       }
+                   }
+
+                   // Dispatch back to main queue to safely modify the clipping store and update UI.
+                   // jcList (NSMutableArray) is not thread-safe, and concurrent access from this
+                   // background queue and the main thread (e.g. showing the bezel) causes crashes.
                    dispatch_async(dispatch_get_main_queue(), ^{
                        if ( ! [pbCount isEqualTo:pbBlockCount] ) {
-                           [flycutOperator addClipping:contents ofType:textType fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path target:self clippingAddedSelector:@selector(updateMenu)];
+                           [flycutOperator addClipping:contents ofType:textType withRichData:richData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path target:self clippingAddedSelector:@selector(updateMenu)];
                        }
                    });
                }
@@ -1665,8 +1688,20 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(void)addClipToPasteboard:(NSString*)pbFullText
 {
-    [jcPasteboard declareTypes:@[NSPasteboardTypeString] owner:nil];
+    [self addClipToPasteboard:pbFullText withRichData:nil];
+}
+
+-(void)addClipToPasteboard:(NSString*)pbFullText withRichData:(NSDictionary *)richData
+{
+    NSMutableArray *pbTypes = [NSMutableArray arrayWithObject:NSPasteboardTypeString];
+    if ( nil != richData )
+        [pbTypes addObjectsFromArray:[richData allKeys]];
+
+    [jcPasteboard declareTypes:pbTypes owner:nil];
+
     [jcPasteboard setString:pbFullText forType:NSPasteboardTypeString];
+    for ( NSString *richType in richData )
+        [jcPasteboard setData:[richData objectForKey:richType] forType:richType];
     [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
 }
 
@@ -2138,9 +2173,10 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 				[flycutOperator getPasteFromIndex:position];
 			}
 		} else {
+			NSDictionary *richData = [flycutOperator getRichDataFromIndex:position];
 			NSString *content = [flycutOperator getPasteFromIndex:position];
 			if (content) {
-				[self addClipToPasteboard:content];
+				[self addClipToPasteboard:content withRichData:richData];
 			}
 		}
 		[self updateMenu];

@@ -156,6 +156,19 @@
         clipHasName = newHasName;
 }
 
+-(void) setRichData:(NSDictionary *)newRichData
+{
+    id old = clipRichData;
+    [newRichData retain];
+    clipRichData = newRichData;
+    [old release];
+}
+
+-(NSDictionary *) richData
+{
+    return clipRichData;
+}
+
 -(void) resetDisplayString
 {
     [clipDisplayString release];
@@ -301,6 +314,7 @@
     [appLocalizedName release];
     [appBundleURL release];
     [imageHash release];
+    [clipRichData release];
     clipDisplayLength = 0;
     [clipDisplayString release];
     clipHasName = 0;

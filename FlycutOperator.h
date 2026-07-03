@@ -52,9 +52,12 @@
 -(bool)addClipping:(NSString*)contents ofType:(NSString*)type fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelectorclippingAddedSelector;
 -(bool)addImageClipping:(NSData *)imageData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL imageType:(NSString *)imageType target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector;
 -(FlycutClipping *)clippingAtIndex:(int)index;
+-(bool)addClipping:(NSString*)contents ofType:(NSString*)type withRichData:(NSDictionary *)richData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector;
 -(int)stackPosition;
 -(NSString*)getPasteFromStackPosition;
 -(NSString*)getPasteFromIndex:(int) position;
+-(NSDictionary*)getRichDataFromStackPosition;
+-(NSDictionary*)getRichDataFromIndex:(int) position;
 -(bool) saveFromStack;
 -(bool)clearItemAtStackPosition;
 -(void)clearList;

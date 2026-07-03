@@ -68,6 +68,14 @@ Here's a complete list of keys you can use in the Bezel.
 
 Press the Search Hotkey (Shift-Command-B, by default) to open the search window. Type to filter your clipboard history. Use the arrow keys to navigate results and press Return to paste the selected item.
 
+**Text Formatting**
+
+Flycut preserves the formatting (RTF and HTML) of copied text, so pasting an older clipping into a rich text editor keeps its bold, fonts, links, and colors. Plain-text-only targets are unaffected — they always receive the plain text. Rich data larger than 1 MB per clipping is not kept.
+
+To disable this and store plain text only, run:
+
+    defaults write com.generalarcade.flycut preserveTextFormatting -bool NO
+
 **Menu Features**
 
 The Flycut menu allows you to select from the most recent items in the main clipboard history store, clear all of them, merge them all into one entry, or access the preferences panel. You can also Option-Click the Flycut menu icon to disable or reenable clipboard tracking, in case you are copying sensitive information such as passwords.
