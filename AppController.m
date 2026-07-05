@@ -943,29 +943,35 @@
 	}
 }
 
-- (void)pasteIndexAndUpdate:(int) position {
+// Returns true if a clipping was found and placed on the pasteboard.
+- (bool)pasteIndexAndUpdate:(int) position {
     NSString* search = [searchBox stringValue];
     if ( nil != search && 0 != search.length )
     {
         NSArray *mapping = [flycutOperator previousIndexes:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:search];
+        if ( position < 0 || position >= (int)[mapping count] )
+            return false; // The list changed since the menu was built.
         position = [mapping[position] intValue];
     }
 
     FlycutClipping *clipping = [flycutOperator clippingAtIndex:position];
     if (clipping && [clipping isImageClipping]) {
-        [self addImageClipToPasteboard:clipping];
+        if ( ! [self addImageClipToPasteboard:clipping] )
+            return false;
         if ([[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"]) {
             [flycutOperator getPasteFromIndex:position];
         }
         [self updateMenu];
-    } else {
-        NSString *content = [flycutOperator getPasteFromIndex: position];
-        if ( nil != content )
-        {
-            [self addClipToPasteboard:content];
-            [self updateMenu];
-        }
+        return true;
     }
+
+    NSString *content = [flycutOperator getPasteFromIndex: position];
+    if ( nil == content )
+        return false;
+
+    [self addClipToPasteboard:content];
+    [self updateMenu];
+    return true;
 }
 
 - (void)metaKeysReleased
@@ -1647,8 +1653,22 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(IBAction)processMenuClippingSelection:(id)sender
 {
-	int index=[[sender menu] indexOfItem:sender];
-	[self pasteIndexAndUpdate:index];
+	// pollPB: runs in NSRunLoopCommonModes, so a clipboard change noticed while
+	// the menu is open triggers updateMenu, which replaces every clipping item.
+	// If that rebuild lands between the click and this action, the clicked item
+	// is no longer in the menu and [sender menu] is nil, so the previous
+	// [[sender menu] indexOfItem:sender] messaged nil and yielded index 0 --
+	// pasting the most recent clipping instead of the one the user clicked.
+	// Bail out instead of pasting the wrong clipping.
+	NSMenu *senderMenu = [sender menu];
+	if ( nil == senderMenu )
+		return;
+	NSInteger index = [senderMenu indexOfItem:sender];
+	if ( index < 0 )
+		return;
+
+	if ( ! [self pasteIndexAndUpdate:(int)index] )
+		return; // Nothing was placed on the pasteboard, so don't fake a Cmd-V.
 
 	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"menuSelectionPastes"] ) {
 		[self performSelector:@selector(hideApp) withObject:nil];
@@ -1670,7 +1690,8 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
 }
 
--(void)addImageClipToPasteboard:(FlycutClipping *)clipping
+// Returns YES when the image (or the GIF's file reference) was placed on the pasteboard.
+-(BOOL)addImageClipToPasteboard:(FlycutClipping *)clipping
 {
     NSString *type = [clipping type];
     if (!type || [type length] == 0)
@@ -1684,18 +1705,19 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
         NSString *path = [[FlycutImageStore sharedStore] imageFilePathForHash:[clipping imageHash]];
         if (path) {
             [jcPasteboard clearContents];
-            [jcPasteboard writeObjects:@[[NSURL fileURLWithPath:path]]];
+            BOOL written = [jcPasteboard writeObjects:@[[NSURL fileURLWithPath:path]]];
             [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
-            return;
+            return written;
         }
     }
 
     NSData *imageData = [[FlycutImageStore sharedStore] imageDataForHash:[clipping imageHash]];
-    if (imageData) {
-        [jcPasteboard declareTypes:@[type] owner:nil];
-        [jcPasteboard setData:imageData forType:type];
-        [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
-    }
+    if (!imageData)
+        return NO;
+    [jcPasteboard declareTypes:@[type] owner:nil];
+    BOOL written = [jcPasteboard setData:imageData forType:type];
+    [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
+    return written;
 }
 
 -(NSURL *)animatedGifURLFromPasteboard
@@ -2116,9 +2138,22 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 - (IBAction)searchWindowItemSelected:(id)sender
 {
-	NSInteger selectedRow = [searchWindowTableView selectedRow];
-	if (selectedRow < 0) {
-		selectedRow = 0;
+	NSInteger selectedRow;
+	if (sender == searchWindowTableView) {
+		// Invoked by double-click: use the row that was actually clicked.  The
+		// selection can change between the click and this action (for example
+		// updateSearchResults re-selects row 0 when the search field action
+		// fires), which pasted the newest entry instead of the clicked one.
+		selectedRow = [searchWindowTableView clickedRow];
+		if (selectedRow < 0) {
+			return; // Double-click below the last row.
+		}
+	} else {
+		// Invoked by Enter in the search field.
+		selectedRow = [searchWindowTableView selectedRow];
+		if (selectedRow < 0) {
+			selectedRow = 0; // Default to first item if none selected
+		}
 	}
 
 	if (selectedRow < [searchResults count]) {
@@ -2128,6 +2163,9 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 		if (searchText && [searchText length] > 0) {
 			mapping = [flycutOperator previousIndexes:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:searchText];
+			if (selectedRow >= (NSInteger)[mapping count]) {
+				return; // The store changed since the results were built.
+			}
 			position = [mapping[selectedRow] intValue];
 		}
 
