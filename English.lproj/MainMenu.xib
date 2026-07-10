@@ -363,15 +363,15 @@
                                                     </stepper>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="IZZ-Ep-7nD" userLabel="Passwords:">
                                                         <rect key="frame" x="14" y="288" width="479" height="16"/>
-                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Passwords:" id="cLX-o3-ZMz">
+                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Passwords &amp; privacy:" id="cLX-o3-ZMz">
                                                             <font key="font" metaFont="systemSemibold" size="13"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                                         </textFieldCell>
                                                     </textField>
-                                                    <button translatesAutoresizingMaskIntoConstraints="NO" id="897">
+                                                    <button toolTip="Keep sensitive clipboard content out of Flycut's history, using the options below. Turn off to save every clipboard." translatesAutoresizingMaskIntoConstraints="NO" id="897">
                                                         <rect key="frame" x="14" y="263" width="477" height="18"/>
-                                                        <buttonCell key="cell" type="check" title="Don't copy from password fields" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="898">
+                                                        <buttonCell key="cell" type="check" title="Don't save passwords" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="898">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
                                                         </buttonCell>
@@ -379,9 +379,9 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPasswordFields" id="902"/>
                                                         </connections>
                                                     </button>
-                                                    <button translatesAutoresizingMaskIntoConstraints="NO" id="pDS-jE-9jb">
+                                                    <button toolTip="Skip clipboard content whose data type marks it as a password (password managers, password fields). The field lists those data-type identifiers." translatesAutoresizingMaskIntoConstraints="NO" id="pDS-jE-9jb">
                                                         <rect key="frame" x="34" y="243" width="136" height="18"/>
-                                                        <buttonCell key="cell" type="check" title="Pasteboard types:" bezelStyle="regularSquare" imagePosition="left" inset="2" id="tzh-NM-RSb">
+                                                        <buttonCell key="cell" type="check" title="by data type:" bezelStyle="regularSquare" imagePosition="left" inset="2" id="tzh-NM-RSb">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
                                                         </buttonCell>
@@ -389,7 +389,7 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPboardTypes" id="kfD-fG-t1V"/>
                                                         </connections>
                                                     </button>
-                                                    <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="x34-dK-wxl">
+                                                    <textField toolTip="Comma-separated clipboard data-type identifiers treated as passwords, e.g. PasswordPboardType, com.agilebits.onepassword." verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="x34-dK-wxl">
                                                         <rect key="frame" x="178" y="242" width="313" height="21"/>
                                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" title="PasswordPboardType" drawsBackground="YES" id="kTZ-dC-s1q">
                                                             <font key="font" metaFont="system"/>
@@ -400,9 +400,19 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPboardTypesList" id="Wbn-u9-3vY"/>
                                                         </connections>
                                                     </textField>
-                                                    <button translatesAutoresizingMaskIntoConstraints="NO" id="Bxp-pI-XMk">
+                                                    <button toolTip="Private/incognito browser windows and some tools mark everything they copy as concealed or temporary (org.nspasteboard.ConcealedType / TransientType / AutoGeneratedType). Off by default so those clippings are still saved; turn on to skip them too." verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Cnc-b0-001">
+                                                        <rect key="frame" x="34" y="223" width="360" height="18"/>
+                                                        <buttonCell key="cell" type="check" title="Also skip private-browsing &amp; temporary clipboards" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="Cnc-c0-002">
+                                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                                            <font key="font" metaFont="system"/>
+                                                        </buttonCell>
+                                                        <connections>
+                                                            <binding destination="808" name="value" keyPath="values.skipConcealedTypes" id="Cnc-n0-003"/>
+                                                        </connections>
+                                                    </button>
+                                                    <button toolTip="Also skip strings whose length is listed and that mix upper- and lower-case letters, digits and symbols — typical of generated passwords." translatesAutoresizingMaskIntoConstraints="NO" id="Bxp-pI-XMk">
                                                         <rect key="frame" x="34" y="223" width="345" height="18"/>
-                                                        <buttonCell key="cell" type="check" title="Detect with Upper, Lower, Digit, and Symbol lengths:" bezelStyle="regularSquare" imagePosition="left" inset="2" id="aAK-L0-EHa">
+                                                        <buttonCell key="cell" type="check" title="by length &amp; complexity:" bezelStyle="regularSquare" imagePosition="left" inset="2" id="aAK-L0-EHa">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
                                                         </buttonCell>
@@ -410,7 +420,7 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPasswordLengths" id="PyJ-gO-ieM"/>
                                                         </connections>
                                                     </button>
-                                                    <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="RYj-wx-tTx">
+                                                    <textField toolTip="Comma-separated lengths to treat as likely passwords, e.g. 12, 20, 32." verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="RYj-wx-tTx">
                                                         <rect key="frame" x="387" y="222" width="104" height="21"/>
                                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" title="12, 20, 32" drawsBackground="YES" id="aqQ-SR-BmT">
                                                             <font key="font" metaFont="system"/>
@@ -421,9 +431,9 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPasswordLengthsList" id="NJg-wN-gsn"/>
                                                         </connections>
                                                     </textField>
-                                                    <button toolTip="For identifying types to include in Pasteboard Types above." translatesAutoresizingMaskIntoConstraints="NO" id="mka-NZ-Esg">
+                                                    <button toolTip="Troubleshooting aid: record the clipboard's data-type identifiers instead of the actual content, to discover which types an app uses (to add above)." translatesAutoresizingMaskIntoConstraints="NO" id="mka-NZ-Esg">
                                                         <rect key="frame" x="34" y="203" width="274" height="18"/>
-                                                        <buttonCell key="cell" type="check" title="Include pasteboard types in clippings list" bezelStyle="regularSquare" imagePosition="left" inset="2" id="9Vi-RY-G0b">
+                                                        <buttonCell key="cell" type="check" title="Diagnostics: save data types instead of content" bezelStyle="regularSquare" imagePosition="left" inset="2" id="9Vi-RY-G0b">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
                                                         </buttonCell>
@@ -553,7 +563,9 @@
                                                     <constraint firstItem="pDS-jE-9jb" firstAttribute="leading" secondItem="897" secondAttribute="leading" constant="20" id="GYo-j6-3vw"/>
                                                     <constraint firstItem="398" firstAttribute="trailing" secondItem="390" secondAttribute="trailing" id="Ggu-1n-f2v"/>
                                                     <constraint firstItem="914" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="HgF-tD-X6T"/>
-                                                    <constraint firstItem="Bxp-pI-XMk" firstAttribute="top" secondItem="pDS-jE-9jb" secondAttribute="bottom" constant="4" id="IB8-Wb-AWb"/>
+                                                    <constraint firstItem="Cnc-b0-001" firstAttribute="top" secondItem="pDS-jE-9jb" secondAttribute="bottom" constant="4" id="Cnc-t0-004"/>
+                                                    <constraint firstItem="Cnc-b0-001" firstAttribute="leading" secondItem="897" secondAttribute="leading" constant="20" id="Cnc-l0-005"/>
+                                                    <constraint firstItem="Bxp-pI-XMk" firstAttribute="top" secondItem="Cnc-b0-001" secondAttribute="bottom" constant="4" id="IB8-Wb-AWb"/>
                                                     <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="cGj-g9-2Dm" secondAttribute="trailing" constant="16" id="IO6-sz-Wmo"/>
                                                     <constraint firstItem="mka-NZ-Esg" firstAttribute="top" secondItem="Bxp-pI-XMk" secondAttribute="bottom" constant="4" id="LMp-eg-a6v"/>
                                                     <constraint firstItem="398" firstAttribute="top" secondItem="694" secondAttribute="bottom" constant="4" id="LYa-Bc-sCv"/>
