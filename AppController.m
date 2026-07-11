@@ -915,6 +915,14 @@
 
 - (void)pasteFromStack
 {
+	// Releasing the modifier keys and pressing Return within a fraction of a second
+	// both trigger a paste, so the same bezel selection would be pasted twice.
+	NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+	if ( now - lastPasteFromStackTime < 0.6 ) {
+		NSLog(@"pasteFromStack ignored - duplicate trigger within 0.6s");
+		return;
+	}
+	lastPasteFromStackTime = now;
     FlycutClipping *clipping = [flycutOperator clippingAtStackPosition];
     if (clipping) {
         if ([clipping isImageClipping]) {
