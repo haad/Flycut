@@ -356,7 +356,7 @@
 										   selector:@selector(pollPB:)
 										   userInfo:nil
 											repeats:YES];
-	// Assign it to NSRunLoopCommonModes so that it will still poll while the menu is open.  Using a simple NSTimer scheduledTimerWithTimeInterval: would result in polling that stops while the menu is active.  In the past this was okay but with Universal Clipboard a new clipping an arrive while the user has the menu open.
+	// Assign it to NSRunLoopCommonModes so the timer keeps ticking while the menu is open.  Using a simple NSTimer scheduledTimerWithTimeInterval: would suspend polling during menu tracking.  Note that -pollPB: intentionally skips capture while the menu or search window is open (a new clipping inserted mid-selection would shift the indices and cause the wrong entry to be pasted); the tick still runs so capture resumes promptly, and menuDidClose: performs a catch-up poll.
 	[[NSRunLoop currentRunLoop] addTimer:pollPBTimer forMode:NSRunLoopCommonModes];
 
     // Finish up
@@ -388,6 +388,10 @@
 
 -(void)menuWillOpen:(NSMenu *)menu
 {
+    // Freeze clipping capture while the menu is open so the item indices the user sees stay
+    // stable until they make a selection (see -pollPB:).
+    isMenuOpen = YES;
+
     NSEvent *event = [NSApp currentEvent];
     if([event modifierFlags] & NSEventModifierFlagOption) {
         [menu cancelTracking];
@@ -410,7 +414,10 @@
 
 -(void)menuDidClose:(NSMenu *)menu
 {
-    // Menu closed - no special handling needed now that we removed search box activation
+    // Resume clipping capture and immediately pick up anything that landed on the pasteboard
+    // while the menu was open (a selection's own paste is ignored via pbBlockCount in -pollPB:).
+    isMenuOpen = NO;
+    [self pollPB:nil];
 }
 
 -(bool)toggleMenuIconDisabled
@@ -1131,6 +1138,17 @@
 
 -(void)pollPB:(NSTimer *)timer
 {
+    // Do not capture new clippings while the user is picking one from the menu or the
+    // search window. Because this timer runs in NSRunLoopCommonModes it fires during menu
+    // tracking, and inserting a new clipping at the top of the store would shift every
+    // clipping's index by one. The pending selection is then resolved against the shifted
+    // store (see -pasteIndexAndUpdate: / -searchWindowItemSelected:), so the user pastes the
+    // wrong entry - typically the freshly-arrived one - instead of the one they clicked.
+    // pbCount is left untouched so the change is still detected and captured once the menu
+    // or search window closes (menuDidClose: fires a catch-up poll).
+    if ( isMenuOpen || isSearchWindowDisplayed )
+        return;
+
     NSString *textType = [jcPasteboard availableTypeFromArray:@[NSPasteboardTypeString]];
     NSString *imageType = [jcPasteboard availableTypeFromArray:@[@"com.compuserve.gif", NSPasteboardTypeTIFF, NSPasteboardTypePNG]];
 

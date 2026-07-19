@@ -36,6 +36,7 @@
 	SRKeyCodeTransformer        *srTransformer;
 	BOOL						isBezelDisplayed;
 	BOOL						isBezelPinned;
+	BOOL						isMenuOpen;
 	NSString					*currentKeycodeCharacter;
     NSDateFormatter*            dateFormat;
 	
