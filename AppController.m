@@ -63,6 +63,12 @@
 -(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL;
 @end
 
+// Clipping items that -updateMenuContaining: has removed from the status menu. jcMenu is
+// their only owner (see the -release right after -insertItem: below), so they would be
+// deallocated at once - while AppKit may still be about to deliver a click for one of them.
+// Keeping the previous generation alive makes such a sender safe to inspect.
+static NSArray *sRetiredMenuClippingItems = nil;
+
 @implementation AppController
 
 
@@ -943,23 +949,23 @@
 - (void)moveItemAtStackPositionToTopOfStack
 {
 	if ( [flycutOperator stackPositionIsInBounds] ) {
-		[self pasteIndexAndUpdate: [flycutOperator stackPosition]];
+		// stackPosition already IS a store position. It must never be run through the menu's
+		// search-box mapping, which is what the old -pasteIndexAndUpdate: did.
+		[self pasteStorePositionAndUpdate: [flycutOperator stackPosition]];
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
 	} else {
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
 	}
 }
 
-// Returns true if a clipping was found and placed on the pasteboard.
-- (bool)pasteIndexAndUpdate:(int) position {
-    NSString* search = [searchBox stringValue];
-    if ( nil != search && 0 != search.length )
-    {
-        NSArray *mapping = [flycutOperator previousIndexes:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:search];
-        if ( position < 0 || position >= (int)[mapping count] )
-            return false; // The list changed since the menu was built.
-        position = [mapping[position] intValue];
-    }
+// Pastes the clipping at the given STORE position. Unlike the old -pasteIndexAndUpdate:
+// this never reads the menu's search box: every caller resolves its own mapping while it
+// still knows which list the position came from. Returns true when something actually
+// reached the pasteboard, so the caller can skip faking cmd-V - otherwise the previous
+// pasteboard contents (typically the last thing pasted) would be inserted again.
+- (bool)pasteStorePositionAndUpdate:(int) position {
+    if ( position < 0 || position >= [flycutOperator jcListCount] )
+        return false;
 
     FlycutClipping *clipping = [flycutOperator clippingAtIndex:position];
     if (clipping && [clipping isImageClipping]) {
@@ -1140,10 +1146,10 @@
 {
     // Do not capture new clippings while the user is picking one from the menu or the
     // search window. Because this timer runs in NSRunLoopCommonModes it fires during menu
-    // tracking, and inserting a new clipping at the top of the store would shift every
-    // clipping's index by one. The pending selection is then resolved against the shifted
-    // store (see -pasteIndexAndUpdate: / -searchWindowItemSelected:), so the user pastes the
-    // wrong entry - typically the freshly-arrived one - instead of the one they clicked.
+    // tracking, and inserting a new clipping at the top of the store would make every row
+    // jump down by one while the user is aiming at it. Correctness no longer depends on
+    // this freeze - a selection is resolved by clipping identity, see
+    // -storePositionForMenuItem: - but the list should not move under the pointer.
     // pbCount is left untouched so the change is still detected and captured once the menu
     // or search window closes (menuDidClose: fires a catch-up poll).
     if ( isMenuOpen || isSearchWindowDisplayed )
@@ -1635,7 +1641,16 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		[jcMenu setMenuChangedMessagesEnabled:NO];
 
-		NSArray *returnedDisplayStrings = [flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:search];
+		int menuDisplayNum = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"];
+		BOOL filtering = ( nil != search && 0 != [search length] );
+
+		NSArray *returnedDisplayStrings = [flycutOperator previousDisplayStrings:menuDisplayNum containing:search];
+
+		// previousDisplayStrings: and previousIndexes: are both newest-first and element-wise
+		// aligned, so the store position of every row is known right here. Recording it now is
+		// what allows the selection to be resolved later without asking the menu where the
+		// clicked item sits and without re-reading the search box.
+		NSArray *returnedIndexes = filtering ? [flycutOperator previousIndexes:menuDisplayNum containing:search] : nil;
 
 		NSArray *menuItems = [[[jcMenu itemArray] reverseObjectEnumerator] allObjects];
 
@@ -1646,18 +1661,47 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		int oldItems = [menuItems count]-jcMenuBaseItemsCount;
 		int newItems = [clipStrings count];
         DLog(@"list=%@, oldItems=%d, newItems=%d", returnedDisplayStrings, oldItems, newItems);
-        
+
+        // Hold on to the outgoing items for one generation instead of letting jcMenu drop
+        // their last reference, so that a click AppKit delivers after this rebuild still
+        // has a valid sender.
+        NSMutableArray *retiringItems = [NSMutableArray array];
         for ( int i = 0; i < oldItems; i++ )
+        {
+            [retiringItems addObject:[jcMenu itemAtIndex:0]];
             [jcMenu removeItemAtIndex:0];
-        
+        }
+        [sRetiredMenuClippingItems release];
+        sRetiredMenuClippingItems = [[NSArray alloc] initWithArray:retiringItems];
+
         for ( int i = 0; i < newItems; i++ )
         {
+            // clipStrings is oldest-first (it was reversed above), everything coming from
+            // the store is newest-first.
+            int newestFirst = newItems - 1 - i;
+            int storePosition = newestFirst;
+            if ( filtering )
+            {
+                if ( newestFirst >= (int)[returnedIndexes count] )
+                    continue; // The store changed while the menu was being built.
+                storePosition = [[returnedIndexes objectAtIndex:newestFirst] intValue];
+            }
+
             NSMenuItem *item;
             item = [[NSMenuItem alloc] initWithTitle:[clipStrings objectAtIndex:i]
                                               action:@selector(processMenuClippingSelection:)
                                        keyEquivalent:@""];
             [item setTarget:self];
             [item setEnabled:YES];
+            // Remember what the row stands for rather than where it sits: the display string
+            // is the clipping's own (pointer-stable) string and therefore an identity, the
+            // position is only a hint that -storePositionForMenuItem: re-validates.
+            // representedObject is a strong property, so the item keeps the string alive even
+            // if the store drops the clipping in the meantime.
+            [item setRepresentedObject:[NSArray arrayWithObjects:
+                                        [NSNumber numberWithInt:storePosition],
+                                        [clipStrings objectAtIndex:i],
+                                        nil]];
             if ([[clipStrings objectAtIndex:i] hasPrefix:@"[Image"]) {
                 NSImage *imgIcon = [NSImage imageNamed:NSImageNameQuickLookTemplate];
                 [imgIcon setSize:NSMakeSize(16, 16)];
@@ -1669,28 +1713,72 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     });
 }
 
+// Works out which clipping a menu item stands for. The item carries its own identity (the
+// clipping's display string) plus the store position it had when the menu was built; that
+// position is only trusted while the store still agrees with it. Returns -1 when the
+// clipping can no longer be found, in which case the caller must not paste anything.
+- (int)storePositionForMenuItem:(NSMenuItem *)item
+{
+	id represented = [item representedObject];
+	if ( ! [represented isKindOfClass:[NSArray class]] || 2 != [(NSArray *)represented count] )
+		return -1;
+
+	id hintNumber = [(NSArray *)represented objectAtIndex:0];
+	id displayString = [(NSArray *)represented objectAtIndex:1];
+	if ( ! [hintNumber isKindOfClass:[NSNumber class]] || ! [displayString isKindOfClass:[NSString class]] )
+		return -1;
+
+	int hint = [hintNumber intValue];
+	NSArray *current = [flycutOperator previousDisplayStrings:[flycutOperator jcListCount] containing:nil];
+	int count = (int)[current count];
+
+	// -[FlycutClipping displayString] hands out the very same string object every time, so
+	// pointer equality identifies exactly one clipping even when several share the same
+	// truncated text. The hint makes the common case O(1).
+	if ( hint >= 0 && hint < count && [current objectAtIndex:hint] == displayString )
+		return hint;
+
+	for ( int i = 0; i < count; i++ )
+		if ( [current objectAtIndex:i] == displayString )
+			return i;
+
+	// The store may have been rebuilt from disk, which produces new string objects.
+	for ( int i = 0; i < count; i++ )
+		if ( [[current objectAtIndex:i] isEqualToString:(NSString *)displayString] )
+			return i;
+
+	return -1;
+}
+
 -(IBAction)processMenuClippingSelection:(id)sender
 {
-	// pollPB: runs in NSRunLoopCommonModes, so a clipboard change noticed while
-	// the menu is open triggers updateMenu, which replaces every clipping item.
-	// If that rebuild lands between the click and this action, the clicked item
-	// is no longer in the menu and [sender menu] is nil, so the previous
-	// [[sender menu] indexOfItem:sender] messaged nil and yielded index 0 --
-	// pasting the most recent clipping instead of the one the user clicked.
-	// Bail out instead of pasting the wrong clipping.
-	NSMenu *senderMenu = [sender menu];
-	if ( nil == senderMenu )
-		return;
-	NSInteger index = [senderMenu indexOfItem:sender];
-	if ( index < 0 )
-		return;
+	// Never derive the selection from the item's position in the menu. -updateMenuContaining:
+	// runs on the main queue via dispatch_async and replaces every clipping item, which can
+	// happen between the click and the delivery of this action. The previous code did
+	//     int index = [[sender menu] indexOfItem:sender];
+	// and an item that had just been removed from the menu answers nil to -menu, so the
+	// message to nil returned 0 - silently pasting the newest clipping instead of the one the
+	// user clicked. Resolving by identity makes a rebuild in that window harmless.
+	int position = -1;
+	if ( [sender isKindOfClass:[NSMenuItem class]] )
+		position = [self storePositionForMenuItem:(NSMenuItem *)sender];
 
-	if ( ! [self pasteIndexAndUpdate:(int)index] )
-		return; // Nothing was placed on the pasteboard, so don't fake a Cmd-V.
+	bool pasted = ( position >= 0 ) ? [self pasteStorePositionAndUpdate:position] : false;
+
+	if ( ! pasted ) {
+		// Log without any clipping contents, so a "nothing happened" report can be told
+		// apart from a wrong paste later on.
+		NSLog(@"processMenuClippingSelection: unresolved menu item (position=%d, item=%@) - nothing pasted",
+		      position,
+		      ( [sender isKindOfClass:[NSMenuItem class]] && nil != [(NSMenuItem *)sender menu] ) ? @"still in menu" : @"detached");
+		NSBeep(); // Pasting some other clipping would be worse than pasting nothing at all.
+	}
 
 	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"menuSelectionPastes"] ) {
+		// Hide either way, so focus returns to the application the user was working in.
 		[self performSelector:@selector(hideApp) withObject:nil];
-		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
+		if ( pasted )
+			[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
 	}
 }
 
@@ -2187,21 +2275,12 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 			position = [mapping[selectedRow] intValue];
 		}
 
-		FlycutClipping *clipping = [flycutOperator clippingAtIndex:position];
-		if (clipping && [clipping isImageClipping]) {
-			[self addImageClipToPasteboard:clipping];
-			if ([[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"]) {
-				[flycutOperator getPasteFromIndex:position];
-			}
-		} else {
-			NSString *content = [flycutOperator getPasteFromIndex:position];
-			if (content) {
-				[self addClipToPasteboard:content];
-			}
+		if ( [self pasteStorePositionAndUpdate:position] ) {
+			[self hideSearchWindow];
+
+			// Always paste immediately (like bezel behavior), ignore menuSelectionPastes preference
+			[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
 		}
-		[self updateMenu];
-		[self hideSearchWindow];
-		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
 	}
 }
 
@@ -2285,6 +2364,8 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	[searchRecorder release];
 	[searchWindow release]; // This will release its subviews automatically
 	[searchResults release];
+	[sRetiredMenuClippingItems release];
+	sRetiredMenuClippingItems = nil;
 	[super dealloc];
 }
 
