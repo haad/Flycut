@@ -1687,20 +1687,28 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
                 storePosition = [[returnedIndexes objectAtIndex:newestFirst] intValue];
             }
 
+            // Remember what the row stands for rather than where it sits: the clipping object
+            // itself is the identity, the position is only a hint that
+            // -storePositionForMenuItem: re-validates.
+            //
+            // The display string deliberately is NOT the identity: it is the first line
+            // truncated to displayLen, and short strings are tagged pointers, so two
+            // different clippings whose first lines happen to match compare pointer-equal.
+            FlycutClipping *clipping = [flycutOperator clippingAtPosition:storePosition];
+            if ( nil == clipping )
+                continue; // The store changed while the menu was being built.
+
             NSMenuItem *item;
             item = [[NSMenuItem alloc] initWithTitle:[clipStrings objectAtIndex:i]
                                               action:@selector(processMenuClippingSelection:)
                                        keyEquivalent:@""];
             [item setTarget:self];
             [item setEnabled:YES];
-            // Remember what the row stands for rather than where it sits: the display string
-            // is the clipping's own (pointer-stable) string and therefore an identity, the
-            // position is only a hint that -storePositionForMenuItem: re-validates.
-            // representedObject is a strong property, so the item keeps the string alive even
-            // if the store drops the clipping in the meantime.
+            // representedObject is a strong property, so the item keeps the clipping alive
+            // even if the store drops it in the meantime.
             [item setRepresentedObject:[NSArray arrayWithObjects:
                                         [NSNumber numberWithInt:storePosition],
-                                        [clipStrings objectAtIndex:i],
+                                        clipping,
                                         nil]];
             if ([[clipStrings objectAtIndex:i] hasPrefix:@"[Image"]) {
                 NSImage *imgIcon = [NSImage imageNamed:NSImageNameQuickLookTemplate];
@@ -1713,10 +1721,10 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     });
 }
 
-// Works out which clipping a menu item stands for. The item carries its own identity (the
-// clipping's display string) plus the store position it had when the menu was built; that
-// position is only trusted while the store still agrees with it. Returns -1 when the
-// clipping can no longer be found, in which case the caller must not paste anything.
+// Works out which clipping a menu item stands for. The item carries the clipping itself
+// plus the store position it had when the menu was built; that position is only trusted
+// while the store still agrees with it. Returns -1 when the clipping can no longer be
+// found, in which case the caller must not paste anything.
 - (int)storePositionForMenuItem:(NSMenuItem *)item
 {
 	id represented = [item representedObject];
@@ -1724,28 +1732,29 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		return -1;
 
 	id hintNumber = [(NSArray *)represented objectAtIndex:0];
-	id displayString = [(NSArray *)represented objectAtIndex:1];
-	if ( ! [hintNumber isKindOfClass:[NSNumber class]] || ! [displayString isKindOfClass:[NSString class]] )
+	id clipping = [(NSArray *)represented objectAtIndex:1];
+	if ( ! [hintNumber isKindOfClass:[NSNumber class]] || ! [clipping isKindOfClass:[FlycutClipping class]] )
 		return -1;
 
 	int hint = [hintNumber intValue];
-	NSArray *current = [flycutOperator previousDisplayStrings:[flycutOperator jcListCount] containing:nil];
-	int count = (int)[current count];
+	int count = [flycutOperator jcListCount];
 
-	// -[FlycutClipping displayString] hands out the very same string object every time, so
-	// pointer equality identifies exactly one clipping even when several share the same
-	// truncated text. The hint makes the common case O(1).
-	if ( hint >= 0 && hint < count && [current objectAtIndex:hint] == displayString )
+	// The clipping object itself is the identity, so the position it happened to have when
+	// the menu was built is only a hint - checking it first keeps the common case O(1).
+	if ( hint >= 0 && hint < count && [flycutOperator clippingAtPosition:hint] == clipping )
 		return hint;
 
 	for ( int i = 0; i < count; i++ )
-		if ( [current objectAtIndex:i] == displayString )
+		if ( [flycutOperator clippingAtPosition:i] == clipping )
 			return i;
 
-	// The store may have been rebuilt from disk, which produces new string objects.
-	for ( int i = 0; i < count; i++ )
-		if ( [[current objectAtIndex:i] isEqualToString:(NSString *)displayString] )
-			return i;
+	// Reloading the store from disk builds new clipping objects, so fall back to comparing
+	// contents. Two clippings with identical contents are interchangeable for pasting.
+	NSString *contents = [(FlycutClipping *)clipping contents];
+	if ( nil != contents )
+		for ( int i = 0; i < count; i++ )
+			if ( [contents isEqualToString:[[flycutOperator clippingAtPosition:i] contents]] )
+				return i;
 
 	return -1;
 }

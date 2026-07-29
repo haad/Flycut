@@ -75,6 +75,10 @@
 -(BOOL) isValidClippingNumber:(NSNumber *)number;
 -(NSString *) clippingStringWithCount:(int)count;
 
+// Read-only access to a stored clipping, for callers that need to hold on to a
+// specific clipping across store changes.  Returns nil for an out-of-range position.
+-(FlycutClipping *) clippingAtPosition:(int)position;
+
 // Save and load
 -(void) saveEngine;
 -(bool) loadEngineFromPList;

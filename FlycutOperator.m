@@ -587,6 +587,14 @@
 	return [clippingStore jcListCount];
 }
 
+-(FlycutClipping *) clippingAtPosition:(int)position
+{
+	if ( position < 0 || position >= [clippingStore jcListCount] )
+		return nil;
+
+	return [clippingStore clippingAtPosition:position];
+}
+
 -(int)rememberNum
 {
 	return [clippingStore rememberNum];
