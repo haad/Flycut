@@ -476,15 +476,35 @@
 -(bool)addClipping:(NSString*)contents ofType:(NSString*)type fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector
 {
 	if ( [clippingStore jcListCount] == 0 || ! [contents isEqualToString:[clippingStore clippingContentsAtPosition:0]]) {
+		// Remember which clipping the stack position points at, so the selection can follow it
+		// across the insert.  Retained because the store may drop clippings while inserting.
+		//
+		// Position 0 is excluded on purpose.  It is where every selection starts, so it does
+		// not express a choice, and the bezel shows whatever sits at the top - following the
+		// old top clipping there would move the selection away from what the user is looking
+		// at.  Staying at 0 keeps the display and the paste in agreement.
+		FlycutClipping *anchor = nil;
+		if ( stackPosition > 0 && stackPosition < [clippingStore jcListCount] )
+			anchor = [[clippingStore clippingAtPosition:stackPosition] retain];
+
 		bool success = [clippingStore addClipping:contents
 										   ofType:type
 							 fromAppLocalizedName:appName
 								 fromAppBundleURL:bundleURL
 									  atTimestamp:[[NSDate date] timeIntervalSince1970]];
 
-//		The below tracks our position down down down... Maybe as an option?
-//		if ( [clippingStore jcListCount] > 1 ) stackPosition++;
-		stackPosition = 0;
+		// Follow the clipping rather than the position.  This used to be stackPosition = 0,
+		// which moved a selection the user was making in the bezel onto the clipping that had
+		// just arrived - so they pasted the newest entry instead of the one they had picked.
+		// -indexOfClipping: matches on contents, which is what is wanted here: two clippings
+		// with equal contents are interchangeable, and it also covers removeDuplicates, where
+		// the existing copy is moved to the top instead of a new one being inserted.
+		// A new selection starts at the newest clipping because opening the bezel says so,
+		// not because an unrelated store change reset the position.
+		int followed = ( nil != anchor ) ? [clippingStore indexOfClipping:anchor] : -1;
+		stackPosition = ( followed >= 0 ) ? followed : 0;
+		[anchor release];
+
         [selectorTarget performSelector:clippingAddedSelector];
 		[self actionAfterListModification];
 

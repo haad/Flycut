@@ -1197,7 +1197,7 @@ static NSArray *sRetiredMenuClippingItems = nil;
                } else {
                    dispatch_async(dispatch_get_main_queue(), ^{
                        if ( ! [pbCount isEqualTo:pbBlockCount] ) {
-                           [flycutOperator addClipping:contents ofType:textType fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path target:self clippingAddedSelector:@selector(updateMenu)];
+                           [flycutOperator addClipping:contents ofType:textType fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path target:self clippingAddedSelector:@selector(clippingWasAdded)];
                        }
                    });
                }
@@ -1495,6 +1495,13 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"stickyBezel"] ) {
 			isBezelPinned = YES;
 		}
+		// The stack position is bezel state, so a new selection starts at the newest clipping.
+		// This used to happen as a side effect of -addClipping: resetting it, which meant a
+		// clipping arriving mid-selection moved the selection instead of the list moving under
+		// a selection that stays put.  Note this is deliberately not in -showBezel:, which the
+		// favourites toggle also calls after -toggleToFromFavoritesStore has swapped in that
+		// store's own remembered position.
+		[flycutOperator setStackPositionToFirstItem];
 		[self showBezel];
 	} else {
 		[self stackDown];
@@ -2036,6 +2043,19 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	if ( result < NSAlertFirstButtonReturn || result >= NSAlertFirstButtonReturn + [buttons count] )
 		return nil;
 	return buttons[result - NSAlertFirstButtonReturn];
+}
+
+// Called by -[FlycutOperator addClipping:...] once the store has been changed AND the stack
+// position has been moved to follow the user's selection across that change.
+- (void)clippingWasAdded
+{
+	[self updateMenu];
+
+	// The store redraws the bezel from inside its own insert, by way of -endUpdates, which is
+	// before the stack position has been settled.  Left at that, the bezel would show the
+	// neighbour of the clipping a paste would actually deliver.  Redraw now that it is settled.
+	if ( isBezelDisplayed )
+		[self updateBezel];
 }
 
 - (void)beginUpdates {
