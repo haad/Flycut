@@ -401,6 +401,12 @@ static NSArray *sRetiredMenuClippingItems = nil;
     NSEvent *event = [NSApp currentEvent];
     if([event modifierFlags] & NSEventModifierFlagOption) {
         [menu cancelTracking];
+        // A menu cancelled from inside -menuWillOpen: never gets a -menuDidClose:, verified
+        // with a standalone AppKit program.  Leaving the flag set would freeze -pollPB:
+        // for good: the option-click is the documented way to pause capture while copying a
+        // password, and the second option-click would re-enable the store but never resume
+        // capturing.  The menu is not opening, so clear it here.
+        isMenuOpen = NO;
         bool disableStore = [self toggleMenuIconDisabled];
         if (!disableStore)
         {
@@ -996,6 +1002,14 @@ static NSArray *sRetiredMenuClippingItems = nil;
 }
 
 - (void)windowDidResignKey:(NSNotification *)notification {
+	if ( [notification object] == searchWindow ) {
+		// -hideApp does not close the search window properly, so isSearchWindowDisplayed
+		// would stay set - and -pollPB: reads that as "a selection is in progress" and
+		// stops capturing altogether, with nothing to show the user why.
+		[self hideSearchWindow];
+		return;
+	}
+
 	[self hideApp];
 }
 
@@ -1457,6 +1471,11 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 -(void)hideApp
 {
 	isBezelPinned = NO;
+	// Hiding the app tears down any open menu and the search window anyway, so clear both
+	// freeze flags here as a backstop.  Neither is meant to outlive its surface, and a
+	// stale one silently stops -pollPB: from capturing anything at all.
+	isMenuOpen = NO;
+	isSearchWindowDisplayed = NO;
 	[self hideBezel];
 	[NSApp hide:self];
 }
