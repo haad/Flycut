@@ -353,8 +353,13 @@
 	NSString *clipping = [self getClipFromCount:position];
 
 	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"] ) {
-		[clippingStore clippingMoveToTop:position];
+		// Settle the stack position BEFORE moving, because the store redraws the bezel from
+		// inside the move (delegateEndUpdates -> -[AppController endUpdates]).  Assigning
+		// afterwards meant that redraw used the pre-move position, which then pointed at the
+		// neighbour of the clipping being pasted - a visible flash of the wrong entry.
+		// Once the clipping has been moved to the top, position 0 is that clipping.
 		stackPosition = 0;
+		[clippingStore clippingMoveToTop:position];
 
 		[self actionAfterListModification];
 	}
