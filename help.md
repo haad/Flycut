@@ -66,7 +66,7 @@ Here's a complete list of keys you can use in the Bezel.
 
 **Search Window**
 
-Press the Search Hotkey (Shift-Command-B, by default) to open the search window. Type to filter your clipboard history. Use the arrow keys to navigate results and press Return to paste the selected item.
+The search window has **no shortcut out of the box** — assign one under "Search clipboard hotkey" in Preferences first. It is left unset deliberately, so that Flycut does not take a shortcut away from the app you are working in. Once assigned, press it to open the search window, type to filter your clipboard history, use the arrow keys to navigate results and press Return to paste the selected item.
 
 **Menu Features**
 

@@ -61,8 +61,13 @@
 	[[NSUserDefaults standardUserDefaults] registerDefaults:[NSDictionary dictionaryWithObjectsAndKeys:
 		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:9],[NSNumber numberWithLong:1179648],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
 		@"ShortcutRecorder mainHotkey",
-		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:1],[NSNumber numberWithLong:1179648|NSEventModifierFlagShift],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
-		@"ShortcutRecorder searchHotkey",
+		// No default for "ShortcutRecorder searchHotkey" on purpose.  It used to default to
+		// shift-command-S, which is Save As... in Word and the colour picker in iWork, and a
+		// clipboard manager has no business claiming a shortcut that common system-wide.  With
+		// no default the recorder stays empty, -toggleSearchHotKey: registers nothing (it
+		// already guards on ShortcutRecorderEmptyCode), and the shortcut reaches the frontmost
+		// app as before.  Users who want the search window assign a shortcut in Preferences.
+		// Anyone who has already set one keeps it - that value lives in the user domain.
 		[NSNumber numberWithInt:10],
 		@"displayNum",
 		[NSNumber numberWithInt:40],
