@@ -67,7 +67,7 @@
     int jcMenuBaseItemsCount;
     IBOutlet NSSearchField *searchBox;
     NSResponder *menuFirstResponder;
-    dispatch_queue_t menuQueue;
+    dispatch_queue_t clipboardReadQueue;
     NSRunningApplication *currentRunningApplication;
     NSEvent *menuOpenEvent;
     IBOutlet NSSlider * heightSlider;
