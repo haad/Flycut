@@ -413,25 +413,33 @@
     // Menu closed - no special handling needed now that we removed search box activation
 }
 
+-(NSImage *)menuBarImageForSymbolName:(NSString *)symbolName
+                                  weight:(NSFontWeight)weight
+                accessibilityDescription:(NSString *)accessibilityDescription
+{
+    NSImage *baseImage = [NSImage imageWithSystemSymbolName:symbolName
+                                  accessibilityDescription:accessibilityDescription];
+    NSImageSymbolConfiguration *configuration =
+        [NSImageSymbolConfiguration configurationWithPointSize:14 weight:weight];
+    NSImage *image = [baseImage imageWithSymbolConfiguration:configuration];
+    [image setTemplate:YES];
+    return image;
+}
+
 -(bool)toggleMenuIconDisabled
 {
-    // Toggles the "disabled" look of the menu icon.  Returns if the icon looks disabled or not, allowing the caller to decide if anything is actually being disabled or if they just wanted the icon to be a status display.
-    if (nil == statusItemText)
+    if (![NSThread isMainThread])
     {
-        statusItemText = statusItem.button.title;
-        statusItemImage = statusItem.button.image;
-        statusItem.button.title = @"";
-        statusItem.button.image = [NSImage imageNamed:@"com.generalarcade.flycut.xout.16.png"];
-        return true;
+        __block bool disabled;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            disabled = [self toggleMenuIconDisabled];
+        });
+        return disabled;
     }
-    else
-    {
-        statusItem.button.title = statusItemText;
-        statusItem.button.image = statusItemImage;
-        statusItemText = nil;
-        statusItemImage = nil;
-    }
-    return false;
+
+    statusItemShowsDisabled = !statusItemShowsDisabled;
+    [self switchMenuIconTo:(int)[[NSUserDefaults standardUserDefaults] integerForKey:@"menuIcon"]];
+    return statusItemShowsDisabled;
 }
 
 - (void)reopenMenu
@@ -510,18 +518,27 @@
 
 -(void) switchMenuIconTo:(int)number
 {
-    if (number == 1 ) {
+    if (statusItemShowsDisabled) {
         statusItem.button.title = @"";
-        statusItem.button.image = [NSImage imageNamed:@"com.generalarcade.flycut.black.16.png"];
-    } else if (number == 2 ) {
+        statusItem.button.image = [self menuBarImageForSymbolName:@"pause.circle"
+                                                           weight:NSFontWeightRegular
+                                         accessibilityDescription:@"Flycut paused"];
+    } else if (number == 1) {
+        statusItem.button.title = @"";
+        statusItem.button.image = [self menuBarImageForSymbolName:@"scissors"
+                                                           weight:NSFontWeightBold
+                                         accessibilityDescription:@"Flycut"];
+    } else if (number == 2) {
         statusItem.button.image = nil;
         statusItem.button.title = [NSString stringWithFormat:@"%C",0x2704];
-    } else if ( number == 3 ) {
+    } else if (number == 3) {
         statusItem.button.image = nil;
         statusItem.button.title = [NSString stringWithFormat:@"%C",0x2702];
     } else {
         statusItem.button.title = @"";
-        statusItem.button.image = [NSImage imageNamed:@"com.generalarcade.flycut.16.png"];
+        statusItem.button.image = [self menuBarImageForSymbolName:@"scissors"
+                                                           weight:NSFontWeightRegular
+                                         accessibilityDescription:@"Flycut"];
     }
 }
 
@@ -756,8 +773,8 @@
 
 	row = [self preferencePanelPopUpRowForText:@"Menu item icon"
 										 items:[NSArray arrayWithObjects:
-												@"Flycut icon",
-												@"Black Flycut icon",
+												@"System scissors",
+												@"Bold system scissors",
 												@"White scissors",
 												@"Black scissors",nil]
 									 frameMaxY:nextYMax

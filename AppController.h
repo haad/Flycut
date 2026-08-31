@@ -52,8 +52,7 @@
 
     // Status item -- the little icon in the menu bar
     NSStatusItem *statusItem;
-    NSString *statusItemText;
-    NSImage *statusItemImage;
+    BOOL statusItemShowsDisabled;
     
     IBOutlet NSTextField *savingSectionLabel;
     IBOutlet NSTextField *saveFromBezelToLabel;
