@@ -65,6 +65,7 @@
 		E5334CA72DBF0A1D00AAEAEE /* FlycutClipping.h in Headers */ = {isa = PBXBuildFile; fileRef = E5334C9F2DBF0A1D00AAEAEE /* FlycutClipping.h */; };
 		F1000001AAAA000100000001 /* FlycutImageStore.m in Sources */ = {isa = PBXBuildFile; fileRef = F1000001AAAA000100000003 /* FlycutImageStore.m */; };
 		F1000001AAAA000100000002 /* FlycutImageStore.h in Headers */ = {isa = PBXBuildFile; fileRef = F1000001AAAA000100000004 /* FlycutImageStore.h */; };
+		F1C0A0032EAA000000000003 /* FlycutMenuIcon.m in Sources */ = {isa = PBXBuildFile; fileRef = F1C0A0022EAA000000000002 /* FlycutMenuIcon.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -168,6 +169,8 @@
 		E5334CA22DBF0A1D00AAEAEE /* FlycutStore.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FlycutStore.m; sourceTree = "<group>"; };
 		F1000001AAAA000100000003 /* FlycutImageStore.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FlycutImageStore.m; sourceTree = "<group>"; };
 		F1000001AAAA000100000004 /* FlycutImageStore.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FlycutImageStore.h; sourceTree = "<group>"; };
+		F1C0A0012EAA000000000001 /* FlycutMenuIcon.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FlycutMenuIcon.h; sourceTree = "<group>"; };
+		F1C0A0022EAA000000000002 /* FlycutMenuIcon.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = FlycutMenuIcon.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -190,6 +193,8 @@
 			children = (
 				AABE497A09FF9CD000A6A239 /* AppController.h */,
 				AABE497B09FF9CD000A6A239 /* AppController.m */,
+				F1C0A0012EAA000000000001 /* FlycutMenuIcon.h */,
+				F1C0A0022EAA000000000002 /* FlycutMenuIcon.m */,
 				8D0C11A01F147E3C0046FAA0 /* FlycutOperator.h */,
 				8D0C119E1F147E250046FAA0 /* FlycutOperator.m */,
 				7761C89B139BDF12000FB3AB /* ShortcutRecorder */,
@@ -503,6 +508,7 @@
 			files = (
 				8D11072D0486CEB800E47090 /* main.m in Sources */,
 				AABE497C09FF9CD000A6A239 /* AppController.m in Sources */,
+				F1C0A0032EAA000000000003 /* FlycutMenuIcon.m in Sources */,
 				77A4F3AE139BD72300F39666 /* SGHotKey.m in Sources */,
 				77A4F3B0139BD72300F39666 /* SGHotKeyCenter.m in Sources */,
 				E5334CA42DBF0A1D00AAEAEE /* FlycutStore.m in Sources */,

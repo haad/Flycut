@@ -13,6 +13,7 @@
 // interface and platform-specific mechanisms.
 
 #import "AppController.h"
+#import "FlycutMenuIcon.h"
 #import "SGHotKey.h"
 #import "SGHotKeyCenter.h"
 #import "SRRecorderCell.h"
@@ -61,6 +62,22 @@
 -(NSURL *)animatedGifURLFromPasteboard;
 // Asynchronously downloads url and, if it is an animated GIF, adds it as a clipping.
 -(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL;
+-(void)configureStatusItemInteraction;
+-(IBAction)statusItemButtonPressed:(id)sender;
+-(NSEvent *)handleStatusItemMouseDown:(NSEvent *)event;
+-(void)handleStatusItemEvent:(NSEvent *)event;
+-(void)showStatusItemMenu;
+-(void)updateMenuBarIcon;
+-(void)updateClipboardTrackingMenuItem;
+-(void)setClipboardTrackingPaused:(BOOL)paused;
+-(IBAction)toggleClipboardTracking:(id)sender;
+-(void)setupClipboardTrackingMenuItem;
+-(void)refreshMenuIconColorControls;
+-(IBAction)toggleMenuIconCustomColors:(id)sender;
+-(IBAction)setActiveMenuIconColor:(id)sender;
+-(IBAction)setPausedMenuIconColor:(id)sender;
+-(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY;
+-(void)buildGeneralPermissionsPreferenceRow;
 @end
 
 @implementation AppController
@@ -77,8 +94,6 @@
 		@"displayNum",
 		[NSNumber numberWithInt:40],
 		@"displayLen",
-		[NSNumber numberWithInt:0],
-		@"menuIcon",
 		[NSNumber numberWithFloat:.25],
 		@"bezelAlpha",
 		[NSNumber numberWithBool:NO],
@@ -123,7 +138,6 @@
 
 	settingsSyncList = @[@"displayNum",
 						 @"displayLen",
-						 @"menuIcon",
 						 @"bezelAlpha",
 						 @"stickyBezel",
 						 @"wraparoundBezel",
@@ -147,6 +161,8 @@
 	searchWindowTableView = nil;
 	searchResults = nil;
 	isSearchWindowDisplayed = NO;
+
+	[FlycutMenuIcon registerColorDefaults:[NSUserDefaults standardUserDefaults]];
 
 	return [super init];
 }
@@ -292,6 +308,7 @@
 	NSLog(@"[Flycut Startup] Bundle ID: %@", bundleID);
 	NSLog(@"[Flycut Startup] Initial Accessibility Trust State: %@", initialTrustState ? @"TRUSTED" : @"NOT TRUSTED");
 	
+	[self buildGeneralPermissionsPreferenceRow];
 	[self buildAppearancesPreferencePanel];
 
 	// We no longer get autosave from ShortcutRecorder, so let's set the recorder by hand
@@ -336,9 +353,10 @@
     statusItem = [[[NSStatusBar systemStatusBar]
             statusItemWithLength:NSVariableStatusItemLength] retain];
     [statusItem setHighlightMode:YES];
-    [self switchMenuIconTo: [[NSUserDefaults standardUserDefaults] integerForKey:@"menuIcon"]];
-	[statusItem setMenu:jcMenu];
+	[self setupClipboardTrackingMenuItem];
+	[self updateMenuBarIcon];
     [jcMenu setDelegate:self];
+	[self configureStatusItemInteraction];
     jcMenuBaseItemsCount = [[[[jcMenu itemArray] reverseObjectEnumerator] allObjects] count];
     [statusItem setEnabled:YES];
 
@@ -388,24 +406,9 @@
 
 -(void)menuWillOpen:(NSMenu *)menu
 {
-    NSEvent *event = [NSApp currentEvent];
-    if([event modifierFlags] & NSEventModifierFlagOption) {
-        [menu cancelTracking];
-        bool disableStore = [self toggleMenuIconDisabled];
-        if (!disableStore)
-        {
-            // Update the pbCount so we don't enable and have it immediately copy the thing the user was trying to avoid.
-            // Code copied from pollPB, which is disabled at this point, so the "should be okay" should still be okay.
-
-            // Reload pbCount with the current changeCount
-            // Probably poor coding technique, but pollPB should be the only thing messing with pbCount, so it should be okay
-            [pbCount release];
-            pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
-        }
-        [flycutOperator setDisableStoreTo:disableStore];
-    }
-    // Note: Removed the search box activation code. The search box in the menu is for manual use only.
-    // Users should use the dedicated search window (cmd-shift-s) for keyboard-driven search.
+    (void)menu;
+    [self updateClipboardTrackingMenuItem];
+    // Option-click is handled before AppKit starts tracking the menu.
 }
 
 -(void)menuDidClose:(NSMenu *)menu
@@ -413,33 +416,282 @@
     // Menu closed - no special handling needed now that we removed search box activation
 }
 
--(NSImage *)menuBarImageForSymbolName:(NSString *)symbolName
-                                  weight:(NSFontWeight)weight
-                accessibilityDescription:(NSString *)accessibilityDescription
+-(void)configureStatusItemInteraction
 {
-    NSImage *baseImage = [NSImage imageWithSystemSymbolName:symbolName
-                                  accessibilityDescription:accessibilityDescription];
-    NSImageSymbolConfiguration *configuration =
-        [NSImageSymbolConfiguration configurationWithPointSize:14 weight:weight];
-    NSImage *image = [baseImage imageWithSymbolConfiguration:configuration];
-    [image setTemplate:YES];
-    return image;
-}
+    NSStatusBarButton *button = [statusItem button];
+    [statusItem setMenu:nil];
+    [button setTarget:self];
+    [button setAction:@selector(statusItemButtonPressed:)];
+    [button sendActionOn:(NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown)];
 
--(bool)toggleMenuIconDisabled
-{
-    if (![NSThread isMainThread])
-    {
-        __block bool disabled;
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            disabled = [self toggleMenuIconDisabled];
-        });
-        return disabled;
+    if (statusItemMouseDownMonitor != nil) {
+        [NSEvent removeMonitor:statusItemMouseDownMonitor];
+        [statusItemMouseDownMonitor release];
+        statusItemMouseDownMonitor = nil;
     }
 
-    statusItemShowsDisabled = !statusItemShowsDisabled;
-    [self switchMenuIconTo:(int)[[NSUserDefaults standardUserDefaults] integerForKey:@"menuIcon"]];
-    return statusItemShowsDisabled;
+    __weak AppController *weakSelf = self;
+    statusItemMouseDownMonitor = [[NSEvent
+        addLocalMonitorForEventsMatchingMask:(NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown)
+        handler:^NSEvent *(NSEvent *event) {
+            AppController *controller = weakSelf;
+            if (controller == nil)
+                return event;
+            return [controller handleStatusItemMouseDown:event];
+        }] retain];
+}
+
+-(IBAction)statusItemButtonPressed:(id)sender
+{
+    (void)sender;
+    [self showStatusItemMenu];
+}
+
+-(NSEvent *)handleStatusItemMouseDown:(NSEvent *)event
+{
+    NSStatusBarButton *button = [statusItem button];
+    if (button == nil || [event window] != [button window])
+        return event;
+
+    NSPoint location = [button convertPoint:[event locationInWindow] fromView:nil];
+    if (!NSPointInRect(location, [button bounds]))
+        return event;
+
+    [self handleStatusItemEvent:event];
+    return nil;
+}
+
+-(void)handleStatusItemEvent:(NSEvent *)event
+{
+    NSEventType type = [event type];
+    BOOL isMouseDown = event != nil &&
+        (type == NSEventTypeLeftMouseDown || type == NSEventTypeRightMouseDown);
+    NSEventModifierFlags eventModifiers = [event modifierFlags];
+    CGEventFlags liveModifiers = CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState);
+    BOOL optionKeyIsDown = (eventModifiers & NSEventModifierFlagOption) != 0 ||
+        (liveModifiers & kCGEventFlagMaskAlternate) != 0;
+
+    if (isMouseDown && optionKeyIsDown) {
+        [self toggleClipboardTracking:nil];
+        return;
+    }
+
+    [self showStatusItemMenu];
+}
+
+-(void)showStatusItemMenu
+{
+    if (statusItem == nil || jcMenu == nil)
+        return;
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    [statusItem popUpStatusItemMenu:jcMenu];
+#pragma clang diagnostic pop
+}
+
+-(void)updateMenuBarIcon
+{
+    BOOL paused = [flycutOperator storeDisabled];
+    NSColor *tintColor = [FlycutMenuIcon tintColorForPaused:paused
+                                               userDefaults:[NSUserDefaults standardUserDefaults]];
+    statusItem.button.title = @"";
+    statusItem.button.image = [FlycutMenuIcon imageForPaused:paused tintColor:tintColor];
+    statusItem.button.contentTintColor = nil;
+    statusItem.button.toolTip = paused ? @"Flycut — Clipboard Tracking Paused" : @"Flycut — Clipboard Tracking Active";
+    statusItem.button.accessibilityLabel = paused ? @"Flycut, clipboard tracking paused" : @"Flycut, clipboard tracking active";
+}
+
+-(void)updateClipboardTrackingMenuItem
+{
+    BOOL paused = [flycutOperator storeDisabled];
+    [clipboardTrackingMenuItem setTitle:paused ? @"Resume Clipboard Tracking" : @"Pause Clipboard Tracking"];
+}
+
+-(void)setClipboardTrackingPaused:(BOOL)paused
+{
+    BOOL wasPaused = [flycutOperator storeDisabled];
+    [flycutOperator setDisableStoreTo:paused];
+
+    // Ignore clipboard changes made intentionally while tracking was paused.
+    if (wasPaused && !paused) {
+        [pbCount release];
+        pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
+    }
+
+    [self updateMenuBarIcon];
+    [self updateClipboardTrackingMenuItem];
+}
+
+-(IBAction)toggleClipboardTracking:(id)sender
+{
+    (void)sender;
+    [self setClipboardTrackingPaused:![flycutOperator storeDisabled]];
+}
+
+-(void)setupClipboardTrackingMenuItem
+{
+    clipboardTrackingMenuItem = [[NSMenuItem alloc] initWithTitle:@"Pause Clipboard Tracking"
+                                                            action:@selector(toggleClipboardTracking:)
+                                                     keyEquivalent:@""];
+    [clipboardTrackingMenuItem setTarget:self];
+
+    NSInteger insertionIndex = [jcMenu indexOfItemWithTarget:self andAction:@selector(showPreferencePanel:)];
+    if (insertionIndex < 0)
+        insertionIndex = [jcMenu numberOfItems];
+    [jcMenu insertItem:clipboardTrackingMenuItem atIndex:insertionIndex];
+    [self updateClipboardTrackingMenuItem];
+}
+
+-(void)refreshMenuIconColorControls
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    BOOL enabled = [defaults boolForKey:FlycutMenuIconCustomColorsEnabledKey];
+    NSColor *activeColor = [FlycutMenuIcon configuredColorForPaused:NO userDefaults:defaults];
+    NSColor *pausedColor = [FlycutMenuIcon configuredColorForPaused:YES userDefaults:defaults];
+
+    [menuIconCustomColorsCheckbox setState:enabled ? NSControlStateValueOn : NSControlStateValueOff];
+    [menuIconActiveColorWell setColor:activeColor];
+    [menuIconPausedColorWell setColor:pausedColor];
+    [menuIconActiveColorWell setEnabled:enabled];
+    [menuIconPausedColorWell setEnabled:enabled];
+    [menuIconActivePreview setContentTintColor:enabled ? activeColor : nil];
+    [menuIconPausedPreview setContentTintColor:enabled ? pausedColor : nil];
+}
+
+-(IBAction)toggleMenuIconCustomColors:(id)sender
+{
+    BOOL enabled = [sender state] == NSControlStateValueOn;
+    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:FlycutMenuIconCustomColorsEnabledKey];
+    [self refreshMenuIconColorControls];
+    [self updateMenuBarIcon];
+}
+
+-(IBAction)setActiveMenuIconColor:(id)sender
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [FlycutMenuIcon setTintColor:[sender color] forPaused:NO userDefaults:defaults];
+    [self refreshMenuIconColorControls];
+    [self updateMenuBarIcon];
+}
+
+-(IBAction)setPausedMenuIconColor:(id)sender
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [FlycutMenuIcon setTintColor:[sender color] forPaused:YES userDefaults:defaults];
+    [self refreshMenuIconColorControls];
+    [self updateMenuBarIcon];
+}
+
+-(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY
+{
+    NSRect panelFrame = [appearancePanel frame];
+    const int height = 70;
+    NSBox *row = [[[NSBox alloc] initWithFrame:NSMakeRect(0, frameMaxY - height + 5,
+                                                          panelFrame.size.width - 10, height)] autorelease];
+    [row setTitlePosition:NSNoTitle];
+    [row setTransparent:YES];
+
+    CGFloat contentWidth = [[row contentView] bounds].size.width;
+    const CGFloat previewWidth = 24.0;
+    const CGFloat colorWellWidth = 38.0;
+    CGFloat pausedPreviewX = contentWidth - 8.0 - previewWidth;
+    CGFloat pausedColorWellX = pausedPreviewX - 5.0 - colorWellWidth;
+    CGFloat pausedLabelX = pausedColorWellX - 4.0 - 45.0;
+    CGFloat activePreviewX = pausedLabelX - 4.0 - previewWidth;
+    CGFloat activeColorWellX = activePreviewX - 5.0 - colorWellWidth;
+    CGFloat activeLabelX = activeColorWellX - 4.0 - 42.0;
+
+    menuIconCustomColorsCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(8, 35, activeLabelX - 14.0, 25)];
+    [menuIconCustomColorsCheckbox setButtonType:NSButtonTypeSwitch];
+    [menuIconCustomColorsCheckbox setTitle:@"Use custom menu bar icon colors"];
+    [menuIconCustomColorsCheckbox setIdentifier:@"menuIconCustomColorsCheckbox"];
+    [menuIconCustomColorsCheckbox setTarget:self];
+    [menuIconCustomColorsCheckbox setAction:@selector(toggleMenuIconCustomColors:)];
+    [row addSubview:menuIconCustomColorsCheckbox];
+
+    NSTextField *activeLabel = [self preferencePanelSliderLabelForText:@"Active"
+                                                               aligned:NSTextAlignmentRight
+                                                              andFrame:NSMakeRect(activeLabelX, 35, 42, 25)];
+    [row addSubview:activeLabel];
+    [activeLabel release];
+    menuIconActiveColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(activeColorWellX, 32, colorWellWidth, 28)];
+    [menuIconActiveColorWell setColorWellStyle:NSColorWellStyleMinimal];
+    [menuIconActiveColorWell setContinuous:YES];
+    [menuIconActiveColorWell setIdentifier:@"menuIconActiveColorWell"];
+    [menuIconActiveColorWell setAccessibilityLabel:@"Active menu bar icon color"];
+    [menuIconActiveColorWell setTarget:self];
+    [menuIconActiveColorWell setAction:@selector(setActiveMenuIconColor:)];
+    [row addSubview:menuIconActiveColorWell];
+
+    NSTextField *pausedLabel = [self preferencePanelSliderLabelForText:@"Paused"
+                                                               aligned:NSTextAlignmentRight
+                                                              andFrame:NSMakeRect(pausedLabelX, 35, 45, 25)];
+    [row addSubview:pausedLabel];
+    [pausedLabel release];
+    menuIconPausedColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(pausedColorWellX, 32, colorWellWidth, 28)];
+    [menuIconPausedColorWell setColorWellStyle:NSColorWellStyleMinimal];
+    [menuIconPausedColorWell setContinuous:YES];
+    [menuIconPausedColorWell setIdentifier:@"menuIconPausedColorWell"];
+    [menuIconPausedColorWell setAccessibilityLabel:@"Paused menu bar icon color"];
+    [menuIconPausedColorWell setTarget:self];
+    [menuIconPausedColorWell setAction:@selector(setPausedMenuIconColor:)];
+    [row addSubview:menuIconPausedColorWell];
+
+    menuIconActivePreview = [[NSImageView alloc] initWithFrame:NSMakeRect(activePreviewX, 34, previewWidth, 24)];
+    [menuIconActivePreview setImage:[FlycutMenuIcon imageForPaused:NO]];
+    [menuIconActivePreview setImageScaling:NSImageScaleProportionallyUpOrDown];
+    [menuIconActivePreview setIdentifier:@"menuIconActivePreview"];
+    [menuIconActivePreview setAccessibilityLabel:@"Active menu bar icon preview"];
+    [row addSubview:menuIconActivePreview];
+
+    menuIconPausedPreview = [[NSImageView alloc] initWithFrame:NSMakeRect(pausedPreviewX, 34, previewWidth, 24)];
+    [menuIconPausedPreview setImage:[FlycutMenuIcon imageForPaused:YES]];
+    [menuIconPausedPreview setImageScaling:NSImageScaleProportionallyUpOrDown];
+    [menuIconPausedPreview setIdentifier:@"menuIconPausedPreview"];
+    [menuIconPausedPreview setAccessibilityLabel:@"Paused menu bar icon preview"];
+    [row addSubview:menuIconPausedPreview];
+
+    NSTextField *automaticLabel = [self preferencePanelSliderLabelForText:@"Off uses the automatic macOS color."
+                                                                  aligned:NSTextAlignmentNatural
+                                                                 andFrame:NSMakeRect(8, 5, 300, 22)];
+    [row addSubview:automaticLabel];
+    [automaticLabel release];
+
+    [self refreshMenuIconColorControls];
+    return row;
+}
+
+-(void)buildGeneralPermissionsPreferenceRow
+{
+    // The existing General outlet anchors this row without changing the NIB.
+    NSView *generalContent = [savingSectionLabel superview];
+    if (generalContent == nil)
+        return;
+    for (NSView *view in [generalContent subviews]) {
+        if ([[view identifier] isEqualToString:@"accessibilityPermissionsRow"])
+            return;
+    }
+
+    NSView *row = [[[NSView alloc] initWithFrame:NSMakeRect(
+        14, 8, NSWidth([generalContent bounds]) - 28, 38)] autorelease];
+    [row setIdentifier:@"accessibilityPermissionsRow"];
+    [row setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+
+    NSBox *separator = [[[NSBox alloc] initWithFrame:NSMakeRect(
+        0, 34, NSWidth([row bounds]), 4)] autorelease];
+    [separator setBoxType:NSBoxSeparator];
+    [separator setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
+    [row addSubview:separator];
+
+    NSButton *button = [[[NSButton alloc] initWithFrame:NSMakeRect(0, 0, 250, 32)] autorelease];
+    [button setTitle:@"Check Accessibility Permissions"];
+    [button setButtonType:NSButtonTypeMomentaryPushIn];
+    [button setBezelStyle:NSBezelStyleRounded];
+    [button setTarget:self];
+    [button setAction:@selector(recheckAccessibility:)];
+    [row addSubview:button];
+    [generalContent addSubview:row];
 }
 
 - (void)reopenMenu
@@ -511,36 +763,9 @@
     [bezel setDelegate:self];
 }
 
--(IBAction) switchMenuIcon:(id)sender
-{
-    [self switchMenuIconTo: [sender indexOfSelectedItem]];
-}
 
--(void) switchMenuIconTo:(int)number
-{
-    if (statusItemShowsDisabled) {
-        statusItem.button.title = @"";
-        statusItem.button.image = [self menuBarImageForSymbolName:@"pause.circle"
-                                                           weight:NSFontWeightRegular
-                                         accessibilityDescription:@"Flycut paused"];
-    } else if (number == 1) {
-        statusItem.button.title = @"";
-        statusItem.button.image = [self menuBarImageForSymbolName:@"scissors"
-                                                           weight:NSFontWeightBold
-                                         accessibilityDescription:@"Flycut"];
-    } else if (number == 2) {
-        statusItem.button.image = nil;
-        statusItem.button.title = [NSString stringWithFormat:@"%C",0x2704];
-    } else if (number == 3) {
-        statusItem.button.image = nil;
-        statusItem.button.title = [NSString stringWithFormat:@"%C",0x2702];
-    } else {
-        statusItem.button.title = @"";
-        statusItem.button.image = [self menuBarImageForSymbolName:@"scissors"
-                                                           weight:NSFontWeightRegular
-                                         accessibilityDescription:@"Flycut"];
-    }
-}
+
+
 
 -(NSDictionary*) checkPreferencesChanges:(NSDictionary*)changes
 {
@@ -732,6 +957,13 @@
 
 -(void) buildAppearancesPreferencePanel
 {
+	if (menuIconCustomColorsCheckbox != nil)
+		return;
+
+	NSRect expandedPanelFrame = [appearancePanel frame];
+	expandedPanelFrame.size.height += 70;
+	[appearancePanel setFrame:expandedPanelFrame];
+
 	NSRect screenFrame = [[NSScreen mainScreen] frame];
 
 	int nextYMax = -1;
@@ -771,18 +1003,6 @@
 	[appearancePanel addSubview:row];
 	nextYMax = row.frame.origin.y;
 
-	row = [self preferencePanelPopUpRowForText:@"Menu item icon"
-										 items:[NSArray arrayWithObjects:
-												@"System scissors",
-												@"Bold system scissors",
-												@"White scissors",
-												@"Black scissors",nil]
-									 frameMaxY:nextYMax
-									   binding:@"menuIcon"
-										action:@selector(switchMenuIcon:)];
-	[appearancePanel addSubview:row];
-	nextYMax = row.frame.origin.y;
-
 	// Add search hotkey recorder - moved up for better visibility
 	row = [self preferencePanelHotkeyRowForText:@"Search clipboard hotkey:" recorder:&searchRecorder frameMaxY:nextYMax];
 	[appearancePanel addSubview:row];
@@ -816,23 +1036,43 @@
     [appearancePanel addSubview:row];
     nextYMax = row.frame.origin.y;
 
-    // Add Accessibility Check button
-    NSRect panelFrame = [appearancePanel frame];
-    int height = 40;
-    NSBox *accessibilityRow = [[NSBox alloc] initWithFrame:NSMakeRect(0, nextYMax - height + 5, panelFrame.size.width - 10, height)];
-    [accessibilityRow setTitlePosition:NSNoTitle];
-    [accessibilityRow setTransparent:YES];
+    row = [self preferencePanelMenuIconColorRowWithFrameMaxY:nextYMax];
+    [appearancePanel addSubview:row];
+    nextYMax = row.frame.origin.y;
     
-    NSButton *accessibilityButton = [[NSButton alloc] initWithFrame:NSMakeRect(8, 4, 250, 25)];
-    [accessibilityButton setTitle:@"Check Accessibility Permissions"];
-    [accessibilityButton setButtonType:NSButtonTypeMomentaryPushIn];
-    [accessibilityButton setBezelStyle:NSBezelStyleRounded];
-    [accessibilityButton setTarget:self];
-    [accessibilityButton setAction:@selector(recheckAccessibility:)];
-    
-    [accessibilityRow addSubview:accessibilityButton];
-    [appearancePanel addSubview:accessibilityRow];
-    nextYMax = accessibilityRow.frame.origin.y;
+    // Size against the NSBox content view, not its outer frame. AppKit gives
+    // NSBox a smaller inset content area; using the outer height placed the
+    // final row at a negative y-coordinate and clipped its button.
+    NSView *panelContentView = [appearancePanel contentView];
+    NSArray *appearanceRows = [[panelContentView subviews] copy];
+    NSRect rowUnion = NSZeroRect;
+    BOOL hasRows = NO;
+    for (NSView *appearanceRow in appearanceRows) {
+        rowUnion = hasRows ? NSUnionRect(rowUnion, [appearanceRow frame]) : [appearanceRow frame];
+        hasRows = YES;
+    }
+    if (hasRows) {
+        const CGFloat panelVerticalPadding = 8.0;
+        NSRect contentBounds = [panelContentView bounds];
+        CGFloat requiredContentHeight = NSHeight(rowUnion) + (2.0 * panelVerticalPadding);
+        CGFloat heightDelta = requiredContentHeight - NSHeight(contentBounds);
+        if (heightDelta > 0.0) {
+            NSRect resizedPanelFrame = [appearancePanel frame];
+            resizedPanelFrame.size.height += heightDelta;
+            [appearancePanel setFrame:resizedPanelFrame];
+            contentBounds = [panelContentView bounds];
+        }
+
+        CGFloat rowOffset = NSMaxY(contentBounds) - panelVerticalPadding - NSMaxY(rowUnion);
+        for (NSView *appearanceRow in appearanceRows) {
+            NSRect rowFrame = [appearanceRow frame];
+            rowFrame.origin.y += rowOffset;
+            [appearanceRow setFrame:rowFrame];
+        }
+    }
+    [appearanceRows release];
+
+    (void)nextYMax;
     
 }
 
@@ -1155,15 +1395,11 @@
                 currRunningApp = currApp;
 
         if ( textType != nil ) {
-			bool largeCopyRisk = nil != currRunningApp && [[currRunningApp localizedName] rangeOfString:@"Remote Desktop Connection"].location != NSNotFound;
-			if (largeCopyRisk)
-				[self toggleMenuIconDisabled];
-
+			// Reading remote clipboard data can block. Keep it off the main thread;
+			// transfer activity must not change the user's explicit paused state.
 			dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
 			dispatch_async(queue, ^{
                 NSString *contents = [jcPasteboard stringForType:textType];
-				if (largeCopyRisk)
-					[self toggleMenuIconDisabled];
 
                 if ( contents == nil || [flycutOperator shouldSkip:contents ofType:[jcPasteboard availableTypeFromArray:@[NSPasteboardTypeString]] fromAvailableTypes:[jcPasteboard types]] ) {
                    DLog(@"Contents: Empty or skipped");
@@ -2241,6 +2477,18 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 }
 
 - (void) dealloc {
+	if (statusItemMouseDownMonitor != nil) {
+		[NSEvent removeMonitor:statusItemMouseDownMonitor];
+		[statusItemMouseDownMonitor release];
+		statusItemMouseDownMonitor = nil;
+	}
+	[clipboardTrackingMenuItem release];
+	[menuIconCustomColorsCheckbox release];
+	[menuIconActiveColorWell release];
+	[menuIconPausedColorWell release];
+	[menuIconActivePreview release];
+	[menuIconPausedPreview release];
+
 	[bezel release];
 	[srTransformer release];
 	[searchRecorder release];

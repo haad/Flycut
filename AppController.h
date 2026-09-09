@@ -52,8 +52,14 @@
 
     // Status item -- the little icon in the menu bar
     NSStatusItem *statusItem;
-    BOOL statusItemShowsDisabled;
-    
+    id statusItemMouseDownMonitor;
+    NSMenuItem *clipboardTrackingMenuItem;
+    NSButton *menuIconCustomColorsCheckbox;
+    NSColorWell *menuIconActiveColorWell;
+    NSColorWell *menuIconPausedColorWell;
+    NSImageView *menuIconActivePreview;
+    NSImageView *menuIconPausedPreview;
+
     IBOutlet NSTextField *savingSectionLabel;
     IBOutlet NSTextField *saveFromBezelToLabel;
     IBOutlet NSTextField *forgottenItemLabel;
@@ -137,7 +143,11 @@
 -(IBAction) setBezelAlpha:(id)sender;
 -(IBAction) setBezelHeight:(id)sender;
 -(IBAction) setBezelWidth:(id)sender;
--(IBAction) switchMenuIcon:(id)sender;
+-(void)updateMenuBarIcon;
+-(IBAction)toggleClipboardTracking:(id)sender;
+-(IBAction)toggleMenuIconCustomColors:(id)sender;
+-(IBAction)setActiveMenuIconColor:(id)sender;
+-(IBAction)setPausedMenuIconColor:(id)sender;
 -(IBAction) toggleLoadOnStartup:(id)sender;
 -(IBAction) toggleMainHotKey:(id)sender;
 -(IBAction) recheckAccessibility:(id)sender;
