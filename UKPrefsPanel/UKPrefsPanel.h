@@ -15,8 +15,8 @@ toolbar at the top.
 UKPrefsPanel is ridiculously easy to use: Create a tabless NSTabView,
 where the name of each tab is the name for the toolbar item, and the
 identifier of each tab is the identifier to be used for the toolbar
-item to represent it. Then create image files with the identifier as
-their names to be used as icons in the toolbar.
+item to represent it. Flycut's known preference identifiers use native
+system symbols; other identifiers may still resolve a named image.
 
 Finally, drag UKPrefsPanel.h into the NIB with the NSTabView,
 instantiate a UKPrefsPanel and connect its tabView outlet to your

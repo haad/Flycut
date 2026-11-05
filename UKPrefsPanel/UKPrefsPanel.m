@@ -7,8 +7,8 @@ DIRECTIONS:
 UKPrefsPanel is ridiculously easy to use: Create a tabless NSTabView,
 where the name of each tab is the name for the toolbar item, and the
 identifier of each tab is the identifier to be used for the toolbar
-item to represent it. Then create image files with the identifier as
-their names to be used as icons in the toolbar.
+item to represent it. Flycut's known preference identifiers use native
+system symbols; other identifiers may still resolve a named image.
 
 Finally, drag UKPrefsPanel.h into the NIB with the NSTabView,
 instantiate a UKPrefsPanel and connect its tabView outlet to your
@@ -29,6 +29,20 @@ Headers:
 -------------------------------------------------------------------------- */
 
 #import "UKPrefsPanel.h"
+
+static NSString *FlycutSystemSymbolNameForPreferencesIdentifier(NSString *identifier)
+{
+    if ([identifier isEqualToString:@"net.sf.jumpcut.preferences.general.tiff"])
+        return @"gearshape";
+    if ([identifier isEqualToString:@"net.sf.jumpcut.preferences.hotkey.tiff"])
+        return @"keyboard";
+    if ([identifier isEqualToString:@"net.sf.jumpcut.preferences.appearance.tiff"])
+        return @"paintpalette";
+    if ([identifier isEqualToString:@"com.generalarcade.flycut.32.png"])
+        return @"person.2";
+
+    return nil;
+}
 
 
 @implementation UKPrefsPanel
@@ -113,7 +127,7 @@ mapTabsToToolbar:
 Create a toolbar based on our tab control.
 
 Tab title		-   Name for toolbar item.
-Tab identifier  -	Image file name and toolbar item identifier.
+Tab identifier  -	System-symbol mapping and toolbar item identifier.
 -------------------------------------------------------------------------- */
 
 -(void) mapTabsToToolbar
@@ -217,9 +231,13 @@ of tabs for the specified identifier.
 		[toolbarItem setPaletteLabel: itemLabel];
 		[toolbarItem setTag:[tabView indexOfTabViewItemWithIdentifier:itemIdent]];
 		
-		// Set up a reasonable tooltip, and image   Note, these aren't localized, but you will likely want to localize many of the item's properties 
+		// Set up a reasonable tooltip and a scalable native toolbar image.
 		[toolbarItem setToolTip: itemLabel];
-		[toolbarItem setImage: [NSImage imageNamed:itemIdent]];
+		NSString *symbolName = FlycutSystemSymbolNameForPreferencesIdentifier(itemIdent);
+		NSImage *itemImage = symbolName == nil
+			? [NSImage imageNamed:itemIdent]
+			: [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:itemLabel];
+		[toolbarItem setImage:itemImage];
 		
 		// Tell the item what message to send when it is clicked 
 		[toolbarItem setTarget: self];
@@ -261,6 +279,11 @@ a click.
 {
 	
 	[tabView selectTabViewItemAtIndex: [sender tag]];
+#if MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_3
+	NSToolbar *toolbar = [[tabView window] toolbar];
+	if( [toolbar respondsToSelector: @selector(setSelectedItemIdentifier:)] )
+		[toolbar setSelectedItemIdentifier: [[tabView selectedTabViewItem] identifier]];
+#endif
 //	[[tabView window] setTitle: [baseWindowName stringByAppendingString: [sender label]]];
 	
 	id box = [[[[tabView tabViewItemAtIndex:[sender tag]] view] subviews] objectAtIndex:0];

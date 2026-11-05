@@ -32,10 +32,6 @@
 		7761C8DC139BE06B000FB3AB /* com.generalarcade.flycut.32.png in Resources */ = {isa = PBXBuildFile; fileRef = 7761C8CE139BE06B000FB3AB /* com.generalarcade.flycut.32.png */; };
 		7761C8DF139BE06B000FB3AB /* jumpcut.icns in Resources */ = {isa = PBXBuildFile; fileRef = 7761C8D1139BE06B000FB3AB /* jumpcut.icns */; };
 		7761C8E0139BE06B000FB3AB /* net.sf.jumpcut.ghost_scissors_small.png in Resources */ = {isa = PBXBuildFile; fileRef = 7761C8D2139BE06B000FB3AB /* net.sf.jumpcut.ghost_scissors_small.png */; };
-		7761C8E1139BE06B000FB3AB /* net.sf.jumpcut.preferences.acknowledgements.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 7761C8D3139BE06B000FB3AB /* net.sf.jumpcut.preferences.acknowledgements.tiff */; };
-		7761C8E2139BE06B000FB3AB /* net.sf.jumpcut.preferences.appearance.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 7761C8D4139BE06B000FB3AB /* net.sf.jumpcut.preferences.appearance.tiff */; };
-		7761C8E3139BE06B000FB3AB /* net.sf.jumpcut.preferences.general.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 7761C8D5139BE06B000FB3AB /* net.sf.jumpcut.preferences.general.tiff */; };
-		7761C8E4139BE06B000FB3AB /* net.sf.jumpcut.preferences.hotkey.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 7761C8D6139BE06B000FB3AB /* net.sf.jumpcut.preferences.hotkey.tiff */; };
 		7761C8E5139BE06B000FB3AB /* net.sf.jumpcut.scissors_bw16.png in Resources */ = {isa = PBXBuildFile; fileRef = 7761C8D7139BE06B000FB3AB /* net.sf.jumpcut.scissors_bw16.png */; };
 		7761C8E6139BE06B000FB3AB /* RemoveShortcut.tif in Resources */ = {isa = PBXBuildFile; fileRef = 7761C8D8139BE06B000FB3AB /* RemoveShortcut.tif */; };
 		7761C8E7139BE06B000FB3AB /* RemoveShortcutPressed.tif in Resources */ = {isa = PBXBuildFile; fileRef = 7761C8D9139BE06B000FB3AB /* RemoveShortcutPressed.tif */; };
@@ -134,10 +130,6 @@
 		7761C8CE139BE06B000FB3AB /* com.generalarcade.flycut.32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = com.generalarcade.flycut.32.png; path = Resources/com.generalarcade.flycut.32.png; sourceTree = "<group>"; };
 		7761C8D1139BE06B000FB3AB /* jumpcut.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; name = jumpcut.icns; path = Resources/jumpcut.icns; sourceTree = "<group>"; };
 		7761C8D2139BE06B000FB3AB /* net.sf.jumpcut.ghost_scissors_small.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = net.sf.jumpcut.ghost_scissors_small.png; path = Resources/net.sf.jumpcut.ghost_scissors_small.png; sourceTree = "<group>"; };
-		7761C8D3139BE06B000FB3AB /* net.sf.jumpcut.preferences.acknowledgements.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = net.sf.jumpcut.preferences.acknowledgements.tiff; path = Resources/net.sf.jumpcut.preferences.acknowledgements.tiff; sourceTree = "<group>"; };
-		7761C8D4139BE06B000FB3AB /* net.sf.jumpcut.preferences.appearance.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = net.sf.jumpcut.preferences.appearance.tiff; path = Resources/net.sf.jumpcut.preferences.appearance.tiff; sourceTree = "<group>"; };
-		7761C8D5139BE06B000FB3AB /* net.sf.jumpcut.preferences.general.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = net.sf.jumpcut.preferences.general.tiff; path = Resources/net.sf.jumpcut.preferences.general.tiff; sourceTree = "<group>"; };
-		7761C8D6139BE06B000FB3AB /* net.sf.jumpcut.preferences.hotkey.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = net.sf.jumpcut.preferences.hotkey.tiff; path = Resources/net.sf.jumpcut.preferences.hotkey.tiff; sourceTree = "<group>"; };
 		7761C8D7139BE06B000FB3AB /* net.sf.jumpcut.scissors_bw16.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = net.sf.jumpcut.scissors_bw16.png; path = Resources/net.sf.jumpcut.scissors_bw16.png; sourceTree = "<group>"; };
 		7761C8D8139BE06B000FB3AB /* RemoveShortcut.tif */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = RemoveShortcut.tif; path = Resources/RemoveShortcut.tif; sourceTree = "<group>"; };
 		7761C8D9139BE06B000FB3AB /* RemoveShortcutPressed.tif */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = RemoveShortcutPressed.tif; path = Resources/RemoveShortcutPressed.tif; sourceTree = "<group>"; };
@@ -276,10 +268,6 @@
 				7761C8D1139BE06B000FB3AB /* jumpcut.icns */,
 				7761C8EB139BE09D000FB3AB /* Info.plist */,
 				7761C8D2139BE06B000FB3AB /* net.sf.jumpcut.ghost_scissors_small.png */,
-				7761C8D3139BE06B000FB3AB /* net.sf.jumpcut.preferences.acknowledgements.tiff */,
-				7761C8D4139BE06B000FB3AB /* net.sf.jumpcut.preferences.appearance.tiff */,
-				7761C8D5139BE06B000FB3AB /* net.sf.jumpcut.preferences.general.tiff */,
-				7761C8D6139BE06B000FB3AB /* net.sf.jumpcut.preferences.hotkey.tiff */,
 				7761C8D7139BE06B000FB3AB /* net.sf.jumpcut.scissors_bw16.png */,
 				7761C8D8139BE06B000FB3AB /* RemoveShortcut.tif */,
 				7761C8D9139BE06B000FB3AB /* RemoveShortcutPressed.tif */,
@@ -494,12 +482,8 @@
 				7761C8DF139BE06B000FB3AB /* jumpcut.icns in Resources */,
 				8D2E28891B0669F500AE62C8 /* com.generalarcade.flycut.xout.32.png in Resources */,
 				7761C8E0139BE06B000FB3AB /* net.sf.jumpcut.ghost_scissors_small.png in Resources */,
-				7761C8E1139BE06B000FB3AB /* net.sf.jumpcut.preferences.acknowledgements.tiff in Resources */,
 				8D2E28871B0669F500AE62C8 /* com.generalarcade.flycut.black.32.png in Resources */,
-				7761C8E2139BE06B000FB3AB /* net.sf.jumpcut.preferences.appearance.tiff in Resources */,
-				7761C8E3139BE06B000FB3AB /* net.sf.jumpcut.preferences.general.tiff in Resources */,
 				8D2E28881B0669F500AE62C8 /* com.generalarcade.flycut.xout.16.png in Resources */,
-				7761C8E4139BE06B000FB3AB /* net.sf.jumpcut.preferences.hotkey.tiff in Resources */,
 				7761C8E5139BE06B000FB3AB /* net.sf.jumpcut.scissors_bw16.png in Resources */,
 				8D2E28861B0669F500AE62C8 /* com.generalarcade.flycut.black.16.png in Resources */,
 				7761C8E6139BE06B000FB3AB /* RemoveShortcut.tif in Resources */,
