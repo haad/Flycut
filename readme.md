@@ -4,6 +4,8 @@
 <a href="https://macdownload.informer.com/flycut/"><img src="award-2022.png" /></a>
 <br />
 
+I have reimplemented Flycut with Swift [CLipsmith](https://github.com/haad/Clipsmith). 
+
 Flycut is a clean and simple clipboard manager for developers. Based on the open source app [Jumpcut](https://github.com/snark/jumpcut).
 
 This is an actively maintained fork, updated to work on the latest macOS versions.
