@@ -11,6 +11,7 @@
 
 
 #import "FlycutClipping.h"
+#import <AppKit/AppKit.h>
 
 @implementation FlycutClipping
 
@@ -31,6 +32,8 @@
     clipContents = [[[NSString alloc] init] retain];
     clipDisplayString = [[[NSString alloc] init] retain];
     clipType = [[[NSString alloc] init] retain];
+    imageHash = nil;
+    imageSize = NSZeroSize;
 
     [self setContents:contents setDisplayLength:displayLength];
     [self setType:type];
@@ -38,7 +41,26 @@
     [self setAppBundleURL:bundleURL];
     [self setTimestamp:timestamp];
     [self setHasName:false];
-    
+
+    return self;
+}
+
+-(id) initWithImageHash:(NSString *)hash withImageSize:(NSSize)size withImageType:(NSString *)imageType withDisplayLength:(int)displayLength withAppLocalizedName:(NSString *)localizedName withAppBundleURL:(NSString*)bundleURL withTimestamp:(NSInteger)timestamp
+{
+    [super init];
+    clipContents = [@"" retain];
+    clipDisplayString = [[[NSString alloc] init] retain];
+    clipType = [(imageType != nil ? imageType : NSPasteboardTypeTIFF) retain];
+    clipDisplayLength = displayLength > 0 ? displayLength : 40;
+
+    [self setImageHash:hash];
+    imageSize = size;
+    [self setAppLocalizedName:localizedName];
+    [self setAppBundleURL:bundleURL];
+    [self setTimestamp:timestamp];
+    [self setHasName:false];
+    [self resetDisplayString];
+
     return self;
 }
 
@@ -136,19 +158,32 @@
 
 -(void) resetDisplayString
 {
+    [clipDisplayString release];
+
+    if (imageHash != nil) {
+        NSString *label = [clipType isEqualToString:@"com.compuserve.gif"] ? @"GIF" : @"Image";
+        NSString *newDisplayString;
+        if (imageSize.width > 0 && imageSize.height > 0) {
+            newDisplayString = [NSString stringWithFormat:@"[%@ %dx%d]",
+                                label, (int)imageSize.width, (int)imageSize.height];
+        } else {
+            newDisplayString = [NSString stringWithFormat:@"[%@]", label];
+        }
+        [newDisplayString retain];
+        clipDisplayString = newDisplayString;
+        return;
+    }
+
     NSString *newDisplayString, *firstLineOfClipping, *trimmedString;
 	NSUInteger start, lineEnd, contentsEnd;
 	NSRange startRange = NSMakeRange(0,0);
 	NSRange contentsRange;
-	// We're resetting the display string, so release the old one.
-    [clipDisplayString release];
-	// We want to restrict the display string to the clipping contents through the first line break.
     trimmedString = [clipContents stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     [trimmedString getLineStart:&start end:&lineEnd contentsEnd:&contentsEnd forRange:startRange];
 	contentsRange = NSMakeRange(0, contentsEnd);
 	firstLineOfClipping = [trimmedString substringWithRange:contentsRange];
     if ( [firstLineOfClipping length] > clipDisplayLength ) {
-        newDisplayString = [[NSString stringWithString:[firstLineOfClipping substringToIndex:clipDisplayLength]] stringByAppendingString:@"…"];   
+        newDisplayString = [[NSString stringWithString:[firstLineOfClipping substringToIndex:clipDisplayLength]] stringByAppendingString:@"…"];
     } else {
         newDisplayString = [NSString stringWithString:firstLineOfClipping];
     }
@@ -216,14 +251,45 @@
     return clipHasName;
 }
 
+-(BOOL) isImageClipping
+{
+    return imageHash != nil;
+}
+
+-(NSString *) imageHash
+{
+    return imageHash;
+}
+
+-(NSSize) imageSize
+{
+    return imageSize;
+}
+
+-(void) setImageHash:(NSString *)hash
+{
+    id old = imageHash;
+    [hash retain];
+    imageHash = hash;
+    [old release];
+}
+
+-(void) setImageSize:(NSSize)size
+{
+    imageSize = size;
+}
+
 - (BOOL)isEqual:(id)other {
     if (other == self)
         return YES;
     if (!other || ![other isKindOfClass:[self class]])
         return NO;
     FlycutClipping * otherClip = (FlycutClipping *)other;
-    return (/*[self.type isEqualToString:otherClip.type] &&*/ // Type is under-utilized a this time and will mismatch on cross-device (macOS <-> iOS) usage.  This should be revisited once we have support for more than just raw text clippings.
-            [self.contents isEqualToString:otherClip.contents]);
+    if ([self isImageClipping] && [otherClip isImageClipping])
+        return [self.imageHash isEqualToString:otherClip.imageHash];
+    if ([self isImageClipping] != [otherClip isImageClipping])
+        return NO;
+    return [self.contents isEqualToString:otherClip.contents];
 }
 
 
@@ -234,6 +300,7 @@
     [clipType release];
     [appLocalizedName release];
     [appBundleURL release];
+    [imageHash release];
     clipDisplayLength = 0;
     [clipDisplayString release];
     clipHasName = 0;

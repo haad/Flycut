@@ -87,6 +87,7 @@
 
 // Add a clipping
 -(bool) addClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger) timestamp;
+-(bool) addImageClippingWithHash:(NSString *)hash imageSize:(NSSize)size imageType:(NSString *)imageType fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger)timestamp;
 -(void) addClipping:(FlycutClipping*) clipping;
 -(void) insertClipping:(FlycutClipping*) clipping atIndex:(int) index;
 

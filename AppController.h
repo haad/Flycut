@@ -21,6 +21,7 @@
 #import "SGHotKey.h"
 
 @class SGHotKey;
+@class FlycutClipping;
 
 @interface AppController : NSResponder <NSMenuDelegate, NSApplicationDelegate, FlycutStoreDelegate, FlycutOperatorDelegate, BezelWindowDelegate> {
     BezelWindow					*bezel;
@@ -91,6 +92,7 @@
 // Basic functionality
 -(void) pollPB:(NSTimer *)timer;
 -(void) addClipToPasteboard:(NSString*)pbFullText;
+-(void) addImageClipToPasteboard:(FlycutClipping *)clipping;
 -(void) setPBBlockCount:(NSNumber *)newPBBlockCount;
 -(void) hideApp;
 -(void) fakeCommandV;

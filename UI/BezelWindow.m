@@ -195,7 +195,16 @@ static const float lineHeight = 16;
 			[charField.heightAnchor constraintEqualToConstant:charFrame.size.height],
 		]];
 
-		[self setInitialFirstResponder:textField];         
+		imagePreview = [[NSImageView alloc] initWithFrame:textFrame];
+		[imagePreview setImageScaling:NSImageScaleProportionallyUpOrDown];
+		[imagePreview setImageAlignment:NSImageAlignCenter];
+		[imagePreview setImageFrameStyle:NSImageFrameNone];
+		[imagePreview setAnimates:YES]; // play multi-frame GIFs in the preview
+		[imagePreview setHidden:YES];
+		[[self contentView] addSubview:imagePreview];
+		isShowingImage = NO;
+
+		[self setInitialFirstResponder:textField];
 		return self;
 	}
 	return nil;
@@ -210,10 +219,10 @@ static const float lineHeight = 16;
     if (nil == sourceText || 0 == sourceText.length)
         showSourceField = false;
 
-    // Defer frame updates to avoid layout recursion
     dispatch_async(dispatch_get_main_queue(), ^{
         NSRect textFrame = [self textFrame];
         [textField setFrame:textFrame];
+        [imagePreview setFrame:textFrame];
         NSRect charFrame = [self charFrame];
         [charField setFrame:charFrame];
     });
@@ -313,14 +322,35 @@ static const float lineHeight = 16;
 
 - (void)setText:(NSString *)newText
 {
-    // The Bezel gets slow when newText is huge.  Probably the retain.
-    // Since we can't see that much of it anyway, trim to 2000 characters.
+    [self clearImage];
     if ([newText length] > 2000)
         newText = [newText substringToIndex:2000];
 	[newText retain];
 	[bezelText release];
 	bezelText = newText;
 	[textField.textField setStringValue:bezelText];
+}
+
+- (void)setImage:(NSImage *)image
+{
+    if (!image) {
+        [self clearImage];
+        return;
+    }
+    [textField setHidden:YES];
+    [imagePreview setImage:image];
+    [imagePreview setHidden:NO];
+    isShowingImage = YES;
+}
+
+- (void)clearImage
+{
+    if (isShowingImage) {
+        [imagePreview setHidden:YES];
+        [imagePreview setImage:nil];
+        [textField setHidden:NO];
+        isShowingImage = NO;
+    }
 }
 
 - (void)setSourceIcon:(NSImage *)newSourceIcon
@@ -408,6 +438,7 @@ static const float lineHeight = 16;
 	[textField release];
 	[charField release];
 	[iconView release];
+	[imagePreview release];
 	[super dealloc];
 }
 

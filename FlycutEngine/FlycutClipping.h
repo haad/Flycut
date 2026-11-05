@@ -12,26 +12,20 @@
 #import <Foundation/Foundation.h>
 
 @interface FlycutClipping : NSObject {
-// What must a clipping hold?
-// The text
     NSString * clipContents;
-// The text type
     NSString * clipType;
-// The display length
     int clipDisplayLength;
-// The display string
     NSString * clipDisplayString;
-// Does it have a name?
     BOOL clipHasName;
-// The app name it came from
     NSString * appLocalizedName;
-// The the bunle URL of the app it came from
     NSString * appBundleURL;
-// The time
     NSInteger clipTimestamp;
+    NSString * imageHash;
+    NSSize imageSize;
 }
 
 -(id) initWithContents:(NSString *)contents withType:(NSString *)type withDisplayLength:(int)displayLength withAppLocalizedName:(NSString *)localizedName withAppBundleURL:(NSString *)bundleURL withTimestamp:(NSInteger)timestamp;
+-(id) initWithImageHash:(NSString *)hash withImageSize:(NSSize)size withImageType:(NSString *)imageType withDisplayLength:(int)displayLength withAppLocalizedName:(NSString *)localizedName withAppBundleURL:(NSString *)bundleURL withTimestamp:(NSInteger)timestamp;
 /* -(id) initWithCoder:(NSCoder *)coder;
 -(void) decodeWithCoder:(NSCoder *)coder; */
 -(NSString *) description;
@@ -53,6 +47,11 @@
 -(NSString *) appBundleURL;
 -(NSInteger) timestamp;
 -(BOOL) hasName;
+-(BOOL) isImageClipping;
+-(NSString *) imageHash;
+-(NSSize) imageSize;
+-(void) setImageHash:(NSString *)hash;
+-(void) setImageSize:(NSSize)size;
 
 // Additional functions
 -(void) resetDisplayString;

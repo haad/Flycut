@@ -40,6 +40,8 @@
 	RoundRecTextField	*textField;
 	RoundRecTextField	*charField;
 	NSImageView			*iconView;
+	NSImageView			*imagePreview;
+	BOOL				isShowingImage;
 	id<BezelWindowDelegate>	delegate;
     Boolean             color;
 }
@@ -63,6 +65,8 @@
 - (void)setSource:(NSString *)newSource;
 - (void)setDate:(NSString *)newDate;
 - (void)setSourceIcon:(NSImage *)newSourceIcon;
+- (void)setImage:(NSImage *)image;
+- (void)clearImage;
 
 - (id<BezelWindowDelegate>)delegate;
 - (void)setDelegate:(id<BezelWindowDelegate>)newDelegate;

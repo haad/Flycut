@@ -8,6 +8,8 @@ This fork was updated by haad to compile on Tahoe 26.0 release of Mac OS.
 © General Arcade, 2011 - 2020.
 © Adam Hamsik, 2025 - 2026.
 
+Image clipboard support contributed by Ankush Vangari (<https://github.com/ankushvangari/Flycut>), merged with gratitude under the MIT License.
+
 Flycut incorporates the following libraries, used with gratitude:
 	• ShortcutRecorder by Jesper et al. (<http://wafflesoftware.net/>)
 	• a modified version of UKPrefsPanel by Uli Kusterer (<http://www.zathras.de/>)

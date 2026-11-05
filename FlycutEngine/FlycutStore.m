@@ -95,6 +95,23 @@
 	return YES;
 }
 
+-(bool) addImageClippingWithHash:(NSString *)hash imageSize:(NSSize)size imageType:(NSString *)imageType fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger)timestamp
+{
+    if (!hash || [hash length] == 0)
+        return NO;
+
+    FlycutClipping *newClipping = [[FlycutClipping alloc] initWithImageHash:hash
+                                                             withImageSize:size
+                                                              withImageType:imageType
+                                                          withDisplayLength:[self displayLen]
+                                                       withAppLocalizedName:appLocalizedName
+                                                           withAppBundleURL:bundleURL
+                                                              withTimestamp:timestamp];
+    [self addClipping:newClipping];
+    [newClipping release];
+    return YES;
+}
+
 -(bool) removeDuplicates{
 	return [[[NSUserDefaults standardUserDefaults] valueForKey:@"removeDuplicates"] boolValue];
 }
@@ -358,13 +375,23 @@
     NSEnumerator *enumerator;
     FlycutClipping *aClipping;
 
-    // If we have a search, do that.  Pretty much a mix of the other two paths below, but separated out to avoid extra processing.
     if (nil != search && search.length > 0) {
         subArray = [jcList copy];
         enumerator = [subArray objectEnumerator];
         int index = 0;
-        while ( aClipping = [enumerator nextObject] ) { // Forward enumerator so we find the most recent N matches
-            if ([[self clippingContentsAtPosition:index] rangeOfString:search options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        while ( aClipping = [enumerator nextObject] ) {
+            BOOL matches = NO;
+            if ([aClipping isImageClipping]) {
+                NSString *appName = [aClipping appLocalizedName];
+                if (appName && [appName rangeOfString:search options:NSCaseInsensitiveSearch].location != NSNotFound)
+                    matches = YES;
+                if ([[aClipping displayString] rangeOfString:search options:NSCaseInsensitiveSearch].location != NSNotFound)
+                    matches = YES;
+            } else {
+                if ([[self clippingContentsAtPosition:index] rangeOfString:search options:NSCaseInsensitiveSearch].location != NSNotFound)
+                    matches = YES;
+            }
+            if (matches) {
                 [returnArray insertObject:[aClipping displayString] atIndex:0];
                 howMany--;
                 if (0 == howMany)
@@ -372,7 +399,7 @@
             }
             index++;
         }
-        return [[returnArray reverseObjectEnumerator] allObjects]; // Reverse the results since the caller expects the most recent to be last.
+        return [[returnArray reverseObjectEnumerator] allObjects];
     }
 
     theRange.location = 0;
@@ -396,13 +423,23 @@
     NSEnumerator *enumerator;
     FlycutClipping *aClipping;
 
-    // If we have a search, do that.
     if (nil != search && search.length > 0) {
         subArray = [jcList copy];
         enumerator = [subArray objectEnumerator];
         int index = 0;
-        while ( aClipping = [enumerator nextObject] ) { // Forward enumerator so we find the most recent N matches
-            if ([[self clippingContentsAtPosition:index] rangeOfString:search options:NSCaseInsensitiveSearch].location != NSNotFound) {
+        while ( aClipping = [enumerator nextObject] ) {
+            BOOL matches = NO;
+            if ([aClipping isImageClipping]) {
+                NSString *appName = [aClipping appLocalizedName];
+                if (appName && [appName rangeOfString:search options:NSCaseInsensitiveSearch].location != NSNotFound)
+                    matches = YES;
+                if ([[aClipping displayString] rangeOfString:search options:NSCaseInsensitiveSearch].location != NSNotFound)
+                    matches = YES;
+            } else {
+                if ([[self clippingContentsAtPosition:index] rangeOfString:search options:NSCaseInsensitiveSearch].location != NSNotFound)
+                    matches = YES;
+            }
+            if (matches) {
                 [returnArray addObject:[NSNumber numberWithInt:index]];
                 howMany--;
                 if (0 == howMany)

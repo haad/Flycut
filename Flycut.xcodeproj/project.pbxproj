@@ -67,6 +67,8 @@
 		E5334CA52DBF0A1D00AAEAEE /* FlycutClipping.m in Sources */ = {isa = PBXBuildFile; fileRef = E5334CA02DBF0A1D00AAEAEE /* FlycutClipping.m */; };
 		E5334CA62DBF0A1D00AAEAEE /* FlycutStore.h in Headers */ = {isa = PBXBuildFile; fileRef = E5334CA12DBF0A1D00AAEAEE /* FlycutStore.h */; };
 		E5334CA72DBF0A1D00AAEAEE /* FlycutClipping.h in Headers */ = {isa = PBXBuildFile; fileRef = E5334C9F2DBF0A1D00AAEAEE /* FlycutClipping.h */; };
+		F1000001AAAA000100000001 /* FlycutImageStore.m in Sources */ = {isa = PBXBuildFile; fileRef = F1000001AAAA000100000003 /* FlycutImageStore.m */; };
+		F1000001AAAA000100000002 /* FlycutImageStore.h in Headers */ = {isa = PBXBuildFile; fileRef = F1000001AAAA000100000004 /* FlycutImageStore.h */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -172,6 +174,8 @@
 		E5334CA02DBF0A1D00AAEAEE /* FlycutClipping.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FlycutClipping.m; sourceTree = "<group>"; };
 		E5334CA12DBF0A1D00AAEAEE /* FlycutStore.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FlycutStore.h; sourceTree = "<group>"; };
 		E5334CA22DBF0A1D00AAEAEE /* FlycutStore.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FlycutStore.m; sourceTree = "<group>"; };
+		F1000001AAAA000100000003 /* FlycutImageStore.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = FlycutImageStore.m; sourceTree = "<group>"; };
+		F1000001AAAA000100000004 /* FlycutImageStore.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = FlycutImageStore.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -376,6 +380,8 @@
 				E5334CA02DBF0A1D00AAEAEE /* FlycutClipping.m */,
 				E5334CA12DBF0A1D00AAEAEE /* FlycutStore.h */,
 				E5334CA22DBF0A1D00AAEAEE /* FlycutStore.m */,
+				F1000001AAAA000100000004 /* FlycutImageStore.h */,
+				F1000001AAAA000100000003 /* FlycutImageStore.m */,
 			);
 			path = FlycutEngine;
 			sourceTree = "<group>";
@@ -399,6 +405,7 @@
 				7761C8AC139BDF12000FB3AB /* SRKeyCodeTransformer.h in Headers */,
 				E5334CA62DBF0A1D00AAEAEE /* FlycutStore.h in Headers */,
 				E5334CA72DBF0A1D00AAEAEE /* FlycutClipping.h in Headers */,
+				F1000001AAAA000100000002 /* FlycutImageStore.h in Headers */,
 				7761C8AE139BDF12000FB3AB /* SRRecorderCell.h in Headers */,
 				7761C8B0139BDF12000FB3AB /* SRRecorderControl.h in Headers */,
 				7761C8B2139BDF12000FB3AB /* SRValidator.h in Headers */,
@@ -516,6 +523,7 @@
 				77A4F3B0139BD72300F39666 /* SGHotKeyCenter.m in Sources */,
 				E5334CA42DBF0A1D00AAEAEE /* FlycutStore.m in Sources */,
 				E5334CA52DBF0A1D00AAEAEE /* FlycutClipping.m in Sources */,
+				F1000001AAAA000100000001 /* FlycutImageStore.m in Sources */,
 				77A4F3B2139BD72300F39666 /* SGKeyCodeTranslator.m in Sources */,
 				77A4F3B4139BD72300F39666 /* SGKeyCombo.m in Sources */,
 				7761C891139BDEAF000FB3AB /* BezelWindow.m in Sources */,
