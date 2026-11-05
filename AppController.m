@@ -971,7 +971,7 @@
 - (void)metaKeysReleased
 {
 	NSLog(@"metaKeysReleased called - isBezelPinned: %@", isBezelPinned ? @"YES" : @"NO");
-	if ( ! isBezelPinned ) {
+	if ( isBezelDisplayed && ! isBezelPinned ) {
 		[self pasteFromStack];
 	}
 }
@@ -1203,20 +1203,35 @@
     }
 }
 
+- (void)cancelBezelSelection
+{
+	[self restoreStashedStoreAndUpdate];
+	[self hideApp];
+}
+
 - (void)processBezelKeyDown:(NSEvent *)theEvent {
 	int newStackPosition;
 	// AppControl should only be getting these directly from bezel via delegation
     if ([theEvent type] == NSEventTypeKeyDown) {
+        // The Escape key is identified by its layout-independent macOS virtual keycode.
+        // Some AppKit events carry no characters, so handle Escape before reading them.
+        if ([theEvent keyCode] == 53) {
+            [self cancelBezelSelection];
+            return;
+        }
 		if ([theEvent keyCode] == [mainRecorder keyCombo].code ) {
             if ([theEvent modifierFlags] & NSEventModifierFlagShift) [self stackUp];
 			 else [self stackDown];
 			return;
 		}
-		unichar pressed = [[theEvent charactersIgnoringModifiers] characterAtIndex:0];
+        NSString *characters = [theEvent charactersIgnoringModifiers];
+        if ([characters length] == 0)
+            return;
+		unichar pressed = [characters characterAtIndex:0];
         NSUInteger modifiers = [theEvent modifierFlags];
 		switch (pressed) {
 			case 0x1B:
-				[self hideApp];
+				[self cancelBezelSelection];
 				break;
             case 0xD: // Enter or Return
 				[self pasteFromStack];
