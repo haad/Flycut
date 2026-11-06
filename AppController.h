@@ -36,7 +36,7 @@
 	SRKeyCodeTransformer        *srTransformer;
 	BOOL						isBezelDisplayed;
 	BOOL						isBezelPinned;
-	NSTimeInterval				lastPasteFromStackTime;
+	BOOL						bezelSelectionFinished;	// the shown bezel was pasted or cancelled
 	NSString					*currentKeycodeCharacter;
     NSDateFormatter*            dateFormat;
 	
