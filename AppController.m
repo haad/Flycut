@@ -980,6 +980,17 @@
 	[self hideApp];
 }
 
+- (void)windowDidBecomeKey:(NSNotification *)notification {
+	// The search window is opened from a global hotkey while another app is
+	// active, and app activation is asynchronous on modern macOS.  A
+	// makeFirstResponder: call at show time runs before the window can take
+	// focus, so the field accepts keystrokes but never shows its caret.
+	// Focus the field once the window has actually become key.
+	if ( [notification object] == searchWindow ) {
+		[searchWindow makeFirstResponder:searchWindowSearchField];
+	}
+}
+
 -(void)fakeKey:(NSNumber*) keyCode withCommandFlag:(BOOL) setFlag
 	/*" +fakeKey synthesizes keyboard events. "*/
 {
