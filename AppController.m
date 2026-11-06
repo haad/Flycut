@@ -64,9 +64,11 @@
 	NSUInteger _focusCheckAttempts;
 	BOOL _selectionStarted;
 	NSString *_selectedPayload;
+	NSString *_selectedPayloadType;
+	NSData *_selectedPayloadData;
 	NSInteger _ownedChangeCount;
 	NSArray *_previousPasteboardItems;
-	BOOL _pasteWasPosted;
+	BOOL _clipboardCommitted;
 }
 @property(nonatomic, readonly, retain) NSRunningApplication *targetApplication;
 @property(nonatomic, readonly) pid_t targetProcessIdentifier;
@@ -74,12 +76,18 @@
 @property(nonatomic, assign) NSUInteger focusCheckAttempts;
 @property(nonatomic, assign) BOOL selectionStarted;
 @property(nonatomic, copy) NSString *selectedPayload;
+// An image selection owns one representation instead of text: its type and bytes.
+@property(nonatomic, copy) NSString *selectedPayloadType;
+@property(nonatomic, copy) NSData *selectedPayloadData;
 @property(nonatomic, assign) NSInteger ownedChangeCount;
 @property(nonatomic, copy) NSArray *previousPasteboardItems;
-@property(nonatomic, assign) BOOL pasteWasPosted;
+// YES once the selection is meant to stay on the clipboard: it was copied on purpose
+// (the bezel's copy-only action) or the paste attempt ended without a cancellation.
+@property(nonatomic, assign) BOOL clipboardCommitted;
 - (id)initWithApplication:(NSRunningApplication *)application
 		processIdentifier:(pid_t)processIdentifier
 			 generation:(NSUInteger)generation;
+- (BOOL)hasSelectedPayload;
 @end
 
 @implementation FCPasteTransaction
@@ -89,9 +97,11 @@
 @synthesize focusCheckAttempts = _focusCheckAttempts;
 @synthesize selectionStarted = _selectionStarted;
 @synthesize selectedPayload = _selectedPayload;
+@synthesize selectedPayloadType = _selectedPayloadType;
+@synthesize selectedPayloadData = _selectedPayloadData;
 @synthesize ownedChangeCount = _ownedChangeCount;
 @synthesize previousPasteboardItems = _previousPasteboardItems;
-@synthesize pasteWasPosted = _pasteWasPosted;
+@synthesize clipboardCommitted = _clipboardCommitted;
 
 - (id)initWithApplication:(NSRunningApplication *)application
 		processIdentifier:(pid_t)processIdentifier
@@ -108,9 +118,16 @@
 	return self;
 }
 
+- (BOOL)hasSelectedPayload
+{
+	return _selectedPayload != nil || _selectedPayloadData != nil;
+}
+
 - (void)dealloc
 {
 	[_previousPasteboardItems release];
+	[_selectedPayloadData release];
+	[_selectedPayloadType release];
 	[_selectedPayload release];
 	[_targetApplication release];
 	[super dealloc];
@@ -127,6 +144,7 @@
 - (void)rememberFrontmostApplicationForPaste;
 - (BOOL)pasteTransactionIsCurrent:(FCPasteTransaction *)transaction;
 - (void)clearPasteTransactionIfCurrent:(FCPasteTransaction *)transaction;
+- (void)finishPasteTransactionKeepingSelection:(FCPasteTransaction *)transaction;
 - (void)clearRememberedPasteTarget;
 - (void)hideAppForPasteTransaction:(FCPasteTransaction *)transaction;
 - (void)completePasteInRememberedApplication:(FCPasteTransaction *)transaction;
@@ -1046,6 +1064,18 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 		[self clearRememberedPasteTarget];
 }
 
+// Ends a transaction that nobody cancelled although its paste was not delivered (no
+// Accessibility access, no paste key, the target could not be activated or lost focus).
+// The user chose this clipping, so it stays on the clipboard as it would without the
+// transaction; only a cancellation (Escape, a superseding selection) rolls it back.
+- (void)finishPasteTransactionKeepingSelection:(FCPasteTransaction *)transaction
+{
+	if ( ![self pasteTransactionIsCurrent:transaction] )
+		return;
+	[transaction setClipboardCommitted:YES];
+	[self clearRememberedPasteTarget];
+}
+
 - (void)clearRememberedPasteTarget
 {
 	FCPasteTransaction *transaction = currentPasteTransaction;
@@ -1081,7 +1111,7 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 		 frontmostProcessIdentifier == flycutProcessIdentifier);
 	if ( !focusStillBelongsToTransaction ) {
 		NSLog(@"Paste cancelled because focus left the original transaction before activation");
-		[self clearPasteTransactionIfCurrent:transaction];
+		[self finishPasteTransactionKeepingSelection:transaction];
 		return;
 	}
 
@@ -1095,7 +1125,7 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 				 afterDelay:0.05];
 	} else {
 		NSLog(@"Could not reactivate the application selected for paste");
-		[self clearPasteTransactionIfCurrent:transaction];
+		[self finishPasteTransactionKeepingSelection:transaction];
 	}
 }
 
@@ -1117,8 +1147,9 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 		targetProcessIdentifier == [frontmostApplication processIdentifier];
 	if ( targetIsFrontmost ) {
 		// Use the same immutable local PID for validation and posting.
-		[transaction setPasteWasPosted:[self postCommandVToProcessIdentifier:targetProcessIdentifier]];
-		[self clearPasteTransactionIfCurrent:transaction];
+		if ( ![self postCommandVToProcessIdentifier:targetProcessIdentifier] )
+			NSLog(@"Paste could not be posted; the selection stays on the clipboard");
+		[self finishPasteTransactionKeepingSelection:transaction];
 		return;
 	}
 
@@ -1135,7 +1166,7 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 	}
 
 	NSLog(@"Paste cancelled because the original target did not become frontmost");
-	[self clearPasteTransactionIfCurrent:transaction];
+	[self finishPasteTransactionKeepingSelection:transaction];
 }
 
 - (NSArray *)snapshotPasteboardItems
@@ -1156,7 +1187,7 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 
 - (void)restorePasteboardForCancelledTransaction:(FCPasteTransaction *)transaction
 {
-	if (transaction == nil || [transaction pasteWasPosted] ||
+	if (transaction == nil || [transaction clipboardCommitted] ||
 		[transaction previousPasteboardItems] == nil || [transaction ownedChangeCount] < 0 ||
 		[jcPasteboard changeCount] != [transaction ownedChangeCount])
 		return;
@@ -1180,13 +1211,19 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 
 - (BOOL)pasteboardIsOwnedByTransaction:(FCPasteTransaction *)transaction
 {
-	if (transaction == nil || [transaction selectedPayload] == nil ||
+	if (transaction == nil || ![transaction hasSelectedPayload] ||
 		[transaction ownedChangeCount] < 0 ||
 		[jcPasteboard changeCount] != [transaction ownedChangeCount])
 		return NO;
-	NSString *contents = [jcPasteboard stringForType:NSPasteboardTypeString];
-	return [contents isEqualToString:[transaction selectedPayload]] &&
-		[jcPasteboard changeCount] == [transaction ownedChangeCount];
+	BOOL contentsMatch;
+	if ([transaction selectedPayload] != nil) {
+		NSString *contents = [jcPasteboard stringForType:NSPasteboardTypeString];
+		contentsMatch = [contents isEqualToString:[transaction selectedPayload]];
+	} else {
+		NSData *contents = [jcPasteboard dataForType:[transaction selectedPayloadType]];
+		contentsMatch = [contents isEqualToData:[transaction selectedPayloadData]];
+	}
+	return contentsMatch && [jcPasteboard changeCount] == [transaction ownedChangeCount];
 }
 
 - (void)cancelPendingPasteCompletion
@@ -1260,7 +1297,13 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 	if ( [flycutOperator stackPositionIsInBounds] ) {
 		// stackPosition already IS a store position. It must never be run through the menu's
 		// search-box mapping, which is what the old -pasteIndexAndUpdate: did.
-		[self pasteStorePositionAndUpdate: [flycutOperator stackPosition]];
+		// The copy is final: a later Escape or hotkey press must not roll it back. The
+		// transaction stays open, so a modifier release can still paste this clipping.
+		FCPasteTransaction *transaction = [currentPasteTransaction retain];
+		if ( [self pasteStorePositionAndUpdate: [flycutOperator stackPosition]] &&
+			[self pasteTransactionIsCurrent:transaction] )
+			[transaction setClipboardCommitted:YES];
+		[transaction release];
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
 	} else {
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
@@ -1592,7 +1635,7 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
                             if ([imageData length] <= (NSUInteger)maxSizeKB * 1024) {
                                 dispatch_async(dispatch_get_main_queue(), ^{
                                     if ( ! [pbCount isEqualTo:pbBlockCount] ) {
-                                        [flycutOperator addImageClipping:imageData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path imageType:captureType target:self clippingAddedSelector:@selector(updateMenu)];
+                                        [flycutOperator addImageClipping:imageData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path imageType:captureType target:self clippingAddedSelector:@selector(clippingWasAdded)];
                                     }
                                     [imageData release];
                                 });
@@ -2141,13 +2184,13 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		if ( [flycutOperator clippingAtPosition:i] == clipping )
 			return i;
 
-	// Reloading the store from disk builds new clipping objects, so fall back to comparing
-	// contents. Two clippings with identical contents are interchangeable for pasting.
-	NSString *contents = [(FlycutClipping *)clipping contents];
-	if ( nil != contents )
-		for ( int i = 0; i < count; i++ )
-			if ( [contents isEqualToString:[[flycutOperator clippingAtPosition:i] contents]] )
-				return i;
+	// Reloading the store from disk builds new clipping objects, so fall back to clipping
+	// equality: identical text contents, or for an image the same image hash. Image
+	// clippings all have empty contents, so comparing contents alone would let a deleted
+	// image row paste whichever other image is listed.
+	for ( int i = 0; i < count; i++ )
+		if ( [(FlycutClipping *)clipping isEqual:[flycutOperator clippingAtPosition:i]] )
+			return i;
 
 	return -1;
 }
@@ -2218,7 +2261,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 {
     FCPasteTransaction *transaction = [currentPasteTransaction retain];
     if (transaction != nil) {
-        if ([transaction selectedPayload] != nil) {
+        if ([transaction hasSelectedPayload]) {
             [transaction release];
             return;
         }
@@ -2244,6 +2287,8 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 }
 
 // Returns YES when the image (or the GIF's file reference) was placed on the pasteboard.
+// Inside a paste transaction the placement is owned exactly like text: the previous
+// clipboard is snapshotted first and the written representation becomes the payload.
 -(BOOL)addImageClipToPasteboard:(FlycutClipping *)clipping
 {
     NSString *type = [clipping type];
@@ -2254,22 +2299,64 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     // upload the actual .gif file (preserving animation); if raw image data is also on
     // the pasteboard they grab that instead and flatten it to a single frame. Pointing
     // at the persistent store file is safe — it lives as long as the clipping does.
+    NSURL *fileURL = nil;
+    NSData *imageData = nil;
     if ([type isEqualToString:@"com.compuserve.gif"]) {
         NSString *path = [[FlycutImageStore sharedStore] imageFilePathForHash:[clipping imageHash]];
-        if (path) {
-            [jcPasteboard clearContents];
-            BOOL written = [jcPasteboard writeObjects:@[[NSURL fileURLWithPath:path]]];
-            [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
-            return written;
+        if (path)
+            fileURL = [NSURL fileURLWithPath:path];
+    }
+    if (fileURL == nil)
+        imageData = [[FlycutImageStore sharedStore] imageDataForHash:[clipping imageHash]];
+
+    FCPasteTransaction *transaction = [currentPasteTransaction retain];
+    if (transaction != nil && [transaction hasSelectedPayload]) {
+        // The transaction's first placement stays its payload, as for text.
+        [transaction release];
+        return YES;
+    }
+    if (fileURL == nil && imageData == nil) {
+        // Nothing can be placed, so this selection must not paste whatever is there now.
+        [self clearPasteTransactionIfCurrent:transaction];
+        [transaction release];
+        return NO;
+    }
+    if (transaction != nil) {
+        NSInteger originalCount = [jcPasteboard changeCount];
+        NSArray *snapshot = [self snapshotPasteboardItems];
+        if (snapshot == nil || [jcPasteboard changeCount] != originalCount ||
+            ![self pasteTransactionIsCurrent:transaction]) {
+            [self clearPasteTransactionIfCurrent:transaction];
+            [transaction release];
+            return NO;
+        }
+        [transaction setPreviousPasteboardItems:snapshot];
+        if (fileURL != nil) {
+            [transaction setSelectedPayloadType:NSPasteboardTypeFileURL];
+            [transaction setSelectedPayloadData:[[fileURL absoluteString] dataUsingEncoding:NSUTF8StringEncoding]];
+        } else {
+            [transaction setSelectedPayloadType:type];
+            [transaction setSelectedPayloadData:imageData];
         }
     }
 
-    NSData *imageData = [[FlycutImageStore sharedStore] imageDataForHash:[clipping imageHash]];
-    if (!imageData)
-        return NO;
-    [jcPasteboard declareTypes:@[type] owner:nil];
-    BOOL written = [jcPasteboard setData:imageData forType:type];
-    [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
+    NSInteger declaredCount;
+    BOOL written;
+    if (fileURL != nil) {
+        declaredCount = [jcPasteboard clearContents];
+        [transaction setOwnedChangeCount:declaredCount];
+        written = [jcPasteboard writeObjects:@[fileURL]];
+    } else {
+        declaredCount = [jcPasteboard declareTypes:@[type] owner:nil];
+        [transaction setOwnedChangeCount:declaredCount];
+        written = [jcPasteboard setData:imageData forType:type];
+    }
+    [self setPBBlockCount:@(declaredCount)];
+    if (!written || [jcPasteboard changeCount] != declaredCount) {
+        [self clearPasteTransactionIfCurrent:transaction];
+        written = NO;
+    }
+    [transaction release];
     return written;
 }
 
@@ -2342,7 +2429,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
         NSData *gifData = [data retain];
         dispatch_async(dispatch_get_main_queue(), ^{
             if ( ! [pbCount isEqualTo:pbBlockCount] ) {
-                [flycutOperator addImageClipping:gifData fromApp:appName withAppBundleURL:bundleURL imageType:@"com.compuserve.gif" target:self clippingAddedSelector:@selector(updateMenu)];
+                [flycutOperator addImageClipping:gifData fromApp:appName withAppBundleURL:bundleURL imageType:@"com.compuserve.gif" target:self clippingAddedSelector:@selector(clippingWasAdded)];
             }
             [gifData release];
         });

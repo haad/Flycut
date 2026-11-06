@@ -23,10 +23,17 @@ open Settings or terminate another application.
   snapshot and restore methods against an in-memory generation-counted board.
   The event sink compiles the real posting method with trust/post functions
   redirected, and inspects all four event-construction/routing calls with inert event objects.
+  The image tests run the same placement, ownership and restore methods for image
+  and GIF-file-reference clippings, with the image file store replaced by memory and
+  the system beep redirected.
 - **Observable:** exact selected identity/payload, activation and post counts,
   original PID, clipboard contents/generation and rollback representations.
 - **Isolation:** stale callbacks cannot post for or clear a newer invocation;
   external copies are not overwritten when their changed generation is observed.
+- **Rollback:** a cancellation (Escape, a superseding selection) or a failed clipboard
+  write restores the previous clipboard, and only while the transaction still owns it.
+  A paste that is not delivered (refused post, failed activation, focus change) and
+  the bezel's copy-only action leave the selected clipping on the clipboard.
 
 `FC_PASTE_TEST_BUILD_ROOT` optionally preserves generated fixture sources,
 binaries and complete compiler output for hash-bound review. Without it, temporary

@@ -549,13 +549,21 @@
         [tempImage release];
     }
 
+    // Follow the selected clipping across the insert, exactly as -addClipping: does for
+    // text, so an image arriving while the bezel is open does not move the selection.
+    FlycutClipping *anchor = nil;
+    if ( stackPosition > 0 && stackPosition < [clippingStore jcListCount] )
+        anchor = [[clippingStore clippingAtPosition:stackPosition] retain];
+
     bool success = [clippingStore addImageClippingWithHash:hash
                                                 imageSize:pixelSize
                                                 imageType:imageType
                                      fromAppLocalizedName:appName
                                          fromAppBundleURL:bundleURL
                                               atTimestamp:[[NSDate date] timeIntervalSince1970]];
-    stackPosition = 0;
+    int followed = ( nil != anchor ) ? [clippingStore indexOfClipping:anchor] : -1;
+    stackPosition = ( followed >= 0 ) ? followed : 0;
+    [anchor release];
     [selectorTarget performSelector:clippingAddedSelector];
     [self actionAfterListModification];
     return success;
