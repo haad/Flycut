@@ -30,7 +30,7 @@
 │   └── Info.plist
 ├── MJCloudKitUserDefaultsSync/ # CloudKit sync library (infrastructure only, currently disabled)
 ├── English.lproj/              # Localization bundle
-│   └── MainMenu.nib            # IB-designed main menu and UI
+│   └── MainMenu.xib            # IB-designed main menu and UI
 ├── Resources/                  # Images, icons, documentation
 ├── Flycut.xcodeproj/           # Xcode project configuration
 ├── Info.plist                  # Application metadata
@@ -80,8 +80,8 @@
 
 **English.lproj:**
 - Purpose: UI localization and IB-designed interface definitions
-- Contains: MainMenu.nib containing all menu structure, preferences window, search window definitions
-- Key files: `MainMenu.nib` (primary UI definition)
+- Contains: MainMenu.xib containing all menu structure, preferences window, search window definitions
+- Key files: `MainMenu.xib` (primary UI definition, compiled at build time)
 - Patterns: Xcode IB-compatible NIB format, outlet connections to AppController
 
 ## Key File Locations
@@ -148,7 +148,7 @@
 
 **New UI Component:**
 - Implementation: Create new file in `UI/` directory (e.g., `CustomControl.m/h`)
-- Integration: Design in `English.lproj/MainMenu.nib` via Xcode IB
+- Integration: Design in `English.lproj/MainMenu.xib` via Xcode IB
 - Controller: Add IBOutlet in `AppController.h` and connect in IB
 - Behavior: Implement in `AppController.m` delegate methods or action handlers
 
@@ -177,7 +177,7 @@
 
 **English.lproj/**
 - Purpose: Localization bundle containing UI definitions
-- Generated: Partially (MainMenu.nib edited in IB)
+- Generated: Partially (MainMenu.xib edited in IB)
 - Committed: Yes (required for app bundle)
 
 **Resources/**
