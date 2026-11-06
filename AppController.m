@@ -1294,16 +1294,21 @@
             case 's': case 'S': // Save / Save-and-delete
                 {
                     bool success = [flycutOperator saveFromStack];
+
+                    // Delete while the store that was saved from is still the current one.
+                    // -restoreStashedStore swaps the store AND the stack position back, so
+                    // deleting after it removed an entry from the main list - at whatever
+                    // position the user had been at there - instead of the clipping that had
+                    // just been saved.  Saving a favorite therefore destroyed an unrelated
+                    // clipping.
+                    if ( success && ( modifiers & NSEventModifierFlagShift ) ) {
+                        [flycutOperator clearItemAtStackPosition];
+                        [self updateBezel];
+                        [self updateMenu];
+                    }
+
                     [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
                     [self restoreStashedStoreAndUpdate];
-
-                    if ( success ) {
-                        if ( modifiers & NSEventModifierFlagShift ) {
-                            [flycutOperator clearItemAtStackPosition];
-                            [self updateBezel];
-                            [self updateMenu];
-                        }
-                    }
                 }
                 break;
             case 'f':
