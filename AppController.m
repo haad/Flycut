@@ -1621,7 +1621,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		// If we remove all of them and add all new ones, the menu won't redraw if the count is unchanged, so just reuse them by changing their title.
 		int oldItems = [menuItems count]-jcMenuBaseItemsCount;
 		int newItems = [clipStrings count];
-        DLog(@"list=%@, oldItems=%d, newItems=%d", returnedDisplayStrings, oldItems, newItems);
+        DLog(@"oldItems=%d, newItems=%d", oldItems, newItems);
         
         for ( int i = 0; i < oldItems; i++ )
             [jcMenu removeItemAtIndex:0];

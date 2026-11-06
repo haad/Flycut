@@ -379,8 +379,16 @@
 	// Check to see if they want a little help figuring out what types to enter.
 	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"] )
 	{
-		[clippingStore addClipping:type ofType:type fromAppLocalizedName:@"Flycut" fromAppBundleURL:nil atTimestamp:0];
-		[self actionAfterListModification];
+		// pollPB evaluates text clippings on a background queue, but the stores
+		// may only be modified on the main thread, so commit the entry there.
+		void (^revealType)(void) = ^{
+			[clippingStore addClipping:type ofType:type fromAppLocalizedName:@"Flycut" fromAppBundleURL:nil atTimestamp:0];
+			[self actionAfterListModification];
+		};
+		if ( [NSThread isMainThread] )
+			revealType();
+		else
+			dispatch_async(dispatch_get_main_queue(), revealType);
 	}
 
 	__block bool skipClipping = NO;
