@@ -26,7 +26,7 @@ Every time you copy a code piece, Flycut stores it in history. Later, you can pa
 | Shortcut | Action |
 |----------|--------|
 | Shift+Command+V | Open clipboard history (bezel) |
-| _(unset by default)_ | Open search window — assign one in Preferences |
+| Control+Shift+S | Open search window |
 
 ### Bezel Navigation
 
