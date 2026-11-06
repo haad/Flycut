@@ -393,6 +393,9 @@
     if([event modifierFlags] & NSEventModifierFlagOption) {
         [menu cancelTracking];
         bool disableStore = [self toggleMenuIconDisabled];
+        // Captures still in flight belong to the previous epoch and are discarded,
+        // even when capture is resumed before they finish.
+        clipboardCaptureEpoch += 1;
         if (!disableStore)
         {
             // Update the pbCount so we don't enable and have it immediately copy the thing the user was trying to avoid.
@@ -1139,6 +1142,7 @@
         imageType = nil;
     NSArray *availableTypes = [jcPasteboard types];
     NSInteger blockedGeneration = [pbBlockCount integerValue];
+    NSUInteger captureEpoch = clipboardCaptureEpoch;
     if ( type == nil && imageType == nil )
         return;
 
@@ -1161,6 +1165,8 @@
                         pasteboardGeneration,
                         pasteboardGenerationAfterRead,
                         blockedGeneration,
+                        captureEpoch,
+                        clipboardCaptureEpoch,
                         [flycutOperator storeDisabled]
                     )) {
                     DLog(@"Contents: Blocked, paused, or changed during read");
@@ -1199,9 +1205,12 @@
             // When the clipboard carries only a flattened still but embeds the source
             // GIF's URL (e.g. Chrome "Copy Image" on an animated GIF), fetch the real
             // animated file instead of capturing the still.
+            // Diagnostics record only the copy's type, so they never start a download;
+            // the still then goes to the image job below, which records its type.
             BOOL haveDirectGIF = [imageType isEqualToString:@"com.compuserve.gif"];
             NSURL *gifURL = nil;
-            if ( !haveDirectGIF && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"] )
+            if ( !haveDirectGIF && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"]
+                 && ![[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"] )
                 gifURL = [self animatedGifURLFromPasteboard];
 
             if ( gifURL != nil ) {
@@ -1226,6 +1235,8 @@
                                 pasteboardGeneration,
                                 pasteboardGenerationAfterRead,
                                 blockedGeneration,
+                                captureEpoch,
+                                clipboardCaptureEpoch,
                                 [flycutOperator storeDisabled]
                             )) {
                             if (revealPasteboardTypes) {
@@ -1782,6 +1793,8 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL
 {
+    // Pausing capture while the download runs discards it, as for clipboard reads.
+    NSUInteger captureEpoch = clipboardCaptureEpoch;
     int maxSizeKB = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"maxImageSizeKB"];
     if (maxSizeKB <= 0) maxSizeKB = 10240;
     NSUInteger maxBytes = (NSUInteger)maxSizeKB * 1024;
@@ -1814,7 +1827,9 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
         NSData *gifData = [data retain];
         dispatch_async(dispatch_get_main_queue(), ^{
-            if ( ! [pbCount isEqualTo:pbBlockCount] ) {
+            // Diagnostics turned on during the download: save no payload.
+            BOOL revealPasteboardTypes = [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
+            if ( captureEpoch == clipboardCaptureEpoch && ! [pbCount isEqualTo:pbBlockCount] && !revealPasteboardTypes ) {
                 [flycutOperator addImageClipping:gifData fromApp:appName withAppBundleURL:bundleURL imageType:@"com.compuserve.gif" target:self clippingAddedSelector:@selector(updateMenu)];
             }
             [gifData release];

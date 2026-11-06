@@ -34,11 +34,13 @@ class ClipboardCaptureSafetyTests(unittest.TestCase):
 #include "ClipboardGenerationPolicy.h"
 
 int main(void) {
-    if (!FCShouldCommitClipboardRead(11, 11, 10, false)) return 1;
-    if (FCShouldCommitClipboardRead(11, 12, 10, false)) return 2;
-    if (FCShouldCommitClipboardRead(11, 11, 11, false)) return 3;
-    if (FCShouldCommitClipboardRead(11, 12, 12, false)) return 4;
-    if (FCShouldCommitClipboardRead(11, 11, 10, true)) return 5;
+    if (!FCShouldCommitClipboardRead(11, 11, 10, 3, 3, false)) return 1;
+    if (FCShouldCommitClipboardRead(11, 12, 10, 3, 3, false)) return 2;
+    if (FCShouldCommitClipboardRead(11, 11, 11, 3, 3, false)) return 3;
+    if (FCShouldCommitClipboardRead(11, 12, 12, 3, 3, false)) return 4;
+    if (FCShouldCommitClipboardRead(11, 11, 10, 3, 3, true)) return 5;
+    // Capture was paused (and possibly resumed) after the read started.
+    if (FCShouldCommitClipboardRead(11, 11, 10, 3, 4, false)) return 6;
     return 0;
 }
 '''
@@ -81,6 +83,7 @@ int main(void) {
         self.assertIn(
             "NSInteger blockedGeneration = [pbBlockCount integerValue]", method
         )
+        self.assertIn("NSUInteger captureEpoch = clipboardCaptureEpoch", method)
         self.assertIn(
             "NSInteger pasteboardGenerationAfterRead = [jcPasteboard changeCount]",
             method,
@@ -94,6 +97,7 @@ int main(void) {
         self.assertIn(
             "FCShouldCommitClipboardRead( pasteboardGeneration, "
             "pasteboardGenerationAfterRead, blockedGeneration, "
+            "captureEpoch, clipboardCaptureEpoch, "
             "[flycutOperator storeDisabled] )",
             normalized_method,
         )
