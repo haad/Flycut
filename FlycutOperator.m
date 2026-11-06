@@ -326,14 +326,12 @@
         }
 
         if (isImage) {
-            [imageData writeToFile:fileNameWithPath atomically:YES];
-        } else {
-            [pbFullText writeToFile:fileNameWithPath
-                      atomically:NO
-                        encoding:NSNonLossyASCIIStringEncoding
-                           error:nil];
+            return [imageData writeToFile:fileNameWithPath atomically:YES];
         }
-        return YES;
+        return [pbFullText writeToFile:fileNameWithPath
+                            atomically:NO
+                              encoding:NSNonLossyASCIIStringEncoding
+                                 error:nil];
     }
     return NO;
 }
@@ -512,22 +510,27 @@
             return NO;
     }
 
+    // Only bytes that decode as an image become an image clipping; anything else
+    // could be neither shown nor pasted.
+    NSImage *tempImage = [[NSImage alloc] initWithData:imageData];
+    if (!tempImage)
+        return NO;
+    NSSize pixelSize = NSZeroSize;
+    NSImageRep *rep = [[tempImage representations] firstObject];
+    if (rep) {
+        pixelSize = NSMakeSize([rep pixelsWide], [rep pixelsHigh]);
+    }
+    [tempImage release];
+
     // With Save: Never the bytes stay in memory only, so no image contents reach the disk.
     NSString *extension = [FlycutImageStore fileExtensionForType:imageType];
+    BOOL stored;
     if ([[NSUserDefaults standardUserDefaults] integerForKey:@"savePreference"] >= 1)
-        [imgStore saveImageData:imageData forHash:hash extension:extension];
+        stored = [imgStore saveImageData:imageData forHash:hash extension:extension];
     else
-        [imgStore saveMemoryOnlyImageData:imageData forHash:hash extension:extension];
-
-    NSSize pixelSize = NSZeroSize;
-    NSImage *tempImage = [[NSImage alloc] initWithData:imageData];
-    if (tempImage) {
-        NSImageRep *rep = [[tempImage representations] firstObject];
-        if (rep) {
-            pixelSize = NSMakeSize([rep pixelsWide], [rep pixelsHigh]);
-        }
-        [tempImage release];
-    }
+        stored = [imgStore saveMemoryOnlyImageData:imageData forHash:hash extension:extension];
+    if (!stored)
+        return NO;
 
     bool success = [clippingStore addImageClippingWithHash:hash
                                                 imageSize:pixelSize
@@ -548,7 +551,10 @@
 
 -(BOOL)isImageHashReferencedElsewhere:(NSString *)hash excludingStore:(FlycutStore *)excludeStore atIndex:(int)excludeIndex
 {
-    FlycutStore *stores[] = { clippingStore, favoritesStore };
+    // While Favorites is shown, clippingStore is the favorites store and the main
+    // history is stashed. Scan each physical store once.
+    FlycutStore *mainStore = stashedStore ? stashedStore : clippingStore;
+    FlycutStore *stores[] = { mainStore, favoritesStore != mainStore ? favoritesStore : nil };
     for (int s = 0; s < 2; s++) {
         FlycutStore *store = stores[s];
         if (!store) continue;
@@ -564,13 +570,7 @@
 }
 
 - (void)willDeleteClippingFromStore:(id)store AtIndex:(int)index {
-    FlycutClipping *clipping = [(FlycutStore *)store clippingAtPosition:index];
-    if ([clipping isImageClipping]) {
-        if (![self isImageHashReferencedElsewhere:[clipping imageHash] excludingStore:(FlycutStore *)store atIndex:index]) {
-            [[FlycutImageStore sharedStore] deleteImageForHash:[clipping imageHash]];
-        }
-    }
-
+	// Export a forgotten clipping before releasing its image bytes; the export reads them.
 	if ( (!inhibitAutosaveClippings)
 		&& ( store == favoritesStore
 		? [[[NSUserDefaults standardUserDefaults] valueForKey:@"saveForgottenFavorites"] boolValue]
@@ -578,6 +578,13 @@
 	{
 		[self saveFromStore:store atIndex:index withPrefix:@"Autosave "];
 	}
+
+    FlycutClipping *clipping = [(FlycutStore *)store clippingAtPosition:index];
+    if ([clipping isImageClipping]) {
+        if (![self isImageHashReferencedElsewhere:[clipping imageHash] excludingStore:(FlycutStore *)store atIndex:index]) {
+            [[FlycutImageStore sharedStore] deleteImageForHash:[clipping imageHash]];
+        }
+    }
 }
 
 -(void)actionAfterListModification

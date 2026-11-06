@@ -166,6 +166,9 @@
     for ( int i = (int)[jcList count] ; i > 0 ; i-- )
 	{
 		[self delegateWillDeleteClippingAtIndex:(i-1)];
+		// Remove each entry before the next callback, so that callback sees only
+		// the clippings that are still listed (duplicates included).
+		[jcList removeObjectAtIndex:(i-1)];
         [self delegateDeleteClippingAtIndex:(i-1)];
 	}
 

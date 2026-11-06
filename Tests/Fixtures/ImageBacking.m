@@ -188,6 +188,7 @@ static NSString *FixtureTemporaryDirectory(void) {
 }
 
 // In-memory pasteboard. -fixtureCopyTypes:data: models another application copying.
+// replaceOnReadOfType models a copy that lands just before that type is read.
 @interface FixturePasteboard : NSObject {
 @public
     NSInteger changeCount;
@@ -195,6 +196,9 @@ static NSString *FixtureTemporaryDirectory(void) {
     NSMutableDictionary *dataByType;
     NSArray *writtenObjects;
     BOOL failWrites;
+    NSString *replaceOnReadOfType;
+    NSArray *replacementTypes;
+    NSDictionary *replacementData;
 }
 - (NSInteger)changeCount;
 - (NSInteger)declareTypes:(NSArray *)types owner:(id)owner;
@@ -260,7 +264,13 @@ static NSString *FixtureTemporaryDirectory(void) {
     }
 }
 - (NSData *)dataForType:(NSString *)type {
-    @synchronized (self) { return [[[dataByType objectForKey:type] retain] autorelease]; }
+    @synchronized (self) {
+        if (replaceOnReadOfType && [type isEqualToString:replaceOnReadOfType]) {
+            [replaceOnReadOfType release]; replaceOnReadOfType = nil;
+            [self fixtureCopyTypes:replacementTypes data:replacementData];
+        }
+        return [[[dataByType objectForKey:type] retain] autorelease];
+    }
 }
 - (NSString *)stringForType:(NSString *)type {
     NSData *data = [self dataForType:type];
@@ -287,16 +297,111 @@ static NSString *FixtureTemporaryDirectory(void) {
 #include "FlycutEngine/FlycutImageStore.m"
 #include "FlycutOperator.m"
 
-// The AppController image paste methods, verbatim, on a harness with the same
-// instance variable names. Unrelated UI methods are recorded stubs.
+// Workspace, network and UI doubles for the extracted AppController methods.
+@interface FixtureWorkspace : NSObject
++ (FixtureWorkspace *)sharedWorkspace;
+- (NSArray *)runningApplications;
+@end
+@implementation FixtureWorkspace
++ (FixtureWorkspace *)sharedWorkspace { static FixtureWorkspace *shared; if (!shared) shared = [[self alloc] init]; return shared; }
+- (NSArray *)runningApplications { return @[]; }
+@end
+
+typedef void (^FixtureCompletion)(NSData *, NSURLResponse *, NSError *);
+static FixtureCompletion pendingDownload;   // completion handler of the last requested download
+static NSURL *pendingDownloadURL;
+static int downloadRequests;
+@interface FixtureURLSessionConfiguration : NSObject {
+    NSTimeInterval timeoutIntervalForRequest, timeoutIntervalForResource;
+}
+@property (nonatomic, assign) NSTimeInterval timeoutIntervalForRequest;
+@property (nonatomic, assign) NSTimeInterval timeoutIntervalForResource;
++ (FixtureURLSessionConfiguration *)ephemeralSessionConfiguration;
+@end
+@implementation FixtureURLSessionConfiguration
+@synthesize timeoutIntervalForRequest, timeoutIntervalForResource;
++ (FixtureURLSessionConfiguration *)ephemeralSessionConfiguration { return [[[self alloc] init] autorelease]; }
+@end
+@interface FixtureDataTask : NSObject
+- (void)resume;
+@end
+@implementation FixtureDataTask
+- (void)resume { downloadRequests++; }
+@end
+@interface FixtureURLSession : NSObject
++ (FixtureURLSession *)sessionWithConfiguration:(FixtureURLSessionConfiguration *)configuration;
+- (id)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))handler;
+- (void)finishTasksAndInvalidate;
+@end
+@implementation FixtureURLSession
++ (FixtureURLSession *)sessionWithConfiguration:(FixtureURLSessionConfiguration *)configuration {
+    (void)configuration;
+    return [[[self alloc] init] autorelease];
+}
+- (id)dataTaskWithURL:(NSURL *)url completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))handler {
+    [pendingDownload release]; pendingDownload = [handler copy];
+    [pendingDownloadURL release]; pendingDownloadURL = [url retain];
+    return [[[FixtureDataTask alloc] init] autorelease];
+}
+- (void)finishTasksAndInvalidate {}
+@end
+
+// Background work of the extracted methods runs on this serial queue, so a case can
+// wait for it deterministically before draining the main queue.
+static dispatch_queue_t fixtureBackgroundQueue;
+static dispatch_queue_t FixtureGlobalQueue(intptr_t identifier, uintptr_t flags) {
+    (void)identifier; (void)flags;
+    return fixtureBackgroundQueue;
+}
+static void Settle(void) {
+    for (int i = 0; i < 3; i++) {
+        dispatch_sync(fixtureBackgroundQueue, ^{});
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, false);
+    }
+}
+
+@interface FixtureControl : NSObject
+- (NSString *)stringValue;
+- (NSInteger)selectedRow;
+@end
+@implementation FixtureControl
+- (NSString *)stringValue { return @""; }
+- (NSInteger)selectedRow { return 0; }
+@end
+@interface FixtureMenu : NSObject
+- (NSInteger)indexOfItem:(id)item;
+@end
+@implementation FixtureMenu
+- (NSInteger)indexOfItem:(id)item { (void)item; return 0; }
+@end
+@interface FixtureMenuItem : NSObject {
+    FixtureMenu *fixtureMenu;
+}
+- (id)menu;
+@end
+@implementation FixtureMenuItem
+- (id)menu { if (!fixtureMenu) fixtureMenu = [[FixtureMenu alloc] init]; return fixtureMenu; }
+@end
+
+// The AppController image paste and capture methods, verbatim, on a harness with
+// the same instance variable names. Unrelated UI methods are recorded stubs.
 #define NSPasteboard FixtureForbiddenRealPasteboard
+#define NSWorkspace FixtureWorkspace
+#define NSURLSession FixtureURLSession
+#define NSURLSessionConfiguration FixtureURLSessionConfiguration
+#define dispatch_get_global_queue FixtureGlobalQueue
 @interface ImageHarness : NSObject {
 @public
     FixturePasteboard *jcPasteboard;
     NSNumber *pbCount;
     NSNumber *pbBlockCount;
     FlycutOperator *flycutOperator;
-    NSMutableArray *scheduled;
+    FixtureControl *searchBox;
+    FixtureControl *searchWindowSearchField;
+    FixtureControl *searchWindowTableView;
+    NSArray *searchResults;
+    NSMutableArray *scheduled;   // selectors passed to -performSelector:withObject:afterDelay:
+    NSMutableArray *calls;       // stubbed UI methods that ran
 }
 @end
 @implementation ImageHarness
@@ -305,8 +410,18 @@ static NSString *FixtureTemporaryDirectory(void) {
     (void)object; (void)delay;
     [scheduled addObject:NSStringFromSelector(selector)];
 }
+- (void)hideApp { [calls addObject:@"hideApp"]; }
+- (void)fakeCommandV { [calls addObject:@"fakeCommandV"]; }
+- (void)restoreStashedStoreAndUpdate { [calls addObject:@"restoreStashedStoreAndUpdate"]; }
+- (void)updateMenu { [calls addObject:@"updateMenu"]; }
+- (void)hideSearchWindow { [calls addObject:@"hideSearchWindow"]; }
+- (void)toggleMenuIconDisabled { [calls addObject:@"toggleMenuIconDisabled"]; }
 @end
 #undef NSPasteboard
+#undef NSWorkspace
+#undef NSURLSession
+#undef NSURLSessionConfiguration
+#undef dispatch_get_global_queue
 #undef NSUserDefaults
 #undef NSSearchPathForDirectoriesInDomains
 #undef NSTemporaryDirectory
@@ -314,13 +429,14 @@ static NSString *FixtureTemporaryDirectory(void) {
 // ---------------------------------------------------------------------------
 // Helpers.
 // ---------------------------------------------------------------------------
+static int clippingAddedCalls;
 @interface SaveTarget : NSObject
 - (void)savePreferencesOnDict:(NSMutableDictionary *)dictionary;
 - (void)clippingAdded;
 @end
 @implementation SaveTarget
 - (void)savePreferencesOnDict:(NSMutableDictionary *)dictionary { (void)dictionary; }
-- (void)clippingAdded {}
+- (void)clippingAdded { clippingAddedCalls++; }
 @end
 static SaveTarget *saveTarget;
 
@@ -385,7 +501,11 @@ static ImageHarness *NewHarness(FlycutOperator *op) {
     harness->pbCount = [@0 retain];
     harness->pbBlockCount = [@0 retain];
     harness->flycutOperator = [op retain];
+    harness->searchBox = [[FixtureControl alloc] init];
+    harness->searchWindowSearchField = [[FixtureControl alloc] init];
+    harness->searchWindowTableView = [[FixtureControl alloc] init];
     harness->scheduled = [[NSMutableArray alloc] init];
+    harness->calls = [[NSMutableArray alloc] init];
     return harness;
 }
 static NSString *PastedFilePath(ImageHarness *harness) {
@@ -585,6 +705,292 @@ static void CaseStaleTemporaryCopiesRemovedAtStart(void) {
     CHECK([fm fileExistsAtPath:[live stringByAppendingPathComponent:@"x.gif"]], "temporary copies of a live process are kept");
 }
 
+static BOOL AddText(FlycutOperator *op, NSString *text) {
+    return [op addClipping:text ofType:NSPasteboardTypeString fromApp:@"Fixture" withAppBundleURL:nil
+                    target:saveTarget clippingAddedSelector:@selector(clippingAdded)];
+}
+
+// PR3-1: while Favorites is shown, deleting a favorite must not release image bytes
+// that the (stashed) main history still references.
+static void FavoriteDeleteKeepsMainHistoryImage(NSInteger savePreference) {
+    [Defaults() setInteger:savePreference forKey:@"savePreference"];
+    FlycutOperator *op = NewOperator();
+    NSData *png = PNGData(40, 50, 60);
+    CHECK(AddImage(op, png, NSPasteboardTypePNG), "image captured");
+    CHECK([op saveFromStackToFavorites], "image moved to Favorites");
+    CHECK(AddText(op, @"text"), "text captured");
+    CHECK(AddImage(op, png, NSPasteboardTypePNG), "same image copied again into the main history");
+    [op toggleToFromFavoritesStore];
+    CHECK([op favoritesStoreIsSelected], "Favorites shown");
+    CHECK([[[op clippingAtStackPosition] imageHash] isEqualToString:HashOf(png)], "selected favorite is the image");
+    CHECK([op clearItemAtStackPosition], "favorite deleted");
+    [op toggleToFromFavoritesStore];
+    CHECK(![op favoritesStoreIsSelected] && [op jcListCount] == 2, "main history shown again");
+    FlycutClipping *mainClipping = [op clippingAtStackPosition];
+    CHECK([mainClipping isImageClipping], "main history still lists the image");
+    CHECK([[[FlycutImageStore sharedStore] imageDataForHash:[mainClipping imageHash]] isEqualToData:png],
+          "deleting the favorite released the bytes of the main history image");
+}
+static void CaseFavoriteDeleteKeepsMainImageSaved(void) { FavoriteDeleteKeepsMainHistoryImage(1); }
+static void CaseFavoriteDeleteKeepsMainImageNever(void) { FavoriteDeleteKeepsMainHistoryImage(0); }
+
+// PR3-6: Clear All must release an image that is listed more than once.
+static void ClearAllReleasesDuplicates(NSInteger savePreference) {
+    [Defaults() setInteger:savePreference forKey:@"savePreference"];
+    [Defaults() setBool:NO forKey:@"removeDuplicates"];
+    FlycutOperator *op = NewOperator();
+    NSData *png = PNGData(70, 80, 90);
+    CHECK(AddImage(op, png, NSPasteboardTypePNG) && AddText(op, @"between") && AddImage(op, png, NSPasteboardTypePNG),
+          "duplicate image clippings captured");
+    CHECK([op jcListCount] == 3, "both duplicates listed");
+    [op clearList];
+    CHECK([op jcListCount] == 0, "list cleared");
+    CHECK(![[FlycutImageStore sharedStore] hasImageForHash:HashOf(png)], "Clear All kept the bytes of a duplicated image");
+    NSArray *files = DataFilesUnderRoot();
+    if ([files count]) fprintf(stderr, "files left after Clear All: %s\n", [Describe(files) UTF8String]);
+    CHECK([files count] == 0, "Clear All left image files on disk");
+}
+static void CaseClearAllDuplicatesSaved(void) { ClearAllReleasesDuplicates(1); }
+static void CaseClearAllDuplicatesNever(void) { ClearAllReleasesDuplicates(0); }
+
+// PR3-2: an image evicted from a full history is exported by "save forgotten
+// clippings" before its bytes are released.
+static void EvictedImageIsAutosaved(NSInteger savePreference) {
+    [Defaults() setInteger:savePreference forKey:@"savePreference"];
+    [Defaults() setInteger:1 forKey:@"rememberNum"];
+    [Defaults() setBool:YES forKey:@"saveForgottenClippings"];
+    [Defaults() setURL:[NSURL fileURLWithPath:RootPath(@"Autosave")] forKey:@"autoSaveToLocation"];
+    FlycutOperator *op = NewOperator();
+    NSData *evicted = PNGData(11, 12, 13), *kept = PNGData(14, 15, 16);
+    CHECK(AddImage(op, evicted, NSPasteboardTypePNG) && AddImage(op, kept, NSPasteboardTypePNG), "two images captured");
+    CHECK([op jcListCount] == 1, "history remembers one clipping");
+    NSArray *exports = FilesUnder(RootPath(@"Autosave"));
+    fprintf(stderr, "forgotten-clipping exports: [%s]\n", [Describe(exports) UTF8String]);
+    CHECK([exports count] == 1, "evicted image was not exported");
+    NSString *export = [RootPath(@"Autosave") stringByAppendingPathComponent:[exports firstObject] ?: @"missing"];
+    CHECK([[export pathExtension] isEqualToString:@"png"], "export keeps the image file type");
+    CHECK([[NSData dataWithContentsOfFile:export] isEqualToData:evicted], "export holds the evicted image bytes");
+    CHECK(![[FlycutImageStore sharedStore] hasImageForHash:HashOf(evicted)], "evicted image bytes released after the export");
+    CHECK([[[FlycutImageStore sharedStore] imageDataForHash:HashOf(kept)] isEqualToData:kept], "remembered image kept");
+}
+static void CaseEvictedImageAutosavedSaved(void) { EvictedImageIsAutosaved(1); }
+static void CaseEvictedImageAutosavedNever(void) { EvictedImageIsAutosaved(0); }
+
+// PR3-2: saving a clipping to a file reports a failed write, so "save and delete"
+// does not delete a clipping that was not saved.
+static void CaseSaveReportsWriteFailure(void) {
+    [Defaults() setInteger:1 forKey:@"savePreference"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    // A regular file where the save directory should be makes every write fail
+    // (ENOTDIR), independent of permissions and inherited ACLs.
+    NSString *notADirectory = RootPath(@"NotADirectory"), *writable = RootPath(@"Writable");
+    CHECK([[NSData dataWithBytes:"x" length:1] writeToFile:notADirectory atomically:NO] &&
+          [fm createDirectoryAtPath:writable withIntermediateDirectories:YES attributes:nil error:nil], "fixture paths");
+    [Defaults() setURL:[NSURL fileURLWithPath:notADirectory] forKey:@"saveToLocation"];
+    FlycutOperator *op = NewOperator();
+    CHECK(AddText(op, @"text to save"), "text captured");
+    CHECK(![op saveFromStack], "a failed text export was reported as saved");
+    CHECK(AddImage(op, PNGData(17, 18, 19), NSPasteboardTypePNG), "image captured");
+    CHECK(![op saveFromStack], "a failed image export was reported as saved");
+
+    [Defaults() setURL:[NSURL fileURLWithPath:writable] forKey:@"saveToLocation"];
+    CHECK([op saveFromStack], "image export to a writable directory succeeds");
+    CHECK([FilesUnder(writable) count] == 1, "image exported once");
+}
+
+// PR3-5: an image whose bytes could not be stored is not reported as a clipping.
+static void CaseFailedImageWriteIsNotCaptured(void) {
+    [Defaults() setInteger:1 forKey:@"savePreference"];
+    // A regular file where the image directory should be makes every image write fail.
+    NSString *flycutDirectory = [ImagesDirectory() stringByDeletingLastPathComponent];
+    CHECK([[NSFileManager defaultManager] createDirectoryAtPath:flycutDirectory withIntermediateDirectories:YES attributes:nil error:nil] &&
+          [[NSData dataWithBytes:"x" length:1] writeToFile:ImagesDirectory() atomically:NO], "fixture paths");
+    FlycutOperator *op = NewOperator();
+    NSData *png = PNGData(21, 22, 23);
+    clippingAddedCalls = 0;
+    CHECK(!AddImage(op, png, NSPasteboardTypePNG), "an image that could not be stored was reported as captured");
+    CHECK([op jcListCount] == 0, "an image that could not be stored was listed");
+    CHECK(clippingAddedCalls == 0, "an image that could not be stored triggered a menu update");
+    CHECK(![[FlycutImageStore sharedStore] hasImageForHash:HashOf(png)], "no bytes for the rejected image");
+}
+
+// PR3-5: bytes that do not decode as an image are not captured.
+static void UndecodableBytesAreNotCaptured(NSInteger savePreference) {
+    [Defaults() setInteger:savePreference forKey:@"savePreference"];
+    FlycutOperator *op = NewOperator();
+    NSData *junk = [@"these bytes are not an image" dataUsingEncoding:NSUTF8StringEncoding];
+    clippingAddedCalls = 0;
+    CHECK(!AddImage(op, junk, NSPasteboardTypePNG), "undecodable bytes were reported as an image clipping");
+    CHECK([op jcListCount] == 0 && clippingAddedCalls == 0, "undecodable bytes were listed as an image");
+    CHECK(![[FlycutImageStore sharedStore] hasImageForHash:HashOf(junk)], "undecodable bytes were stored");
+    CHECK([DataFilesUnderRoot() count] == 0, "undecodable bytes were written to disk");
+}
+static void CaseUndecodableBytesNotCapturedSaved(void) { UndecodableBytesAreNotCaptured(1); }
+static void CaseUndecodableBytesNotCapturedNever(void) { UndecodableBytesAreNotCaptured(0); }
+
+// PR3-5: when an image cannot be placed on the clipboard, no Paste keystroke is
+// synthesized, because it would paste whatever the clipboard held before.
+static void CaseLostImageBytesAreNotPasted(void) {
+    [Defaults() setInteger:1 forKey:@"savePreference"];
+    [Defaults() setBool:YES forKey:@"menuSelectionPastes"];
+    FlycutOperator *op = NewOperator();
+    NSData *png = PNGData(24, 25, 26);
+    CHECK(AddImage(op, png, NSPasteboardTypePNG), "image captured");
+    ImageHarness *harness = NewHarness(op);
+    FixtureMenuItem *menuItem = [[[FixtureMenuItem alloc] init] autorelease];
+    harness->searchResults = [@[@"[Image]"] retain];
+
+    // Control: with its bytes available the image is placed and pasted on every path.
+    [harness pasteFromStack];
+    CHECK([harness->scheduled containsObject:@"fakeCommandV"], "control: bezel pastes a stored image");
+    CHECK([[harness->jcPasteboard dataForType:NSPasteboardTypePNG] isEqualToData:png], "control: image placed on the clipboard");
+    [harness->scheduled removeAllObjects];
+    [harness processMenuClippingSelection:menuItem];
+    CHECK([harness->scheduled containsObject:@"fakeCommandV"], "control: menu selection pastes a stored image");
+    [harness->scheduled removeAllObjects];
+    [harness searchWindowItemSelected:nil];
+    CHECK([harness->scheduled containsObject:@"fakeCommandV"], "control: search window pastes a stored image");
+
+    // The stored file disappears behind Flycut's back.
+    NSString *stored = [ImagesDirectory() stringByAppendingPathComponent:[HashOf(png) stringByAppendingPathExtension:@"png"]];
+    CHECK([[NSFileManager defaultManager] removeItemAtPath:stored error:nil], "stored image file removed");
+    [harness->jcPasteboard fixtureCopyTypes:@[NSPasteboardTypeString] data:@{NSPasteboardTypeString: [@"previous clipboard" dataUsingEncoding:NSUTF8StringEncoding]}];
+    NSInteger generation = [harness->jcPasteboard changeCount];
+
+    [harness->scheduled removeAllObjects];
+    [harness pasteFromStack];
+    CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "bezel synthesized Paste for an image that could not be placed");
+    CHECK([harness->scheduled containsObject:@"hideApp"], "bezel still closes");
+    [harness->scheduled removeAllObjects];
+    [harness processMenuClippingSelection:menuItem];
+    CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "menu synthesized Paste for an image that could not be placed");
+    [harness->scheduled removeAllObjects];
+    [harness searchWindowItemSelected:nil];
+    CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "search window synthesized Paste for an image that could not be placed");
+    CHECK([harness->jcPasteboard changeCount] == generation, "the previous clipboard was left untouched");
+}
+
+// PR3-5: a pasteboard that refuses the image write does not get a Paste keystroke.
+static void CaseRefusedPasteboardWriteIsNotPasted(void) {
+    [Defaults() setInteger:1 forKey:@"savePreference"];
+    FlycutOperator *op = NewOperator();
+    CHECK(AddImage(op, PNGData(27, 28, 29), NSPasteboardTypePNG) && AddImage(op, AnimatedGIFData(), @"com.compuserve.gif"), "images captured");
+    ImageHarness *harness = NewHarness(op);
+    harness->jcPasteboard->failWrites = YES;
+    [harness pasteFromStack];
+    CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "GIF file reference was refused but Paste was synthesized");
+    CHECK([op setStackPositionTo:1], "PNG selected");
+    [harness->scheduled removeAllObjects];
+    [harness pasteFromStack];
+    CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "image data was refused but Paste was synthesized");
+}
+
+// PR3-4: capture reads the clipboard on a background queue. Only bytes of the
+// generation whose types passed the privacy check may be committed.
+static ImageHarness *PollingHarness(FlycutOperator *op) {
+    [Defaults() setBool:YES forKey:@"captureImages"];
+    ImageHarness *harness = NewHarness(op);
+    [harness->pbCount release];
+    harness->pbCount = [@([harness->jcPasteboard changeCount]) retain];
+    return harness;
+}
+static void CaseImageCaptureControl(void) {
+    [Defaults() setInteger:0 forKey:@"savePreference"];
+    FlycutOperator *op = NewOperator();
+    ImageHarness *harness = PollingHarness(op);
+    NSData *png = PNGData(31, 32, 33);
+    [harness->jcPasteboard fixtureCopyTypes:@[NSPasteboardTypePNG] data:@{NSPasteboardTypePNG: png}];
+    [harness pollPB:nil];
+    Settle();
+    CHECK([op jcListCount] == 1, "control: copied image captured");
+    CHECK([[[FlycutImageStore sharedStore] imageDataForHash:[[op clippingAtStackPosition] imageHash]] isEqualToData:png], "control: captured bytes");
+    [harness->jcPasteboard fixtureCopyTypes:@[NSPasteboardTypePNG, @"org.nspasteboard.ConcealedType"] data:@{NSPasteboardTypePNG: PNGData(34, 35, 36)}];
+    [harness pollPB:nil];
+    Settle();
+    CHECK([op jcListCount] == 1, "control: concealed image skipped");
+}
+static void CaseImageReplacedBeforeReadIsDropped(void) {
+    [Defaults() setInteger:0 forKey:@"savePreference"];
+    FlycutOperator *op = NewOperator();
+    ImageHarness *harness = PollingHarness(op);
+    NSData *visible = PNGData(41, 42, 43), *concealed = PNGData(44, 45, 46);
+    FixturePasteboard *pasteboard = harness->jcPasteboard;
+    [pasteboard fixtureCopyTypes:@[NSPasteboardTypePNG] data:@{NSPasteboardTypePNG: visible}];
+    // A password manager copies a concealed image after the type check, before the read.
+    pasteboard->replaceOnReadOfType = [NSPasteboardTypePNG retain];
+    pasteboard->replacementTypes = [@[NSPasteboardTypePNG, @"org.nspasteboard.ConcealedType"] retain];
+    pasteboard->replacementData = [@{NSPasteboardTypePNG: concealed} retain];
+    [harness pollPB:nil];
+    Settle();
+    CHECK(pasteboard->replaceOnReadOfType == nil, "the image was read after the replacement");
+    CHECK(![[FlycutImageStore sharedStore] hasImageForHash:HashOf(concealed)], "bytes of a concealed clipboard generation were captured");
+    CHECK([op jcListCount] == 0, "an image read from a later clipboard generation was captured");
+}
+
+static NSData *GIFDownloadPage(void) {
+    return [@"<html><img src=\"https://example.test/animated.gif\"></html>" dataUsingEncoding:NSUTF8StringEncoding];
+}
+static ImageHarness *StartGIFDownload(FlycutOperator *op) {
+    [Defaults() setBool:YES forKey:@"downloadAnimatedGIFs"];
+    ImageHarness *harness = PollingHarness(op);
+    [harness->jcPasteboard fixtureCopyTypes:@[NSPasteboardTypeTIFF, @"public.html"]
+                                       data:@{NSPasteboardTypeTIFF: PNGData(1, 1, 1), @"public.html": GIFDownloadPage()}];
+    [harness pollPB:nil];
+    Settle();
+    CHECK(downloadRequests == 1 && pendingDownload != nil, "animated GIF download requested (no network: session double)");
+    CHECK([[pendingDownloadURL absoluteString] isEqualToString:@"https://example.test/animated.gif"], "download URL from the copied HTML");
+    CHECK([op jcListCount] == 0, "the still image is not captured while the GIF downloads");
+    return harness;
+}
+static void FinishGIFDownload(NSData *gif) {
+    NSHTTPURLResponse *response = [[[NSHTTPURLResponse alloc] initWithURL:pendingDownloadURL statusCode:200
+                                                              HTTPVersion:@"HTTP/1.1" headerFields:@{}] autorelease];
+    FixtureCompletion handler = pendingDownload;
+    dispatch_async(fixtureBackgroundQueue, ^{ handler(gif, response, nil); });
+    Settle();
+}
+static void CaseGIFDownloadControl(void) {
+    [Defaults() setInteger:0 forKey:@"savePreference"];
+    FlycutOperator *op = NewOperator();
+    StartGIFDownload(op);
+    NSData *gif = AnimatedGIFData();
+    FinishGIFDownload(gif);
+    CHECK([op jcListCount] == 1 && [[[op clippingAtStackPosition] type] isEqualToString:@"com.compuserve.gif"], "control: downloaded GIF captured");
+    CHECK([[[FlycutImageStore sharedStore] imageDataForHash:[[op clippingAtStackPosition] imageHash]] isEqualToData:gif], "control: GIF bytes");
+}
+static void CaseGIFDownloadAfterClipboardChangeIsDropped(void) {
+    [Defaults() setInteger:0 forKey:@"savePreference"];
+    FlycutOperator *op = NewOperator();
+    ImageHarness *harness = StartGIFDownload(op);
+    [harness->jcPasteboard fixtureCopyTypes:@[NSPasteboardTypeString] data:@{NSPasteboardTypeString: [@"newer copy" dataUsingEncoding:NSUTF8StringEncoding]}];
+    FinishGIFDownload(AnimatedGIFData());
+    CHECK([op jcListCount] == 0, "a GIF download finishing after the clipboard changed was captured");
+}
+static void CaseGIFDownloadAfterCapturePausedIsDropped(void) {
+    [Defaults() setInteger:0 forKey:@"savePreference"];
+    FlycutOperator *op = NewOperator();
+    StartGIFDownload(op);
+    [op setDisableStoreTo:YES];
+    FinishGIFDownload(AnimatedGIFData());
+    CHECK([op jcListCount] == 0, "a GIF download finishing after capture was paused was captured");
+}
+static void CaseGIFDownloadAfterImageCaptureOffIsDropped(void) {
+    [Defaults() setInteger:0 forKey:@"savePreference"];
+    FlycutOperator *op = NewOperator();
+    StartGIFDownload(op);
+    [Defaults() setBool:NO forKey:@"captureImages"];
+    FinishGIFDownload(AnimatedGIFData());
+    CHECK([op jcListCount] == 0, "a GIF download finishing after image capture was turned off was captured");
+}
+static void CaseGIFDownloadAfterDownloadsOffIsDropped(void) {
+    [Defaults() setInteger:0 forKey:@"savePreference"];
+    FlycutOperator *op = NewOperator();
+    StartGIFDownload(op);
+    [Defaults() setBool:NO forKey:@"downloadAnimatedGIFs"];
+    FinishGIFDownload(AnimatedGIFData());
+    CHECK([op jcListCount] == 0, "a GIF download finishing after GIF downloads were turned off was captured");
+}
+
 // Guard self-tests: the containment guard must stop writes and deletes outside the
 // fixture root. The probe targets are harmless even if the guard failed.
 static void CaseGuardStopsOutsideWrite(void) {
@@ -610,6 +1016,25 @@ static const Case cases[] = {
     {"never-then-saving-exit", CaseNeverThenSavingPersistsOnExit},
     {"never-then-saving-relaunch", CaseNeverThenSavingRestoresAfterRelaunch},
     {"stale-temporary-copies", CaseStaleTemporaryCopiesRemovedAtStart},
+    {"favorite-delete-main-image-saved", CaseFavoriteDeleteKeepsMainImageSaved},
+    {"favorite-delete-main-image-never", CaseFavoriteDeleteKeepsMainImageNever},
+    {"clear-all-duplicates-saved", CaseClearAllDuplicatesSaved},
+    {"clear-all-duplicates-never", CaseClearAllDuplicatesNever},
+    {"evicted-image-autosaved-saved", CaseEvictedImageAutosavedSaved},
+    {"evicted-image-autosaved-never", CaseEvictedImageAutosavedNever},
+    {"save-reports-write-failure", CaseSaveReportsWriteFailure},
+    {"failed-image-write-not-captured", CaseFailedImageWriteIsNotCaptured},
+    {"undecodable-bytes-not-captured-saved", CaseUndecodableBytesNotCapturedSaved},
+    {"undecodable-bytes-not-captured-never", CaseUndecodableBytesNotCapturedNever},
+    {"lost-image-not-pasted", CaseLostImageBytesAreNotPasted},
+    {"refused-pasteboard-write-not-pasted", CaseRefusedPasteboardWriteIsNotPasted},
+    {"image-capture-control", CaseImageCaptureControl},
+    {"image-replaced-before-read", CaseImageReplacedBeforeReadIsDropped},
+    {"gif-download-control", CaseGIFDownloadControl},
+    {"gif-download-after-clipboard-change", CaseGIFDownloadAfterClipboardChangeIsDropped},
+    {"gif-download-after-capture-paused", CaseGIFDownloadAfterCapturePausedIsDropped},
+    {"gif-download-after-image-capture-off", CaseGIFDownloadAfterImageCaptureOffIsDropped},
+    {"gif-download-after-downloads-off", CaseGIFDownloadAfterDownloadsOffIsDropped},
     {"guard-outside-write", CaseGuardStopsOutsideWrite},
     {"guard-outside-delete", CaseGuardStopsOutsideDelete},
 };
@@ -621,6 +1046,7 @@ int main(int argc, const char *argv[]) {
         if (![fixtureRoot isAbsolutePath] || [fixtureRoot length] < 8) return 2;
         InstallContainmentGuards();
         saveTarget = [[SaveTarget alloc] init];
+        fixtureBackgroundQueue = dispatch_queue_create("fixture.background", DISPATCH_QUEUE_SERIAL);
         for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
             if (strcmp(argv[1], cases[i].name) == 0) {
                 cases[i].run();
