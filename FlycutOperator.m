@@ -514,6 +514,11 @@
 
 		return success;
     }
+	// The newest clipping already holds this text, so it is not added again. Keep
+	// the formatting of this latest copy instead (none for a plain-text copy), so
+	// pasting the clipping matches what was copied last.
+	if ( [clippingStore setRichData:richData forClippingAtPosition:0] )
+		[self actionAfterListModification];
 	return  NO;
 }
 

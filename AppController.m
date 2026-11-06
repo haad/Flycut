@@ -1144,6 +1144,8 @@
 			if (largeCopyRisk)
 				[self toggleMenuIconDisabled];
 
+			// Every read below must come from the clipboard generation detected here.
+			NSInteger captureCount = [pbCount integerValue];
 			dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
 			dispatch_async(queue, ^{
                 NSString *contents = [jcPasteboard stringForType:textType];
@@ -1154,8 +1156,9 @@
                    DLog(@"Contents: Empty or skipped");
                } else {
                    // Capture rich representations of the text so pasting an older clipping
-                   // can keep its formatting.  Only done after the skip checks above so
-                   // concealed/transient clippings never have their rich data read.
+                   // can keep its formatting.  Only done after the skip checks above, and the
+                   // snapshot is dropped below if the clipboard changed meanwhile, so rich data
+                   // of concealed/transient clippings is never stored.
                    NSMutableDictionary *richData = nil;
                    if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"preserveTextFormatting"] ) {
                        for ( NSString *richType in [NSArray arrayWithObjects:NSPasteboardTypeRTF, NSPasteboardTypeHTML, nil] ) {
@@ -1171,14 +1174,21 @@
                        }
                    }
 
-                   // Dispatch back to main queue to safely modify the clipping store and update UI.
-                   // jcList (NSMutableArray) is not thread-safe, and concurrent access from this
-                   // background queue and the main thread (e.g. showing the bezel) causes crashes.
-                   dispatch_async(dispatch_get_main_queue(), ^{
-                       if ( ! [pbCount isEqualTo:pbBlockCount] ) {
-                           [flycutOperator addClipping:contents ofType:textType withRichData:richData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path target:self clippingAddedSelector:@selector(updateMenu)];
-                       }
-                   });
+                   if ( [jcPasteboard changeCount] != captureCount ) {
+                       // The clipboard changed while it was read, so the text, the types
+                       // checked above and the rich data may belong to different copies.
+                       // Drop the whole snapshot; the next poll captures the new contents.
+                       DLog(@"Contents: clipboard changed during capture, skipped");
+                   } else {
+                       // Dispatch back to main queue to safely modify the clipping store and update UI.
+                       // jcList (NSMutableArray) is not thread-safe, and concurrent access from this
+                       // background queue and the main thread (e.g. showing the bezel) causes crashes.
+                       dispatch_async(dispatch_get_main_queue(), ^{
+                           if ( ! [pbCount isEqualTo:pbBlockCount] ) {
+                               [flycutOperator addClipping:contents ofType:textType withRichData:richData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path target:self clippingAddedSelector:@selector(updateMenu)];
+                           }
+                       });
+                   }
                }
             });
         }

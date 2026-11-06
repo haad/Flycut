@@ -93,6 +93,9 @@
 -(void) addClipping:(FlycutClipping*) clipping;
 -(void) insertClipping:(FlycutClipping*) clipping atIndex:(int) index;
 
+// Replace the rich representations of a text clipping; returns whether they changed
+-(bool) setRichData:(NSDictionary *)richData forClippingAtPosition:(int)index;
+
 // Delete a clipping
 -(void) clearItem:(int)index;
 

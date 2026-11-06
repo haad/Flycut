@@ -70,7 +70,7 @@ Press the Search Hotkey (Shift-Command-B, by default) to open the search window.
 
 **Text Formatting**
 
-Flycut preserves the formatting (RTF and HTML) of copied text, so pasting an older clipping into a rich text editor keeps its bold, fonts, links, and colors. Plain-text-only targets are unaffected — they always receive the plain text. Rich data larger than 1 MB per clipping is not kept.
+Flycut preserves the formatting (RTF and HTML) of copied text, so pasting an older clipping into a rich text editor keeps its bold, fonts, links, and colors. Plain-text-only targets are unaffected – they always receive the plain text. RTF and HTML are each kept up to 1 MiB; a larger format is dropped, and the plain text is always kept. Formatting data can contain more than the visible text, such as hidden markup or links; previews and search show the plain text only.
 
 To disable this and store plain text only, run:
 
