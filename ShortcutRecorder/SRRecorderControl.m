@@ -92,6 +92,17 @@
     return okToChange;
 }
 
+// NSControl asks a null-type cell for no focus ring; the recorder cell knows its shape.
+- (NSRect)focusRingMaskBounds
+{
+	return [SRCell focusRingMaskBoundsForFrame:[self bounds] inView:self];
+}
+
+- (void)drawFocusRingMask
+{
+	[SRCell drawFocusRingMaskWithFrame:[self bounds] inView:self];
+}
+
 #pragma mark *** Aesthetics ***
 - (BOOL)animates {
 	return [SRCell animates];

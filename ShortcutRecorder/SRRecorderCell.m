@@ -242,27 +242,24 @@
 				[roundedRect fill];
 			}
 			
-		// Draw snapback image
-			NSImage *snapBackArrow = SRResIndImage(@"SRSnapback");	
-			[snapBackArrow drawAtPoint:[self _snapbackRectForFrame: cellFrame].origin fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0f];
-			
-		// Because of the gradient and snapback image, the white rounded rect will be smaller
-			whiteRect = NSInsetRect(cellFrame, 9.5f, 2.0f);
-			whiteRect.origin.x -= 7.5f;
+		// Because of the gradient, the white rounded rect will be smaller. There is
+		// no snapback arrow any more: Escape cancels a recording, and the Restore
+		// Default button next to the field brings back the factory shortcut.
+			whiteRect = NSInsetRect(cellFrame, 2.0f, 2.0f);
 		}
 		
-	// Draw white rounded box
+	// Draw the field like a text field, in the system colors (Dark Mode too)
 		radius = NSHeight(whiteRect) / 2.0f;
 		roundedRect = [NSBezierPath bezierPathWithRoundedRect:whiteRect xRadius:radius yRadius:radius];
 		[[NSGraphicsContext currentContext] saveGraphicsState];
 		[roundedRect addClip];
-		[[NSColor whiteColor] set];
+		[[NSColor textBackgroundColor] set];
 		[NSBezierPath fillRect: whiteRect];
 		
 	// Draw border and remove badge if needed
 		if (!isRecording)
 		{
-			[[NSColor windowFrameColor] set];
+			[[NSColor tertiaryLabelColor] set];
 			[roundedRect stroke];
 			
 		// If key combination is set and valid, draw remove image
@@ -285,7 +282,7 @@
 		BOOL recordingOrEmpty = (isRecording || [self _isEmpty]);
 		NSDictionary *attributes = [NSDictionary dictionaryWithObjectsAndKeys: mpstyle, NSParagraphStyleAttributeName,
 			[NSFont systemFontOfSize: (recordingOrEmpty ? [NSFont labelFontSize] : [NSFont smallSystemFontSize])], NSFontAttributeName,
-			(recordingOrEmpty ? [NSColor disabledControlTextColor] : [NSColor blackColor]), NSForegroundColorAttributeName, 
+			(recordingOrEmpty ? [NSColor placeholderTextColor] : [NSColor labelColor]), NSForegroundColorAttributeName, 
 			nil];
 		
 		NSString *displayString;
@@ -342,16 +339,7 @@
 	// Finally draw it
 		[displayString drawInRect:textRect withAttributes:attributes];
 		
-    // draw a focus ring...?
-		if ( [self showsFirstResponder] )
-		{
-			[NSGraphicsContext saveGraphicsState];
-			NSSetFocusRingStyle(NSFocusRingOnly);
-			radius = NSHeight(cellFrame) / 2.0f;
-			[[NSBezierPath bezierPathWithRoundedRect:cellFrame xRadius:radius yRadius:radius] fill];
-			[NSGraphicsContext restoreGraphicsState];
-		}
-		
+		// The focus ring is drawn by AppKit, see -drawFocusRingMaskWithFrame:inView:.
 	} else {
 		
 //	NSRect rawCellFrame = cellFrame;
@@ -414,7 +402,7 @@
 		[roundedRect stroke];
 		[roundedRect addClip];
 		
-//	if (isVaguelyRecording) 
+		if (!NSIsEmptyRect([self _snapbackRectForFrame: cellFrame]))
 		{
 			NSRect snapBackRect = SRAnimationOffsetRect([self _snapbackRectForFrame: cellFrame],cellFrame);
 //		NSLog(@"snapbackrect: %@; offset: %@", NSStringFromRect([self _snapbackRectForFrame: cellFrame]), NSStringFromRect(snapBackRect));
@@ -577,18 +565,26 @@
 		
 		[[NSGraphicsContext currentContext] restoreGraphicsState];
 		
-    // draw a focus ring...?
-		
-		if ( [self showsFirstResponder] )
-		{
-			[NSGraphicsContext saveGraphicsState];
-			NSSetFocusRingStyle(NSFocusRingOnly);
-			radius = NSHeight(cellFrame) / 2.0f;
-			[[NSBezierPath bezierPathWithRoundedRect:cellFrame xRadius:radius yRadius:radius] fill];
-			[NSGraphicsContext restoreGraphicsState];
-		}
-		
+		// The focus ring is drawn by AppKit, see -drawFocusRingMaskWithFrame:inView:.
 	}
+}
+
+// Keyboard focus is shown by AppKit's standard focus ring around the capsule.
+// The old code drew its own ring inside -drawWithFrame:inView:, which modern
+// AppKit never asks for, so a focused recorder had no valid ring at all.
+// While recording, the recording look marks the control and no ring is drawn.
+- (NSRect)focusRingMaskBoundsForFrame:(NSRect)cellFrame inView:(NSView *)controlView
+{
+	(void)controlView;
+	return isRecording ? NSZeroRect : cellFrame;
+}
+
+- (void)drawFocusRingMaskWithFrame:(NSRect)cellFrame inView:(NSView *)controlView
+{
+	(void)controlView;
+	if (isRecording) return;
+	CGFloat radius = NSHeight(cellFrame) / 2.0f;
+	[[NSBezierPath bezierPathWithRoundedRect:cellFrame xRadius:radius yRadius:radius] fill];
 }
 
 #pragma mark *** Mouse Tracking ***
@@ -608,29 +604,19 @@
 		return;
 	}
 	
-	// We're either in recording or normal display mode
-	if (!isRecording)
-	{
-		// Create and register tracking rect for the remove badge if shortcut is not empty
-		NSRect removeButtonRect = [self _removeButtonRectForFrame: cellFrame];
-		BOOL mouseInside = [controlView mouse:mouseLocation inRect:removeButtonRect];
-		
-		if (removeTrackingRectTag != 0) [controlView removeTrackingRect: removeTrackingRectTag];
-		removeTrackingRectTag = [controlView addTrackingRect:removeButtonRect owner:self userData:nil assumeInside:mouseInside];
-		
-		if (mouseInsideTrackingArea != mouseInside) mouseInsideTrackingArea = mouseInside;
+	// We're either in recording or normal display mode; only the current mode's
+	// badge is tracked, and an empty badge rect is not tracked at all.
+	if (removeTrackingRectTag != 0) [controlView removeTrackingRect: removeTrackingRectTag];
+	if (snapbackTrackingRectTag != 0) [controlView removeTrackingRect: snapbackTrackingRectTag];
+	removeTrackingRectTag = 0;
+	snapbackTrackingRectTag = 0;
+	NSRect badgeRect = isRecording ? [self _snapbackRectForFrame: cellFrame] : [self _removeButtonRectForFrame: cellFrame];
+	BOOL mouseInside = !NSIsEmptyRect(badgeRect) && [controlView mouse:mouseLocation inRect:badgeRect];
+	if (!NSIsEmptyRect(badgeRect)) {
+		NSTrackingRectTag tag = [controlView addTrackingRect:badgeRect owner:self userData:nil assumeInside:mouseInside];
+		if (isRecording) snapbackTrackingRectTag = tag; else removeTrackingRectTag = tag;
 	}
-	else
-	{
-		// Create and register tracking rect for the snapback badge if we're in recording mode
-		NSRect snapbackRect = [self _snapbackRectForFrame: cellFrame];
-		BOOL mouseInside = [controlView mouse:mouseLocation inRect:snapbackRect];
-
-		if (snapbackTrackingRectTag != 0) [controlView removeTrackingRect: snapbackTrackingRectTag];
-		snapbackTrackingRectTag = [controlView addTrackingRect:snapbackRect owner:self userData:nil assumeInside:mouseInside];	
-		
-		if (mouseInsideTrackingArea != mouseInside) mouseInsideTrackingArea = mouseInside;
-	}
+	if (mouseInsideTrackingArea != mouseInside) mouseInsideTrackingArea = mouseInside;
 }
 
 - (void)mouseEntered:(NSEvent *)theEvent
@@ -1152,6 +1138,7 @@
     // invalidate the focus ring rect...
     NSView *controlView = [self controlView];
     [controlView setKeyboardFocusRingNeedsDisplayInRect:[controlView bounds]];
+    [controlView noteFocusRingMaskChanged];
 
     if (globalHotKeys) hotKeyModeToken = PushSymbolicHotKeyMode(kHIHotKeyModeAllDisabled);
 }
@@ -1168,6 +1155,7 @@
     // invalidate the focus ring rect...
     NSView *controlView = [self controlView];
     [controlView setKeyboardFocusRingNeedsDisplayInRect:[controlView bounds]];
+    [controlView noteFocusRingMaskChanged];
 	
 	if (globalHotKeys) PopSymbolicHotKeyMode(hotKeyModeToken);
 }
@@ -1258,15 +1246,9 @@
 
 - (NSRect)_snapbackRectForFrame:(NSRect)cellFrame
 {	
-//	if (!isRecording) return NSZeroRect;
-
-	NSRect snapbackRect;
-	NSImage *snapbackImage = SRResIndImage(@"SRSnapback");
-	
-	snapbackRect.origin = NSMakePoint(NSMaxX(cellFrame) - [snapbackImage size].width - 2, (NSMaxY(cellFrame) - [snapbackImage size].height)/2 + 1);
-	snapbackRect.size = [snapbackImage size];
-
-	return snapbackRect;
+	// The snapback badge ("use old shortcut") is gone; nothing to draw or track.
+	(void)cellFrame;
+	return NSZeroRect;
 }
 
 #pragma mark *** Filters ***
