@@ -83,3 +83,5 @@ The preferences panel allows you to customize settings including:
 - Removing duplicate clippings
 - Skipping password manager entries
 - iCloud settings sync
+
+A setting that differs from its factory value shows a small round arrow next to it (tooltip "Restore Default"). Click the arrow to go back to the default; for the two "Save … to:" folders that is the Desktop. The arrow disappears once the default is back.
