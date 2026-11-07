@@ -376,31 +376,43 @@
 
 -(BOOL)shouldSkip:(NSString *)contents ofType:(NSString *)type fromAvailableTypes:(NSArray<NSString *> *)availableTypes
 {
+	// Check to see if they want a little help figuring out what types to enter.
+	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"] )
+	{
+		// pollPB evaluates text clippings on a background queue, but the stores
+		// may only be modified on the main thread, so commit the entry there.
+		void (^revealType)(void) = ^{
+			[clippingStore addClipping:type ofType:type fromAppLocalizedName:@"Flycut" fromAppBundleURL:nil atTimestamp:0];
+			[self actionAfterListModification];
+		};
+		if ( [NSThread isMainThread] )
+			revealType();
+		else
+			dispatch_async(dispatch_get_main_queue(), revealType);
+	}
+
+	__block bool skipClipping = NO;
+
+	// Check the array of types to skip.  This honors the nspasteboard.org conventions
+	// (ConcealedType etc.), so it must apply independently of the password-field
+	// heuristics toggle below.
+	if ( availableTypes && [[NSUserDefaults standardUserDefaults] boolForKey:@"skipPboardTypes"] )
+	{
+		NSSet *typesToSkip = [NSSet setWithArray: [[[[NSUserDefaults standardUserDefaults] stringForKey:@"skipPboardTypesList"] stringByReplacingOccurrencesOfString:@" " withString:@""] componentsSeparatedByString: @","]];
+		NSSet *pasteBoardTypes = [NSSet setWithArray: availableTypes];
+
+		if ( [pasteBoardTypes intersectsSet: typesToSkip] )
+			{
+					skipClipping = YES;
+			};
+
+	}
+	if (skipClipping)
+		return YES;
+
 	// Check to see if we are skipping passwords based on length and characters.
 	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"skipPasswordFields"] )
 	{
-		// Check to see if they want a little help figuring out what types to enter.
-		if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"] )
-			[clippingStore addClipping:type ofType:type fromAppLocalizedName:@"Flycut" fromAppBundleURL:nil atTimestamp:0];
-		[self actionAfterListModification];
-
-		__block bool skipClipping = NO;
-
-		// Check the array of types to skip.
-		if ( availableTypes && [[NSUserDefaults standardUserDefaults] boolForKey:@"skipPboardTypes"] )
-		{
-			NSSet *typesToSkip = [NSSet setWithArray: [[[[NSUserDefaults standardUserDefaults] stringForKey:@"skipPboardTypesList"] stringByReplacingOccurrencesOfString:@" " withString:@""] componentsSeparatedByString: @","]];
-			NSSet *pasteBoardTypes = [NSSet setWithArray: availableTypes];
-
-			if ( [pasteBoardTypes intersectsSet: typesToSkip] )
-				{
-						skipClipping = YES;
-				};
-
-		}
-		if (skipClipping)
-			return YES;
-
 		// Check the array of lengths to skip for suspicious strings.
 		if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"skipPasswordLengths"] )
 		{
