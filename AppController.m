@@ -13,6 +13,7 @@
 // interface and platform-specific mechanisms.
 
 #import "AppController.h"
+#import "ClipboardGenerationPolicy.h"
 #import "SGHotKey.h"
 #import "SGHotKeyCenter.h"
 #import "SRRecorderCell.h"
@@ -139,7 +140,7 @@
                         ];
 	[settingsSyncList retain];
 
-	menuQueue = dispatch_queue_create(@"com.Flycut.menuUpdateQueue", DISPATCH_QUEUE_SERIAL);
+	clipboardReadQueue = dispatch_queue_create("com.Flycut.clipboardReadQueue", DISPATCH_QUEUE_SERIAL);
 
 	// Initialize search window pointers to nil
 	searchWindow = nil;
@@ -392,6 +393,9 @@
     if([event modifierFlags] & NSEventModifierFlagOption) {
         [menu cancelTracking];
         bool disableStore = [self toggleMenuIconDisabled];
+        // Captures still in flight belong to the previous epoch and are discarded,
+        // even when capture is resumed before they finish.
+        clipboardCaptureEpoch += 1;
         if (!disableStore)
         {
             // Update the pbCount so we don't enable and have it immediately copy the thing the user was trying to avoid.
@@ -1125,79 +1129,134 @@
 
 -(void)pollPB:(NSTimer *)timer
 {
-    NSString *textType = [jcPasteboard availableTypeFromArray:@[NSPasteboardTypeString]];
+    NSInteger pasteboardGeneration = [jcPasteboard changeCount];
+    if ( [pbCount integerValue] == pasteboardGeneration || [flycutOperator storeDisabled] )
+        return;
+
+    [pbCount release];
+    pbCount = [[NSNumber numberWithInteger:pasteboardGeneration] retain];
+
+    NSString *type = [jcPasteboard availableTypeFromArray:[NSArray arrayWithObject:NSPasteboardTypeString]];
     NSString *imageType = [jcPasteboard availableTypeFromArray:@[@"com.compuserve.gif", NSPasteboardTypeTIFF, NSPasteboardTypePNG]];
+    if ( ![[NSUserDefaults standardUserDefaults] boolForKey:@"captureImages"] )
+        imageType = nil;
+    NSArray *availableTypes = [jcPasteboard types];
+    NSInteger blockedGeneration = [pbBlockCount integerValue];
+    NSUInteger captureEpoch = clipboardCaptureEpoch;
+    if ( type == nil && imageType == nil )
+        return;
 
-    if ( [pbCount intValue] != [jcPasteboard changeCount] && ![flycutOperator storeDisabled] ) {
-        [pbCount release];
-        pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
+    NSRunningApplication *currRunningApp = nil;
+    for (NSRunningApplication *currApp in [[NSWorkspace sharedWorkspace] runningApplications])
+        if ([currApp isActive])
+            currRunningApp = currApp;
 
-        NSRunningApplication *currRunningApp = nil;
-        for (NSRunningApplication *currApp in [[NSWorkspace sharedWorkspace] runningApplications])
-            if ([currApp isActive])
-                currRunningApp = currApp;
+    if ( type != nil ) {
+        dispatch_async(clipboardReadQueue, ^{
+            NSString *contents = [jcPasteboard stringForType:type];
+            NSInteger pasteboardGenerationAfterRead = [jcPasteboard changeCount];
+            BOOL contentShouldBeSkipped = contents == nil;
+            if (!contentShouldBeSkipped)
+                contentShouldBeSkipped = [flycutOperator shouldSkip:contents ofType:type fromAvailableTypes:availableTypes];
 
-        if ( textType != nil ) {
-			bool largeCopyRisk = nil != currRunningApp && [[currRunningApp localizedName] rangeOfString:@"Remote Desktop Connection"].location != NSNotFound;
-			if (largeCopyRisk)
-				[self toggleMenuIconDisabled];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                BOOL revealPasteboardTypes = [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
+                if (!FCShouldCommitClipboardRead(
+                        pasteboardGeneration,
+                        pasteboardGenerationAfterRead,
+                        blockedGeneration,
+                        captureEpoch,
+                        clipboardCaptureEpoch,
+                        [flycutOperator storeDisabled]
+                    )) {
+                    DLog(@"Contents: Blocked, paused, or changed during read");
+                    return;
+                }
 
-			dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
-			dispatch_async(queue, ^{
-                NSString *contents = [jcPasteboard stringForType:textType];
-				if (largeCopyRisk)
-					[self toggleMenuIconDisabled];
+                if (revealPasteboardTypes) {
+                    [flycutOperator addClipping:type
+                                         ofType:type
+                                        fromApp:@"Flycut"
+                               withAppBundleURL:nil
+                                         target:self
+                         clippingAddedSelector:@selector(updateMenu)];
+                    return;
+                }
 
-                if ( contents == nil || [flycutOperator shouldSkip:contents ofType:[jcPasteboard availableTypeFromArray:@[NSPasteboardTypeString]] fromAvailableTypes:[jcPasteboard types]] ) {
-                   DLog(@"Contents: Empty or skipped");
-               } else {
-                   dispatch_async(dispatch_get_main_queue(), ^{
-                       if ( ! [pbCount isEqualTo:pbBlockCount] ) {
-                           [flycutOperator addClipping:contents ofType:textType fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path target:self clippingAddedSelector:@selector(updateMenu)];
-                       }
-                   });
-               }
+                if (contentShouldBeSkipped) {
+                    DLog(@"Contents: Empty or skipped");
+                    return;
+                }
+
+                [flycutOperator addClipping:contents
+                                     ofType:type
+                                    fromApp:[currRunningApp localizedName]
+                           withAppBundleURL:currRunningApp.bundleURL.path
+                                     target:self
+                     clippingAddedSelector:@selector(updateMenu)];
             });
-        }
+        });
+    }
 
-        if ( imageType != nil && [[NSUserDefaults standardUserDefaults] boolForKey:@"captureImages"] ) {
-            if ( [flycutOperator shouldSkip:@"" ofType:imageType fromAvailableTypes:[jcPasteboard types]] ) {
-                DLog(@"Image: skipped due to pasteboard type filter");
+    if ( imageType != nil ) {
+        if ( [flycutOperator shouldSkip:@"" ofType:imageType fromAvailableTypes:availableTypes] ) {
+            DLog(@"Image: skipped due to pasteboard type filter");
+        } else {
+            // When the clipboard carries only a flattened still but embeds the source
+            // GIF's URL (e.g. Chrome "Copy Image" on an animated GIF), fetch the real
+            // animated file instead of capturing the still.
+            // Diagnostics record only the copy's type, so they never start a download;
+            // the still then goes to the image job below, which records its type.
+            BOOL haveDirectGIF = [imageType isEqualToString:@"com.compuserve.gif"];
+            NSURL *gifURL = nil;
+            if ( !haveDirectGIF && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"]
+                 && ![[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"] )
+                gifURL = [self animatedGifURLFromPasteboard];
+
+            if ( gifURL != nil ) {
+                // Skip the still entirely; the async download adds the animated GIF on success.
+                [self downloadAndCaptureGIFFromURL:gifURL fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path];
             } else {
-                // When the clipboard carries only a flattened still but embeds the source
-                // GIF's URL (e.g. Chrome "Copy Image" on an animated GIF), fetch the real
-                // animated file instead of capturing the still.
-                BOOL haveDirectGIF = [imageType isEqualToString:@"com.compuserve.gif"];
-                NSURL *gifURL = nil;
-                if ( !haveDirectGIF && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"] )
-                    gifURL = [self animatedGifURLFromPasteboard];
+                NSString *captureType = imageType;
+                BOOL textTypeRecordsDiagnostics = type != nil;
+                dispatch_async(clipboardReadQueue, ^{
+                    NSData *imageData = [[jcPasteboard dataForType:captureType] copy];
+                    NSInteger pasteboardGenerationAfterRead = [jcPasteboard changeCount];
+                    int maxSizeKB = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"maxImageSizeKB"];
+                    if (maxSizeKB <= 0) maxSizeKB = 10240;
+                    if (imageData == nil || [imageData length] == 0 || [imageData length] > (NSUInteger)maxSizeKB * 1024) {
+                        [imageData release];
+                        return;
+                    }
 
-                if ( gifURL != nil ) {
-                    // Skip the still entirely; the async download adds the animated GIF on success.
-                    [self downloadAndCaptureGIFFromURL:gifURL fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path];
-                } else {
-                    NSString *captureType = imageType;
-                    dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
-                    dispatch_async(queue, ^{
-                        NSData *imageData = [[jcPasteboard dataForType:captureType] copy];
-                        if (imageData && [imageData length] > 0) {
-                            int maxSizeKB = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"maxImageSizeKB"];
-                            if (maxSizeKB <= 0) maxSizeKB = 10240;
-                            if ([imageData length] <= (NSUInteger)maxSizeKB * 1024) {
-                                dispatch_async(dispatch_get_main_queue(), ^{
-                                    if ( ! [pbCount isEqualTo:pbBlockCount] ) {
-                                        [flycutOperator addImageClipping:imageData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path imageType:captureType target:self clippingAddedSelector:@selector(updateMenu)];
-                                    }
-                                    [imageData release];
-                                });
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        BOOL revealPasteboardTypes = [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
+                        if (FCShouldCommitClipboardRead(
+                                pasteboardGeneration,
+                                pasteboardGenerationAfterRead,
+                                blockedGeneration,
+                                captureEpoch,
+                                clipboardCaptureEpoch,
+                                [flycutOperator storeDisabled]
+                            )) {
+                            if (revealPasteboardTypes) {
+                                // Diagnostics record the type instead of the payload, once per copy.
+                                if (!textTypeRecordsDiagnostics)
+                                    [flycutOperator addClipping:captureType
+                                                         ofType:captureType
+                                                        fromApp:@"Flycut"
+                                               withAppBundleURL:nil
+                                                         target:self
+                                         clippingAddedSelector:@selector(updateMenu)];
                             } else {
-                                [imageData release];
+                                [flycutOperator addImageClipping:imageData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path imageType:captureType target:self clippingAddedSelector:@selector(updateMenu)];
                             }
                         } else {
-                            [imageData release];
+                            DLog(@"Image: Blocked, paused, or changed during read");
                         }
+                        [imageData release];
                     });
-                }
+                });
             }
         }
     }
@@ -1734,6 +1793,8 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL
 {
+    // Pausing capture while the download runs discards it, as for clipboard reads.
+    NSUInteger captureEpoch = clipboardCaptureEpoch;
     int maxSizeKB = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"maxImageSizeKB"];
     if (maxSizeKB <= 0) maxSizeKB = 10240;
     NSUInteger maxBytes = (NSUInteger)maxSizeKB * 1024;
@@ -1766,7 +1827,9 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
         NSData *gifData = [data retain];
         dispatch_async(dispatch_get_main_queue(), ^{
-            if ( ! [pbCount isEqualTo:pbBlockCount] ) {
+            // Diagnostics turned on during the download: save no payload.
+            BOOL revealPasteboardTypes = [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
+            if ( captureEpoch == clipboardCaptureEpoch && ! [pbCount isEqualTo:pbBlockCount] && !revealPasteboardTypes ) {
                 [flycutOperator addImageClipping:gifData fromApp:appName withAppBundleURL:bundleURL imageType:@"com.compuserve.gif" target:self clippingAddedSelector:@selector(updateMenu)];
             }
             [gifData release];
