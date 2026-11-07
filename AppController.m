@@ -253,6 +253,10 @@
 }
 
 
+// The code-built rows of the Appearance pane are inset by this much on both
+// sides of their content: row labels start at it, and whatever a row puts at
+// its right end stops at it.
+static const CGFloat FlycutAppearanceRowInset = 8.0;
 
 
 
@@ -498,7 +502,7 @@
     statusItem.button.title = @"";
     statusItem.button.image = [FlycutMenuIcon imageForPaused:paused tintColor:tintColor];
     statusItem.button.contentTintColor = nil;
-    statusItem.button.toolTip = paused ? @"Flycut — Clipboard Tracking Paused" : @"Flycut — Clipboard Tracking Active";
+    statusItem.button.toolTip = paused ? @"Flycut – Clipboard Tracking Paused" : @"Flycut – Clipboard Tracking Active";
     statusItem.button.accessibilityLabel = paused ? @"Flycut, clipboard tracking paused" : @"Flycut, clipboard tracking active";
 }
 
@@ -585,38 +589,66 @@
 
 -(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY
 {
+    // One line at the pitch of the checkbox rows above it, every control
+    // exactly as high as the checkbox and centred on its line: the color wells
+    // use the mini control size (16 pt) and the state labels take the font and
+    // title colour of the checkbox itself. The hint below the line is made like
+    // the other row labels of this pane (same label factory, so the same font
+    // and colour) and starts at their left edge.
     NSRect panelFrame = [appearancePanel frame];
-    const int height = 70;
+    const int height = 56;
     NSBox *row = [[[NSBox alloc] initWithFrame:NSMakeRect(0, frameMaxY - height + 5,
                                                           panelFrame.size.width - 10, height)] autorelease];
     [row setTitlePosition:NSNoTitle];
     [row setTransparent:YES];
 
     CGFloat contentWidth = [[row contentView] bounds].size.width;
-    const CGFloat previewWidth = 24.0;
-    const CGFloat colorWellWidth = 38.0;
-    CGFloat pausedPreviewX = contentWidth - 8.0 - previewWidth;
-    CGFloat pausedColorWellX = pausedPreviewX - 5.0 - colorWellWidth;
-    CGFloat pausedLabelX = pausedColorWellX - 4.0 - 45.0;
-    CGFloat activePreviewX = pausedLabelX - 4.0 - previewWidth;
-    CGFloat activeColorWellX = activePreviewX - 5.0 - colorWellWidth;
-    CGFloat activeLabelX = activeColorWellX - 4.0 - 42.0;
+    const CGFloat rowLabelX = FlycutAppearanceRowInset;  // where every row label of this pane starts
+    const CGFloat lineMidY = 32.0;
+    const NSSize wellSize = NSMakeSize(32.0, 16.0);  // NSColorWell at NSControlSizeMini
+    const CGFloat previewSide = 16.0;                // the menu bar icon's own size
 
-    menuIconCustomColorsCheckbox = [[NSButton alloc] initWithFrame:NSMakeRect(8, 35, activeLabelX - 14.0, 25)];
+    menuIconCustomColorsCheckbox = [[NSButton alloc] initWithFrame:NSZeroRect];
     [menuIconCustomColorsCheckbox setButtonType:NSButtonTypeSwitch];
     [menuIconCustomColorsCheckbox setTitle:@"Use custom menu bar icon colors"];
+    NSFont *checkboxFont = [menuIconCustomColorsCheckbox font];
+    NSColor *checkboxTitleColor = [[menuIconCustomColorsCheckbox attributedTitle] attribute:NSForegroundColorAttributeName
+                                                                                    atIndex:0
+                                                                             effectiveRange:NULL];
+    if (checkboxTitleColor == nil)
+        checkboxTitleColor = [NSColor controlTextColor];  // NSButtonCell's title colour
+
+    NSTextField *activeLabel = [NSTextField labelWithString:@"Active"];
+    NSTextField *pausedLabel = [NSTextField labelWithString:@"Paused"];
+    for (NSTextField *label in @[activeLabel, pausedLabel]) {
+        [label setFont:checkboxFont];
+        [label setTextColor:checkboxTitleColor];
+    }
+    NSSize activeLabelSize = [activeLabel fittingSize];
+    NSSize pausedLabelSize = [pausedLabel fittingSize];
+
+    CGFloat pausedPreviewX = contentWidth - FlycutAppearanceRowInset - previewSide;
+    CGFloat pausedColorWellX = pausedPreviewX - 4.0 - wellSize.width;
+    CGFloat pausedLabelX = pausedColorWellX - 4.0 - ceil(pausedLabelSize.width);
+    CGFloat activePreviewX = pausedLabelX - 14.0 - previewSide;
+    CGFloat activeColorWellX = activePreviewX - 4.0 - wellSize.width;
+    CGFloat activeLabelX = activeColorWellX - 4.0 - ceil(activeLabelSize.width);
+
+    CGFloat checkboxHeight = [menuIconCustomColorsCheckbox fittingSize].height;
+    [menuIconCustomColorsCheckbox setFrame:NSMakeRect(rowLabelX, lineMidY - checkboxHeight / 2.0,
+                                                      activeLabelX - rowLabelX - 8.0, checkboxHeight)];
     [menuIconCustomColorsCheckbox setIdentifier:@"menuIconCustomColorsCheckbox"];
     [menuIconCustomColorsCheckbox setTarget:self];
     [menuIconCustomColorsCheckbox setAction:@selector(toggleMenuIconCustomColors:)];
     [row addSubview:menuIconCustomColorsCheckbox];
 
-    NSTextField *activeLabel = [self preferencePanelSliderLabelForText:@"Active"
-                                                               aligned:NSTextAlignmentRight
-                                                              andFrame:NSMakeRect(activeLabelX, 35, 42, 25)];
+    [activeLabel setFrame:NSMakeRect(activeLabelX, lineMidY - ceil(activeLabelSize.height) / 2.0,
+                                     ceil(activeLabelSize.width), ceil(activeLabelSize.height))];
     [row addSubview:activeLabel];
-    [activeLabel release];
-    menuIconActiveColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(activeColorWellX, 32, colorWellWidth, 28)];
+    menuIconActiveColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(activeColorWellX, lineMidY - wellSize.height / 2.0,
+                                                                           wellSize.width, wellSize.height)];
     [menuIconActiveColorWell setColorWellStyle:NSColorWellStyleMinimal];
+    [menuIconActiveColorWell setControlSize:NSControlSizeMini];
     [menuIconActiveColorWell setContinuous:YES];
     [menuIconActiveColorWell setIdentifier:@"menuIconActiveColorWell"];
     [menuIconActiveColorWell setAccessibilityLabel:@"Active menu bar icon color"];
@@ -624,13 +656,13 @@
     [menuIconActiveColorWell setAction:@selector(setActiveMenuIconColor:)];
     [row addSubview:menuIconActiveColorWell];
 
-    NSTextField *pausedLabel = [self preferencePanelSliderLabelForText:@"Paused"
-                                                               aligned:NSTextAlignmentRight
-                                                              andFrame:NSMakeRect(pausedLabelX, 35, 45, 25)];
+    [pausedLabel setFrame:NSMakeRect(pausedLabelX, lineMidY - ceil(pausedLabelSize.height) / 2.0,
+                                     ceil(pausedLabelSize.width), ceil(pausedLabelSize.height))];
     [row addSubview:pausedLabel];
-    [pausedLabel release];
-    menuIconPausedColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(pausedColorWellX, 32, colorWellWidth, 28)];
+    menuIconPausedColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(pausedColorWellX, lineMidY - wellSize.height / 2.0,
+                                                                           wellSize.width, wellSize.height)];
     [menuIconPausedColorWell setColorWellStyle:NSColorWellStyleMinimal];
+    [menuIconPausedColorWell setControlSize:NSControlSizeMini];
     [menuIconPausedColorWell setContinuous:YES];
     [menuIconPausedColorWell setIdentifier:@"menuIconPausedColorWell"];
     [menuIconPausedColorWell setAccessibilityLabel:@"Paused menu bar icon color"];
@@ -638,14 +670,16 @@
     [menuIconPausedColorWell setAction:@selector(setPausedMenuIconColor:)];
     [row addSubview:menuIconPausedColorWell];
 
-    menuIconActivePreview = [[NSImageView alloc] initWithFrame:NSMakeRect(activePreviewX, 34, previewWidth, 24)];
+    menuIconActivePreview = [[NSImageView alloc] initWithFrame:NSMakeRect(activePreviewX, lineMidY - previewSide / 2.0,
+                                                                         previewSide, previewSide)];
     [menuIconActivePreview setImage:[FlycutMenuIcon imageForPaused:NO]];
     [menuIconActivePreview setImageScaling:NSImageScaleProportionallyUpOrDown];
     [menuIconActivePreview setIdentifier:@"menuIconActivePreview"];
     [menuIconActivePreview setAccessibilityLabel:@"Active menu bar icon preview"];
     [row addSubview:menuIconActivePreview];
 
-    menuIconPausedPreview = [[NSImageView alloc] initWithFrame:NSMakeRect(pausedPreviewX, 34, previewWidth, 24)];
+    menuIconPausedPreview = [[NSImageView alloc] initWithFrame:NSMakeRect(pausedPreviewX, lineMidY - previewSide / 2.0,
+                                                                         previewSide, previewSide)];
     [menuIconPausedPreview setImage:[FlycutMenuIcon imageForPaused:YES]];
     [menuIconPausedPreview setImageScaling:NSImageScaleProportionallyUpOrDown];
     [menuIconPausedPreview setIdentifier:@"menuIconPausedPreview"];
@@ -654,7 +688,10 @@
 
     NSTextField *automaticLabel = [self preferencePanelSliderLabelForText:@"Off uses the automatic macOS color."
                                                                   aligned:NSTextAlignmentNatural
-                                                                 andFrame:NSMakeRect(8, 5, 300, 22)];
+                                                                 andFrame:NSZeroRect];
+    NSSize automaticSize = [[automaticLabel cell] cellSizeForBounds:NSMakeRect(0, 0, CGFLOAT_MAX, CGFLOAT_MAX)];
+    [automaticLabel setFrame:NSMakeRect(rowLabelX, 4, MIN(ceil(automaticSize.width), contentWidth - rowLabelX - FlycutAppearanceRowInset),
+                                        ceil(automaticSize.height))];
     [row addSubview:automaticLabel];
     [automaticLabel release];
 

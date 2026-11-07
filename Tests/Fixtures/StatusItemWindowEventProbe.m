@@ -1,4 +1,9 @@
+// Routes synthetic mouse events through -[NSApplication sendEvent:] to a real
+// NSStatusBarButton. The button is hosted by FCOffscreenStatusItem (an
+// off-screen, non-activating panel that is never ordered in) instead of the
+// system status bar, so the fixture creates no menu-bar item.
 #import <Cocoa/Cocoa.h>
+#import "FixtureIsolation.h"
 #import "AppController.h"
 
 @interface AppController (StatusItemWindowEventProbe)
@@ -42,7 +47,7 @@ static NSEvent *MouseEvent(NSEventType type, NSWindow *window, NSPoint point,
                                         type == NSEventTypeRightMouseDown) ? 1.0 : 0.0];
 }
 
-static BOOL ResolveStatusButton(NSStatusItem *item, NSStatusBarButton **resolvedButton,
+static BOOL ResolveStatusButton(FCOffscreenStatusItem *item, NSStatusBarButton **resolvedButton,
                                 NSWindow **resolvedWindow, NSPoint *resolvedPoint)
 {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.0];
@@ -69,7 +74,7 @@ static int ExerciseButton(NSEventType downType, NSEventType upType, BOOL option,
                           NSUInteger expectedToggle, NSUInteger expectedMenu)
 {
     FCWindowEventProbeController *controller = [[FCWindowEventProbeController alloc] init];
-    NSStatusItem *item = [[NSStatusBar systemStatusBar] statusItemWithLength:36.0];
+    FCOffscreenStatusItem *item = [[[FCOffscreenStatusItem alloc] initWithLength:36.0] autorelease];
     NSMenu *menu = [[[NSMenu alloc] initWithTitle:@"Probe"] autorelease];
     [controller setValue:item forKey:@"statusItem"];
     [controller setValue:menu forKey:@"jcMenu"];
@@ -78,10 +83,8 @@ static int ExerciseButton(NSEventType downType, NSEventType upType, BOOL option,
     NSStatusBarButton *button = nil;
     NSWindow *window = nil;
     NSPoint point = NSZeroPoint;
-    if (!ResolveStatusButton(item, &button, &window, &point)) {
-        [[NSStatusBar systemStatusBar] removeStatusItem:item];
+    if (!ResolveStatusButton(item, &button, &window, &point))
         return 10;
-    }
     NSEventModifierFlags flags = option ? NSEventModifierFlagOption : 0;
     NSEvent *mouseUp = MouseEvent(upType, window, point, flags, 2);
     [NSApp postEvent:mouseUp atStart:YES];
@@ -90,7 +93,6 @@ static int ExerciseButton(NSEventType downType, NSEventType upType, BOOL option,
 
     NSUInteger toggles = controller.toggleCount;
     NSUInteger menus = controller.menuCount;
-    [[NSStatusBar systemStatusBar] removeStatusItem:item];
     if (toggles != expectedToggle)
         return 20 + (int)toggles;
     if (menus != expectedMenu)
@@ -101,7 +103,7 @@ static int ExerciseButton(NSEventType downType, NSEventType upType, BOOL option,
 static int StressOptionButtons(NSUInteger repetitions)
 {
     FCWindowEventProbeController *controller = [[FCWindowEventProbeController alloc] init];
-    NSStatusItem *item = [[NSStatusBar systemStatusBar] statusItemWithLength:36.0];
+    FCOffscreenStatusItem *item = [[[FCOffscreenStatusItem alloc] initWithLength:36.0] autorelease];
     NSMenu *menu = [[[NSMenu alloc] initWithTitle:@"Stress Probe"] autorelease];
     [controller setValue:item forKey:@"statusItem"];
     [controller setValue:menu forKey:@"jcMenu"];
@@ -110,10 +112,8 @@ static int StressOptionButtons(NSUInteger repetitions)
     NSStatusBarButton *button = nil;
     NSWindow *window = nil;
     NSPoint point = NSZeroPoint;
-    if (!ResolveStatusButton(item, &button, &window, &point)) {
-        [[NSStatusBar systemStatusBar] removeStatusItem:item];
+    if (!ResolveStatusButton(item, &button, &window, &point))
         return 10;
-    }
 
     NSUInteger expected = 0;
     NSInteger eventNumber = 100;
@@ -127,13 +127,10 @@ static int StressOptionButtons(NSUInteger repetitions)
             [NSApp sendEvent:MouseEvent(downTypes[buttonIndex], window, point,
                                          NSEventModifierFlagOption, eventNumber++)];
             expected++;
-            if (controller.toggleCount != expected || controller.menuCount != 0) {
-                [[NSStatusBar systemStatusBar] removeStatusItem:item];
+            if (controller.toggleCount != expected || controller.menuCount != 0)
                 return 20 + (int)buttonIndex;
-            }
         }
     }
-    [[NSStatusBar systemStatusBar] removeStatusItem:item];
     printf("OPTION_STRESS=PASS RIGHT=%lu LEFT=%lu\n",
            (unsigned long)repetitions, (unsigned long)repetitions);
     return 0;
@@ -142,7 +139,7 @@ static int StressOptionButtons(NSUInteger repetitions)
 static int VerifyProgrammaticPressIgnoresStaleOptionEvent(void)
 {
     FCWindowEventProbeController *controller = [[FCWindowEventProbeController alloc] init];
-    NSStatusItem *item = [[NSStatusBar systemStatusBar] statusItemWithLength:36.0];
+    FCOffscreenStatusItem *item = [[[FCOffscreenStatusItem alloc] initWithLength:36.0] autorelease];
     NSMenu *menu = [[[NSMenu alloc] initWithTitle:@"Programmatic Probe"] autorelease];
     [controller setValue:item forKey:@"statusItem"];
     [controller setValue:menu forKey:@"jcMenu"];
@@ -151,10 +148,8 @@ static int VerifyProgrammaticPressIgnoresStaleOptionEvent(void)
     NSStatusBarButton *button = nil;
     NSWindow *window = nil;
     NSPoint point = NSZeroPoint;
-    if (!ResolveStatusButton(item, &button, &window, &point)) {
-        [[NSStatusBar systemStatusBar] removeStatusItem:item];
+    if (!ResolveStatusButton(item, &button, &window, &point))
         return 10;
-    }
 
     NSEvent *stale = [NSEvent mouseEventWithType:NSEventTypeRightMouseDown
                                          location:point
@@ -170,14 +165,11 @@ static int VerifyProgrammaticPressIgnoresStaleOptionEvent(void)
                                              untilDate:[NSDate dateWithTimeIntervalSinceNow:1.0]
                                                 inMode:NSDefaultRunLoopMode
                                                dequeue:YES];
-    if (retrieved == nil || [NSApp currentEvent] != retrieved) {
-        [[NSStatusBar systemStatusBar] removeStatusItem:item];
+    if (retrieved == nil || [NSApp currentEvent] != retrieved)
         return 11;
-    }
     [button performClick:nil];
     NSUInteger toggles = controller.toggleCount;
     NSUInteger menus = controller.menuCount;
-    [[NSStatusBar systemStatusBar] removeStatusItem:item];
     if (toggles != 0)
         return 20 + (int)toggles;
     if (menus != 1)

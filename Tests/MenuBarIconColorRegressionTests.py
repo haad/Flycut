@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Native regression tests for configurable menu-bar icon colors."""
+"""Native regression tests for configurable menu-bar icon colors.
+
+Every fixture imports Tests/Fixtures/FixtureIsolation.h: defaults live in process
+memory (nothing is written to the user's Preferences folder) and the status
+button is hosted off screen, so no item appears in the menu bar.
+"""
 
 from __future__ import annotations
 
@@ -14,13 +19,14 @@ import xml.etree.ElementTree as ET
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "Tests" / "Fixtures"
 ICON_SOURCE = ROOT / "FlycutMenuIcon.m"
 MAIN_MENU_XIB = ROOT / "English.lproj" / "MainMenu.xib"
 
 FIXTURE = r'''
 #import <AppKit/AppKit.h>
 #import <math.h>
-#import <unistd.h>
+#import "FixtureIsolation.h"
 #import "FlycutMenuIcon.h"
 
 static BOOL ColorsEqual(NSColor *left, NSColor *right)
@@ -43,9 +49,8 @@ static BOOL ColorsEqual(NSColor *left, NSColor *right)
 int main(void)
 {
     @autoreleasepool {
-        NSString *suiteName = [NSString stringWithFormat:@"com.generalarcade.flycut.color-test.%d", getpid()];
-        NSUserDefaults *defaults = [[[NSUserDefaults alloc] initWithSuiteName:suiteName] autorelease];
-        [defaults removePersistentDomainForName:suiteName];
+        // A fresh in-memory store is passed to the production API.
+        NSUserDefaults *defaults = [[[FCMemoryDefaults alloc] init] autorelease];
         [FlycutMenuIcon registerColorDefaults:defaults];
 
         if ([defaults boolForKey:FlycutMenuIconCustomColorsEnabledKey]) {
@@ -124,8 +129,6 @@ int main(void)
             fprintf(stderr, "automatic mode must not discard configured state colors\n");
             return 17;
         }
-
-        [defaults removePersistentDomainForName:suiteName];
     }
     return 0;
 }
@@ -134,6 +137,7 @@ int main(void)
 CONTROLLER_FIXTURE = r'''
 #import <AppKit/AppKit.h>
 #import <math.h>
+#import "FixtureIsolation.h"
 #import "AppController.h"
 #import "FlycutMenuIcon.h"
 
@@ -184,6 +188,42 @@ static BOOL ColorsEqual(NSColor *left, NSColor *right)
            fabs(lb - rb) < 0.0001 && fabs(la - ra) < 0.0001;
 }
 
+// The colour a text colour shows on screen, in both Light and Dark Mode.
+static BOOL ResolvedColorsEqual(NSColor *left, NSColor *right)
+{
+    __block BOOL equal = YES;
+    for (NSString *name in @[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]) {
+        [[NSAppearance appearanceNamed:name] performAsCurrentDrawingAppearance:^{
+            if (!ColorsEqual(left, right))
+                equal = NO;
+        }];
+    }
+    return equal;
+}
+
+static NSTextField *FindLabel(NSView *root, NSString *text)
+{
+    if ([root isKindOfClass:[NSTextField class]] && [[(NSTextField *)root stringValue] isEqualToString:text])
+        return (NSTextField *)root;
+    for (NSView *child in [root subviews]) {
+        NSTextField *match = FindLabel(child, text);
+        if (match != nil)
+            return match;
+    }
+    return nil;
+}
+
+// Where a label's text starts and ends, in the coordinates of another view.
+static NSRect TextRectInView(NSTextField *label, NSView *view)
+{
+    return [label convertRect:[[label cell] titleRectForBounds:[label bounds]] toView:view];
+}
+
+static BOOL FontsEqual(NSFont *left, NSFont *right)
+{
+    return [[left fontName] isEqualToString:[right fontName]] && fabs([left pointSize] - [right pointSize]) < 0.01;
+}
+
 static NSInteger RenderedPixelsNearColor(NSView *view, NSColor *expected)
 {
     NSColor *expectedRGB = [expected colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
@@ -216,10 +256,10 @@ int main(void)
     @autoreleasepool {
         [NSApplication sharedApplication];
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        for (NSString *key in @[FlycutMenuIconCustomColorsEnabledKey,
-                               FlycutMenuIconActiveColorComponentsKey,
-                               FlycutMenuIconPausedColorComponentsKey])
-            [defaults removeObjectForKey:key];
+        if (![defaults isMemberOfClass:[FCMemoryDefaults class]]) {
+            fprintf(stderr, "production defaults are not the in-memory fixture defaults\n");
+            return 20;
+        }
 
         AppController *controller = [[AppController alloc] init];
         NSBox *panel = [[[NSBox alloc] initWithFrame:NSMakeRect(0, 0, __APPEARANCE_PANEL_WIDTH__, 350)] autorelease];
@@ -252,6 +292,107 @@ int main(void)
                 return 29;
             }
         }
+        // The row reads as one line of the page: wells no taller than a small
+        // control next to a regular checkbox, state labels in the checkbox font,
+        // and each label centred on the well and preview it names.
+        CGFloat lineHeight = [checkbox fittingSize].height;
+        for (NSColorWell *well in @[activeWell, pausedWell]) {
+            if (NSHeight([well frame]) > lineHeight * 1.25 + 0.01) {
+                fprintf(stderr, "color well is too tall for the row: %s line=%.1f\n",
+                        [NSStringFromRect([well frame]) UTF8String], lineHeight);
+                return 30;
+            }
+        }
+        NSDictionary *stateViews = @{@"Active": @[activeWell, activePreview], @"Paused": @[pausedWell, pausedPreview]};
+        for (NSString *title in stateViews) {
+            NSTextField *label = nil;
+            for (NSView *child in [colorRow subviews])
+                if ([child isKindOfClass:[NSTextField class]] && [[(NSTextField *)child stringValue] isEqualToString:title])
+                    label = (NSTextField *)child;
+            if (label == nil) {
+                fprintf(stderr, "state label %s is missing\n", [title UTF8String]);
+                return 31;
+            }
+            if (fabs([[label font] pointSize] - [[checkbox font] pointSize]) > 0.01) {
+                fprintf(stderr, "state label %s uses %.1f pt, the checkbox %.1f pt\n", [title UTF8String],
+                        [[label font] pointSize], [[checkbox font] pointSize]);
+                return 32;
+            }
+            NSRect labelFrame = [label convertRect:[label bounds] toView:colorRow];
+            for (NSView *named in stateViews[title]) {
+                NSRect namedFrame = [named convertRect:[named bounds] toView:colorRow];
+                if (fabs(NSMidY(labelFrame) - NSMidY(namedFrame)) > 1.0) {
+                    fprintf(stderr, "state label %s is not centred on %s: label=%s view=%s\n", [title UTF8String],
+                            [[named identifier] UTF8String], [NSStringFromRect(labelFrame) UTF8String],
+                            [NSStringFromRect(namedFrame) UTF8String]);
+                    return 33;
+                }
+            }
+        }
+        // "Active" and "Paused" read like the checkbox title: its font and the
+        // colour of its title, both taken from the live checkbox.
+        NSColor *checkboxTitleColor = [[checkbox attributedTitle] attribute:NSForegroundColorAttributeName atIndex:0 effectiveRange:NULL];
+        if (checkboxTitleColor == nil) {
+            fprintf(stderr, "the checkbox title has no text colour to compare with\n");
+            return 34;
+        }
+        for (NSString *title in stateViews) {
+            NSTextField *label = FindLabel(colorRow, title);
+            if (!FontsEqual([label font], [checkbox font]) || !ResolvedColorsEqual([label textColor], checkboxTitleColor)) {
+                fprintf(stderr, "state label %s: font %s %.1f colour %s; checkbox font %s %.1f colour %s\n", [title UTF8String],
+                        [[[label font] fontName] UTF8String], [[label font] pointSize], [[[label textColor] description] UTF8String],
+                        [[[checkbox font] fontName] UTF8String], [[checkbox font] pointSize], [[checkboxTitleColor description] UTF8String]);
+                return 35;
+            }
+        }
+        // The hint under the line reads like the other row labels of the pane
+        // ("Bezel width", "Search clipboard hotkey:"): same left edge, font and
+        // text colour, compared with those live labels. It sits below the line.
+        NSTextField *hint = FindLabel(colorRow, @"Off uses the automatic macOS color.");
+        if (hint == nil) {
+            fprintf(stderr, "the automatic-colour hint is missing\n");
+            return 36;
+        }
+        for (NSString *title in @[@"Bezel width", @"Search clipboard hotkey:"]) {
+            NSTextField *reference = FindLabel(panel, title);
+            if (reference == nil || reference == hint) {
+                fprintf(stderr, "row label %s is missing\n", [title UTF8String]);
+                return 37;
+            }
+            NSRect hintText = TextRectInView(hint, panel), referenceText = TextRectInView(reference, panel);
+            if (fabs(NSMinX(hintText) - NSMinX(referenceText)) > 0.5) {
+                fprintf(stderr, "hint text starts at x=%.1f, row label %s at x=%.1f\n", NSMinX(hintText),
+                        [title UTF8String], NSMinX(referenceText));
+                return 38;
+            }
+            if (!FontsEqual([hint font], [reference font]) || !ResolvedColorsEqual([hint textColor], [reference textColor])) {
+                fprintf(stderr, "hint font %s %.1f colour %s; row label %s font %s %.1f colour %s\n",
+                        [[[hint font] fontName] UTF8String], [[hint font] pointSize], [[[hint textColor] description] UTF8String],
+                        [title UTF8String], [[[reference font] fontName] UTF8String], [[reference font] pointSize],
+                        [[[reference textColor] description] UTF8String]);
+                return 39;
+            }
+        }
+        if (NSMaxY([hint frame]) > NSMinY([checkbox frame]) + 0.5 || [hint isEditable] || [hint isBordered]) {
+            fprintf(stderr, "the hint is not a plain label below the checkbox line: hint=%s checkbox=%s\n",
+                    [NSStringFromRect([hint frame]) UTF8String], [NSStringFromRect([checkbox frame]) UTF8String]);
+            return 40;
+        }
+        NSSize hintFitting = [[hint cell] cellSizeForBounds:NSMakeRect(0, 0, CGFLOAT_MAX, CGFLOAT_MAX)];
+        if (NSWidth([hint frame]) + 0.5 < hintFitting.width || NSHeight([hint frame]) + 0.5 < hintFitting.height) {
+            fprintf(stderr, "the hint is clipped: frame=%s needs %s\n", [NSStringFromRect([hint frame]) UTF8String],
+                    [NSStringFromSize(hintFitting) UTF8String]);
+            return 41;
+        }
+        // One inset on both sides of the row: the paused preview ends as far
+        // from the row's right edge as the hint starts from its left edge.
+        NSView *rowContent = [hint superview];
+        NSRect pausedInRow = [pausedPreview convertRect:[pausedPreview bounds] toView:rowContent];
+        if (fabs(NSWidth([rowContent bounds]) - NSMaxX(pausedInRow) - NSMinX([hint frame])) > 0.5) {
+            fprintf(stderr, "the colour row ends %.1f from the right edge, the hint starts at %.1f\n",
+                    NSWidth([rowContent bounds]) - NSMaxX(pausedInRow), NSMinX([hint frame]));
+            return 42;
+        }
         if ([checkbox state] != NSControlStateValueOff || [activeWell isEnabled] || [pausedWell isEnabled]) {
             fprintf(stderr, "custom controls must start in automatic mode\n");
             return 23;
@@ -280,7 +421,7 @@ int main(void)
             return 25;
         }
 
-        NSStatusItem *statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
+        FCOffscreenStatusItem *statusItem = [[[FCOffscreenStatusItem alloc] initWithLength:28.0] autorelease];
         FCColorStateOperator *state = [[[FCColorStateOperator alloc] init] autorelease];
         [controller setValue:statusItem forKey:@"statusItem"];
         [controller setValue:state forKey:@"flycutOperator"];
@@ -307,13 +448,8 @@ int main(void)
             return 28;
         }
 
-        [[NSStatusBar systemStatusBar] removeStatusItem:statusItem];
         [controller setValue:nil forKey:@"statusItem"];
         [controller setValue:nil forKey:@"flycutOperator"];
-        for (NSString *key in @[FlycutMenuIconCustomColorsEnabledKey,
-                               FlycutMenuIconActiveColorComponentsKey,
-                               FlycutMenuIconPausedColorComponentsKey])
-            [defaults removeObjectForKey:key];
         [controller release];
     }
     return 0;
@@ -323,6 +459,7 @@ int main(void)
 LAYOUT_FIXTURE = r'''
 #import <AppKit/AppKit.h>
 #import <objc/runtime.h>
+#import "FixtureIsolation.h"
 #import "AppController.h"
 #import "UKPrefsPanel.h"
 #import "SRRecorderCell.h"
@@ -338,19 +475,6 @@ static id SafeInit(id self, SEL cmd) {
 static void NoBinding(id self, SEL cmd, id binding, id object, id path, id options) {}
 static NSUInteger permissionChecks;
 static void Check(id self, SEL cmd, id sender) { permissionChecks++; }
-@interface MemoryDefaults : NSUserDefaults { NSMutableDictionary *values; }
-@end
-@implementation MemoryDefaults
-- (id)init { self = [super initWithSuiteName:[[NSUUID UUID] UUIDString]]; if (self) values = [NSMutableDictionary new]; return self; }
-- (id)objectForKey:(NSString *)key { return [values objectForKey:key]; }
-- (void)setObject:(id)value forKey:(NSString *)key { if (value) [values setObject:value forKey:key]; else [values removeObjectForKey:key]; }
-- (void)removeObjectForKey:(NSString *)key { [values removeObjectForKey:key]; }
-- (void)registerDefaults:(NSDictionary *)defaults { for (NSString *key in defaults) if (!values[key]) values[key] = defaults[key]; }
-- (NSDictionary *)dictionaryRepresentation { return [[values copy] autorelease]; }
-- (BOOL)synchronize { return YES; }
-@end
-static NSUserDefaults *isolatedDefaults;
-static id Defaults(id self, SEL cmd) { return isolatedDefaults; }
 
 static NSButton *FindButton(NSView *root) {
     if ([root isKindOfClass:[NSButton class]] &&
@@ -390,10 +514,10 @@ static int VerifyRow(NSView *content, NSBox *box, NSArray *originals, NSArray *f
 int main(int argc, const char **argv) {
  @autoreleasepool {
     if (argc < 2) return 2;
-    isolatedDefaults = [MemoryDefaults new];
-    // Isolate state/lifecycle only; the NIB hierarchy, constraints, box margins,
-    // production panel builders and UKPrefsPanel resizing all run unchanged.
-    method_setImplementation(class_getClassMethod([NSUserDefaults class], @selector(standardUserDefaults)), (IMP)Defaults);
+    if (![[NSUserDefaults standardUserDefaults] isMemberOfClass:[FCMemoryDefaults class]]) return 3;
+    // Isolate state/lifecycle only (defaults are in memory via FixtureIsolation.h);
+    // the NIB hierarchy, constraints, box margins, production panel builders and
+    // UKPrefsPanel resizing all run unchanged.
     method_setImplementation(class_getInstanceMethod([AppController class], @selector(init)), (IMP)SafeInit);
     method_setImplementation(class_getInstanceMethod([AppController class], @selector(awakeFromNib)), (IMP)Noop);
     method_setImplementation(class_getInstanceMethod([AppController class], @selector(recheckAccessibility:)), (IMP)Check);
@@ -503,6 +627,8 @@ class MenuBarIconColorRegressionTests(unittest.TestCase):
                     "arm64",
                     "-I",
                     str(ROOT),
+                    "-I",
+                    str(FIXTURES),
                     str(fixture),
                     str(ICON_SOURCE),
                     "-framework",
@@ -553,7 +679,7 @@ class MenuBarIconColorRegressionTests(unittest.TestCase):
         ]
         if ICON_SOURCE not in sources:
             sources.append(ICON_SOURCE)
-        include_dirs = sorted({ROOT, *(path.parent for path in sources)})
+        include_dirs = sorted({ROOT, FIXTURES, *(path.parent for path in sources)})
 
         with tempfile.TemporaryDirectory(prefix="flycut-appearance-layout-") as temp_dir:
             temp = pathlib.Path(temp_dir)
@@ -620,7 +746,7 @@ class MenuBarIconColorRegressionTests(unittest.TestCase):
             )
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
-    def test_native_controls_drive_live_status_item_tints(self) -> None:
+    def test_native_controls_drive_status_button_tints(self) -> None:
         if MAIN_MENU_XIB.exists():
             appearance_box = ET.parse(MAIN_MENU_XIB).find(".//box[@identifier='testbox']/rect[@key='frame']")
             self.assertIsNotNone(appearance_box, "production XIB is missing the Appearance panel frame")
@@ -650,7 +776,7 @@ class MenuBarIconColorRegressionTests(unittest.TestCase):
         ]
         if ICON_SOURCE not in sources:
             sources.append(ICON_SOURCE)
-        include_dirs = sorted({ROOT, *(path.parent for path in sources)})
+        include_dirs = sorted({ROOT, FIXTURES, *(path.parent for path in sources)})
 
         with tempfile.TemporaryDirectory(prefix="flycut-menu-icon-color-ui-") as temp_dir:
             temp = pathlib.Path(temp_dir)
@@ -703,6 +829,16 @@ class MenuBarIconColorRegressionTests(unittest.TestCase):
                 timeout=30,
             )
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+
+    def test_appearance_rows_share_one_inset_constant(self) -> None:
+        source = (ROOT / "AppController.m").read_text()
+        self.assertEqual(source.count("static const CGFloat FlycutAppearanceRowInset = "), 1)
+        start = source.index("-(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY\n{")
+        body = source[start:source.index("\n}\n", start)]
+        # Left edge (hint, checkbox) and right edge (paused preview) both come from the shared inset.
+        self.assertIn("rowLabelX = FlycutAppearanceRowInset;", body)
+        self.assertIn("contentWidth - FlycutAppearanceRowInset - previewSide", body)
 
 
 if __name__ == "__main__":

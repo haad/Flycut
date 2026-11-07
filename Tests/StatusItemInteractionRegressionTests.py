@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Regression tests for reliable status-item mouse-button routing."""
+"""Regression tests for reliable status-item mouse-button routing.
+
+The native fixtures import Tests/Fixtures/FixtureIsolation.h: defaults stay in
+process memory and the status button lives in an off-screen, non-activating
+panel, so no menu-bar item is created and nothing is shown.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +15,7 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "Tests" / "Fixtures"
 APP_CONTROLLER = ROOT / "AppController.m"
 APP_HEADER = ROOT / "AppController.h"
 
@@ -69,6 +75,7 @@ class StatusItemInteractionRegressionTests(unittest.TestCase):
         fixture = r'''
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import "FixtureIsolation.h"
 #import "AppController.h"
 
 CGEventFlags FCTestCGEventSourceFlagsState(CGEventSourceStateID stateID) {
@@ -171,7 +178,7 @@ int main(void) {
         if icon_source not in relative_sources:
             relative_sources.append(icon_source)
         sources = [ROOT / path for path in relative_sources]
-        include_dirs = sorted({ROOT, *(path.parent for path in sources)})
+        include_dirs = sorted({ROOT, FIXTURES, *(path.parent for path in sources)})
 
         with tempfile.TemporaryDirectory(prefix="flycut-status-item-interaction-") as directory:
             source = pathlib.Path(directory) / "StatusItemInteractionFixture.m"
@@ -223,7 +230,7 @@ int main(void) {
                 f"status-item event matrix failed with exit {run.returncode}\n{run.stderr}",
             )
 
-    def test_real_status_button_tracks_each_mouse_button_once(self) -> None:
+    def test_status_button_window_routes_each_mouse_button_once(self) -> None:
         fixture_source = ROOT / "Tests" / "Fixtures" / "StatusItemWindowEventProbe.m"
         relative_sources = [
             pathlib.Path(path)
@@ -238,7 +245,7 @@ int main(void) {
         if icon_source not in relative_sources:
             relative_sources.append(icon_source)
         sources = [ROOT / path for path in relative_sources]
-        include_dirs = sorted({ROOT, *(path.parent for path in sources)})
+        include_dirs = sorted({ROOT, FIXTURES, *(path.parent for path in sources)})
 
         with tempfile.TemporaryDirectory(prefix="flycut-status-button-window-event-") as directory:
             binary = pathlib.Path(directory) / "StatusItemWindowEventProbe"

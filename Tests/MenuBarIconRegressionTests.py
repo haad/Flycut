@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Regression tests for Flycut's adaptive clipboard-tracking menu-bar UI."""
+"""Regression tests for Flycut's adaptive clipboard-tracking menu-bar UI.
+
+The native fixtures import Tests/Fixtures/FixtureIsolation.h, which keeps all
+defaults in process memory.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +15,7 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "Tests" / "Fixtures"
 APP_CONTROLLER = ROOT / "AppController.m"
 APP_HEADER = ROOT / "AppController.h"
 ICON_HEADER = ROOT / "FlycutMenuIcon.h"
@@ -40,6 +45,7 @@ class MenuBarIconRegressionTests(unittest.TestCase):
     def test_clipping_stack_images_are_distinct_menu_bar_templates(self) -> None:
         fixture = r'''
 #import <AppKit/AppKit.h>
+#import "FixtureIsolation.h"
 #import "FlycutMenuIcon.h"
 
 int main(void) {
@@ -76,6 +82,8 @@ int main(void) {
                     "arm64",
                     "-I",
                     str(ROOT),
+                    "-I",
+                    str(FIXTURES),
                     str(source),
                     str(ICON_SOURCE),
                     "-framework",
@@ -151,6 +159,10 @@ int main(void) {
         self.assertIn("[flycutOperator storeDisabled]", menu_text)
         self.assertIn('@"Pause Clipboard Tracking"', source)
         self.assertIn('@"Resume Clipboard Tracking"', source)
+        # Visible texts use the spaced en dash, not the em dash.
+        self.assertIn('@"Flycut \u2013 Clipboard Tracking Paused"', icon)
+        self.assertIn('@"Flycut \u2013 Clipboard Tracking Active"', icon)
+        self.assertNotIn("\u2014", icon)
         self.assertNotIn("statusItemShowsDisabled", header)
 
     def test_option_click_does_not_sample_modifiers_during_menu_tracking(self) -> None:
@@ -171,6 +183,7 @@ int main(void) {
         fixture = r'''
 #import <Cocoa/Cocoa.h>
 #import <ApplicationServices/ApplicationServices.h>
+#import "FixtureIsolation.h"
 #import "AppController.h"
 
 CGEventFlags FCTestCGEventSourceFlagsState(CGEventSourceStateID stateID) {
@@ -237,7 +250,7 @@ int main(void) {
         if icon_source not in relative_sources:
             relative_sources.append(icon_source)
         sources = [ROOT / path for path in relative_sources]
-        include_dirs = sorted({ROOT, *(path.parent for path in sources)})
+        include_dirs = sorted({ROOT, FIXTURES, *(path.parent for path in sources)})
 
         with tempfile.TemporaryDirectory(prefix="flycut-option-click-") as directory:
             source = pathlib.Path(directory) / "OptionClickFixture.m"
