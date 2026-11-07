@@ -53,6 +53,8 @@
         @"removeDuplicates",
         [NSNumber numberWithBool:NO],
         @"pasteMovesToTop",
+        [NSNumber numberWithBool:YES],
+        @"preserveTextFormatting",
         [NSNumber numberWithBool:NO],
         @"syncSettingsViaICloud",
         [NSNumber numberWithBool:NO],
@@ -68,7 +70,8 @@
 						 @"skipPasswordLengths",
 						 @"skipPasswordLengthsList",
 						 @"removeDuplicates",
-						 @"pasteMovesToTop"];
+						 @"pasteMovesToTop",
+						 @"preserveTextFormatting"];
 	[settingsSyncList retain];
 
 	return self;
@@ -227,6 +230,21 @@
 		return [self getPasteFromIndex: stackPosition];
 	}
 	return nil;
+}
+
+// Must be called before getPasteFromIndex:/getPasteFromStackPosition, which may
+// reorder the list when pasteMovesToTop is enabled.
+- (NSDictionary*)getRichDataFromStackPosition
+{
+	if ( [clippingStore jcListCount] > stackPosition ) {
+		return [self getRichDataFromIndex: stackPosition];
+	}
+	return nil;
+}
+
+- (NSDictionary*)getRichDataFromIndex:(int) position
+{
+	return [clippingStore clippingRichDataAtPosition:position];
 }
 
 - (bool)saveFromStack
@@ -475,12 +493,18 @@
 
 -(bool)addClipping:(NSString*)contents ofType:(NSString*)type fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector
 {
+	return [self addClipping:contents ofType:type withRichData:nil fromApp:appName withAppBundleURL:bundleURL target:selectorTarget clippingAddedSelector:clippingAddedSelector];
+}
+
+-(bool)addClipping:(NSString*)contents ofType:(NSString*)type withRichData:(NSDictionary *)richData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector
+{
 	if ( [clippingStore jcListCount] == 0 || ! [contents isEqualToString:[clippingStore clippingContentsAtPosition:0]]) {
 		bool success = [clippingStore addClipping:contents
 										   ofType:type
 							 fromAppLocalizedName:appName
 								 fromAppBundleURL:bundleURL
-									  atTimestamp:[[NSDate date] timeIntervalSince1970]];
+									  atTimestamp:[[NSDate date] timeIntervalSince1970]
+									 withRichData:richData];
 
 //		The below tracks our position down down down... Maybe as an option?
 //		if ( [clippingStore jcListCount] > 1 ) stackPosition++;
@@ -490,6 +514,11 @@
 
 		return success;
     }
+	// The newest clipping already holds this text, so it is not added again. Keep
+	// the formatting of this latest copy instead (none for a plain-text copy), so
+	// pasting the clipping matches what was copied last.
+	if ( [clippingStore setRichData:richData forClippingAtPosition:0] )
+		[self actionAfterListModification];
 	return  NO;
 }
 
@@ -1083,11 +1112,24 @@
 										 atTimestamp:[[aSavedClipping objectForKey:@"Timestamp"] integerValue]];
 				}
 			} else {
+				// Only restore rich data that has the expected shape (type string -> data),
+				// since the plist could have been written by other versions or edited.
+				NSDictionary *richData = [aSavedClipping objectForKey:@"RichData"];
+				if ( [richData isKindOfClass:[NSDictionary class]] ) {
+					for ( id key in richData )
+						if ( ! [key isKindOfClass:[NSString class]] || ! [[richData objectForKey:key] isKindOfClass:[NSData class]] ) {
+							richData = nil;
+							break;
+						}
+				} else
+					richData = nil;
+
 				[store addClipping:[aSavedClipping objectForKey:@"Contents"]
 								  ofType:[aSavedClipping objectForKey:@"Type"]
 					fromAppLocalizedName:[aSavedClipping objectForKey:@"AppLocalizedName"]
 						fromAppBundleURL:[aSavedClipping objectForKey:@"AppBundleURL"]
-							 atTimestamp:[[aSavedClipping objectForKey:@"Timestamp"] integerValue]];
+							 atTimestamp:[[aSavedClipping objectForKey:@"Timestamp"] integerValue]
+							withRichData:richData];
 			}
 		}
 		return YES;
@@ -1175,6 +1217,10 @@
         int timestamp = [clipping timestamp];
         if ( timestamp > 0 )
             [dict setObject:[NSNumber numberWithInt:timestamp] forKey:@"Timestamp"];
+
+        NSDictionary *richData = [clipping richData];
+        if ( nil != richData && [richData count] > 0 )
+            [dict setObject:richData forKey:@"RichData"];
 
         [jcListArray addObject:dict];
     }

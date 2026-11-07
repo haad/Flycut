@@ -156,6 +156,34 @@
         clipHasName = newHasName;
 }
 
+// Rich data is limited to non-empty RTF and HTML representations of at most 1 MiB,
+// whether it was just captured or restored from a saved (possibly edited) store, so
+// pasting a clipping can never replace its plain text or declare other types.
+static const NSUInteger FlycutMaxRichDataLength = 1048576;
+
+-(void) setRichData:(NSDictionary *)newRichData
+{
+    NSMutableDictionary *allowedRichData = nil;
+    if ( [newRichData isKindOfClass:[NSDictionary class]] ) {
+        for ( NSString *richType in [NSArray arrayWithObjects:NSPasteboardTypeRTF, NSPasteboardTypeHTML, nil] ) {
+            id data = [newRichData objectForKey:richType];
+            if ( [data isKindOfClass:[NSData class]] && [data length] > 0 && [data length] <= FlycutMaxRichDataLength ) {
+                if ( nil == allowedRichData )
+                    allowedRichData = [NSMutableDictionary dictionaryWithCapacity:2];
+                [allowedRichData setObject:data forKey:richType];
+            }
+        }
+    }
+    id old = clipRichData;
+    clipRichData = [allowedRichData copy];
+    [old release];
+}
+
+-(NSDictionary *) richData
+{
+    return clipRichData;
+}
+
 -(void) resetDisplayString
 {
     [clipDisplayString release];
@@ -301,6 +329,7 @@
     [appLocalizedName release];
     [appBundleURL release];
     [imageHash release];
+    [clipRichData release];
     clipDisplayLength = 0;
     [clipDisplayString release];
     clipHasName = 0;
