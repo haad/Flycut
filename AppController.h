@@ -36,6 +36,9 @@
 	SRKeyCodeTransformer        *srTransformer;
 	BOOL						isBezelDisplayed;
 	BOOL						isBezelPinned;
+	BOOL						isMenuOpen;
+	NSUInteger nextPasteTransactionGeneration;
+	id currentPasteTransaction;
 	NSString					*currentKeycodeCharacter;
     NSDateFormatter*            dateFormat;
 	
@@ -44,6 +47,7 @@
 	NSSearchField				*searchWindowSearchField;
 	NSTableView					*searchWindowTableView;
 	NSArray						*searchResults;
+	NSArray *searchResultClippings;
 	BOOL						isSearchWindowDisplayed;
 
     NSArray *settingsSyncList;
@@ -68,7 +72,6 @@
     IBOutlet NSSearchField *searchBox;
     NSResponder *menuFirstResponder;
     dispatch_queue_t menuQueue;
-    NSRunningApplication *currentRunningApplication;
     NSEvent *menuOpenEvent;
     IBOutlet NSSlider * heightSlider;
     IBOutlet NSSlider * widthSlider;
@@ -92,7 +95,7 @@
 // Basic functionality
 -(void) pollPB:(NSTimer *)timer;
 -(void) addClipToPasteboard:(NSString*)pbFullText;
--(void) addImageClipToPasteboard:(FlycutClipping *)clipping;
+-(BOOL) addImageClipToPasteboard:(FlycutClipping *)clipping;
 -(void) setPBBlockCount:(NSNumber *)newPBBlockCount;
 -(void) hideApp;
 -(void) fakeCommandV;

@@ -353,8 +353,13 @@
 	NSString *clipping = [self getClipFromCount:position];
 
 	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"] ) {
-		[clippingStore clippingMoveToTop:position];
+		// Settle the stack position BEFORE moving, because the store redraws the bezel from
+		// inside the move (delegateEndUpdates -> -[AppController endUpdates]).  Assigning
+		// afterwards meant that redraw used the pre-move position, which then pointed at the
+		// neighbour of the clipping being pasted - a visible flash of the wrong entry.
+		// Once the clipping has been moved to the top, position 0 is that clipping.
 		stackPosition = 0;
+		[clippingStore clippingMoveToTop:position];
 
 		[self actionAfterListModification];
 	}
@@ -476,15 +481,35 @@
 -(bool)addClipping:(NSString*)contents ofType:(NSString*)type fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector
 {
 	if ( [clippingStore jcListCount] == 0 || ! [contents isEqualToString:[clippingStore clippingContentsAtPosition:0]]) {
+		// Remember which clipping the stack position points at, so the selection can follow it
+		// across the insert.  Retained because the store may drop clippings while inserting.
+		//
+		// Position 0 is excluded on purpose.  It is where every selection starts, so it does
+		// not express a choice, and the bezel shows whatever sits at the top - following the
+		// old top clipping there would move the selection away from what the user is looking
+		// at.  Staying at 0 keeps the display and the paste in agreement.
+		FlycutClipping *anchor = nil;
+		if ( stackPosition > 0 && stackPosition < [clippingStore jcListCount] )
+			anchor = [[clippingStore clippingAtPosition:stackPosition] retain];
+
 		bool success = [clippingStore addClipping:contents
 										   ofType:type
 							 fromAppLocalizedName:appName
 								 fromAppBundleURL:bundleURL
 									  atTimestamp:[[NSDate date] timeIntervalSince1970]];
 
-//		The below tracks our position down down down... Maybe as an option?
-//		if ( [clippingStore jcListCount] > 1 ) stackPosition++;
-		stackPosition = 0;
+		// Follow the clipping rather than the position.  This used to be stackPosition = 0,
+		// which moved a selection the user was making in the bezel onto the clipping that had
+		// just arrived - so they pasted the newest entry instead of the one they had picked.
+		// -indexOfClipping: matches on contents, which is what is wanted here: two clippings
+		// with equal contents are interchangeable, and it also covers removeDuplicates, where
+		// the existing copy is moved to the top instead of a new one being inserted.
+		// A new selection starts at the newest clipping because opening the bezel says so,
+		// not because an unrelated store change reset the position.
+		int followed = ( nil != anchor ) ? [clippingStore indexOfClipping:anchor] : -1;
+		stackPosition = ( followed >= 0 ) ? followed : 0;
+		[anchor release];
+
         [selectorTarget performSelector:clippingAddedSelector];
 		[self actionAfterListModification];
 
@@ -524,13 +549,21 @@
         [tempImage release];
     }
 
+    // Follow the selected clipping across the insert, exactly as -addClipping: does for
+    // text, so an image arriving while the bezel is open does not move the selection.
+    FlycutClipping *anchor = nil;
+    if ( stackPosition > 0 && stackPosition < [clippingStore jcListCount] )
+        anchor = [[clippingStore clippingAtPosition:stackPosition] retain];
+
     bool success = [clippingStore addImageClippingWithHash:hash
                                                 imageSize:pixelSize
                                                 imageType:imageType
                                      fromAppLocalizedName:appName
                                          fromAppBundleURL:bundleURL
                                               atTimestamp:[[NSDate date] timeIntervalSince1970]];
-    stackPosition = 0;
+    int followed = ( nil != anchor ) ? [clippingStore indexOfClipping:anchor] : -1;
+    stackPosition = ( followed >= 0 ) ? followed : 0;
+    [anchor release];
     [selectorTarget performSelector:clippingAddedSelector];
     [self actionAfterListModification];
     return success;
@@ -585,6 +618,14 @@
 -(int)jcListCount
 {
 	return [clippingStore jcListCount];
+}
+
+-(FlycutClipping *) clippingAtPosition:(int)position
+{
+	if ( position < 0 || position >= [clippingStore jcListCount] )
+		return nil;
+
+	return [clippingStore clippingAtPosition:position];
 }
 
 -(int)rememberNum
