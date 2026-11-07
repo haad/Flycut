@@ -326,14 +326,12 @@
         }
 
         if (isImage) {
-            [imageData writeToFile:fileNameWithPath atomically:YES];
-        } else {
-            [pbFullText writeToFile:fileNameWithPath
-                      atomically:NO
-                        encoding:NSNonLossyASCIIStringEncoding
-                           error:nil];
+            return [imageData writeToFile:fileNameWithPath atomically:YES];
         }
-        return YES;
+        return [pbFullText writeToFile:fileNameWithPath
+                            atomically:NO
+                              encoding:NSNonLossyASCIIStringEncoding
+                                 error:nil];
     }
     return NO;
 }
@@ -512,17 +510,27 @@
             return NO;
     }
 
-    [imgStore saveImageData:imageData forHash:hash extension:[FlycutImageStore fileExtensionForType:imageType]];
-
-    NSSize pixelSize = NSZeroSize;
+    // Only bytes that decode as an image become an image clipping; anything else
+    // could be neither shown nor pasted.
     NSImage *tempImage = [[NSImage alloc] initWithData:imageData];
-    if (tempImage) {
-        NSImageRep *rep = [[tempImage representations] firstObject];
-        if (rep) {
-            pixelSize = NSMakeSize([rep pixelsWide], [rep pixelsHigh]);
-        }
-        [tempImage release];
+    if (!tempImage)
+        return NO;
+    NSSize pixelSize = NSZeroSize;
+    NSImageRep *rep = [[tempImage representations] firstObject];
+    if (rep) {
+        pixelSize = NSMakeSize([rep pixelsWide], [rep pixelsHigh]);
     }
+    [tempImage release];
+
+    // With Save: Never the bytes stay in memory only, so no image contents reach the disk.
+    NSString *extension = [FlycutImageStore fileExtensionForType:imageType];
+    BOOL stored;
+    if ([[NSUserDefaults standardUserDefaults] integerForKey:@"savePreference"] >= 1)
+        stored = [imgStore saveImageData:imageData forHash:hash extension:extension];
+    else
+        stored = [imgStore saveMemoryOnlyImageData:imageData forHash:hash extension:extension];
+    if (!stored)
+        return NO;
 
     bool success = [clippingStore addImageClippingWithHash:hash
                                                 imageSize:pixelSize
@@ -543,7 +551,10 @@
 
 -(BOOL)isImageHashReferencedElsewhere:(NSString *)hash excludingStore:(FlycutStore *)excludeStore atIndex:(int)excludeIndex
 {
-    FlycutStore *stores[] = { clippingStore, favoritesStore };
+    // While Favorites is shown, clippingStore is the favorites store and the main
+    // history is stashed. Scan each physical store once.
+    FlycutStore *mainStore = stashedStore ? stashedStore : clippingStore;
+    FlycutStore *stores[] = { mainStore, favoritesStore != mainStore ? favoritesStore : nil };
     for (int s = 0; s < 2; s++) {
         FlycutStore *store = stores[s];
         if (!store) continue;
@@ -559,13 +570,7 @@
 }
 
 - (void)willDeleteClippingFromStore:(id)store AtIndex:(int)index {
-    FlycutClipping *clipping = [(FlycutStore *)store clippingAtPosition:index];
-    if ([clipping isImageClipping]) {
-        if (![self isImageHashReferencedElsewhere:[clipping imageHash] excludingStore:(FlycutStore *)store atIndex:index]) {
-            [[FlycutImageStore sharedStore] deleteImageForHash:[clipping imageHash]];
-        }
-    }
-
+	// Export a forgotten clipping before releasing its image bytes; the export reads them.
 	if ( (!inhibitAutosaveClippings)
 		&& ( store == favoritesStore
 		? [[[NSUserDefaults standardUserDefaults] valueForKey:@"saveForgottenFavorites"] boolValue]
@@ -573,6 +578,13 @@
 	{
 		[self saveFromStore:store atIndex:index withPrefix:@"Autosave "];
 	}
+
+    FlycutClipping *clipping = [(FlycutStore *)store clippingAtPosition:index];
+    if ([clipping isImageClipping]) {
+        if (![self isImageHashReferencedElsewhere:[clipping imageHash] excludingStore:(FlycutStore *)store atIndex:index]) {
+            [[FlycutImageStore sharedStore] deleteImageForHash:[clipping imageHash]];
+        }
+    }
 }
 
 -(void)actionAfterListModification
@@ -1182,6 +1194,17 @@
 	[store clearModifiedSinceLastSaveStore];
 }
 
+// Saved history must be able to restore its images after a relaunch, including
+// images captured while Save: Never kept them in memory only.
+- (void)persistMemoryOnlyImagesOfStore:(FlycutStore *)store {
+    for ( int i = 0 ; i < [store jcListCount] ; i++ )
+    {
+        FlycutClipping *clipping = [store clippingAtPosition:i];
+        if ([clipping isImageClipping])
+            [[FlycutImageStore sharedStore] persistMemoryOnlyImageForHash:[clipping imageHash]];
+    }
+}
+
 -(void) saveEngine {
 	// saveEngine saves to NSUserDefaults.  If there have been no modifications, just skip this to avoid busy activity for any observers.
 	if ( !([clippingStore modifiedSinceLastSaveStore]
@@ -1198,6 +1221,8 @@
 
 	[saveTarget performSelector:saveSelector withObject:saveDict];
 
+    [self persistMemoryOnlyImagesOfStore:clippingStore];
+    [self persistMemoryOnlyImagesOfStore:favoritesStore];
     [self saveStore:clippingStore toKey:@"jcList" onDict:saveDict];
     [self saveStore:favoritesStore toKey:@"favoritesList" onDict:saveDict];
 
@@ -1214,7 +1239,10 @@
         [[NSUserDefaults standardUserDefaults] setValue:[NSDictionary dictionary] forKey:@"store"];
         DLog(@"Saving preferences on exit");
         [[NSUserDefaults standardUserDefaults] synchronize];
+        // Nothing refers to stored images any more; do not leave their contents on disk.
+        [[FlycutImageStore sharedStore] removeAllImages];
     }
+    [[FlycutImageStore sharedStore] removeEphemeralFiles];
 }
 
 -(NSArray *) previousIndexes:(int)howMany containing:(NSString*)search // This method is in newest-first order.
