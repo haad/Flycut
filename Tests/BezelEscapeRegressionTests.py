@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -250,6 +251,75 @@ int main(int argc, const char *argv[]) {
                         timeout=30,
                     )
                     self.assertEqual(run.returncode, 0, f"{message}; exit={run.returncode}")
+
+
+class BezelPendingPasteRegressionTests(unittest.TestCase):
+    """Real pasteFromStack/processBezelKeyDown run-loop lifecycle.
+
+    The fixture links every production source and replaces only OS
+    boundaries (event posting, permission check, keyboard layout, NSApp,
+    pasteboard, preferences storage). It never posts input or touches TCC, and
+    it aborts if a case reaches the real image store or general pasteboard.
+    """
+
+    FIXTURE = ROOT / "Tests/Fixtures/BezelPendingPaste.m"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temporary = tempfile.TemporaryDirectory(prefix="flycut-bezel-pending-")
+        cls.addClassCleanup(cls.temporary.cleanup)
+        cls.artifacts = pathlib.Path(os.environ.get("FLYCUT_TEST_ARTIFACTS") or cls.temporary.name).resolve() / "BezelPendingPaste"
+        cls.artifacts.mkdir(parents=True, exist_ok=True)
+        sources = [
+            ROOT / path
+            for path in subprocess.check_output(
+                ["/usr/bin/git", "ls-files", "*.m"], cwd=ROOT, text=True
+            ).splitlines()
+            if path != "main.m"
+            and not path.startswith("FlycutHelper/")
+            and not path.startswith("Tests/")
+        ]
+        cls.binary = cls.artifacts / "BezelPendingPaste"
+        command = [
+            "/usr/bin/xcrun", "clang", "-fno-objc-arc", "-fobjc-weak", "-fblocks", "-fmodules",
+            "-DFLYCUT_MAC=1", "-mmacosx-version-min=13.5", "-arch", "arm64",
+            "-include", str(ROOT / "Flycut_Prefix.pch"),
+        ]
+        for include_dir in sorted({ROOT, *(path.parent for path in sources)}):
+            command.extend(["-I", str(include_dir)])
+        command.extend(str(path) for path in sources)
+        command.append(str(cls.FIXTURE))
+        for framework in ("Cocoa", "Carbon", "ServiceManagement", "CloudKit"):
+            command.extend(["-framework", framework])
+        command.extend(["-o", str(cls.binary)])
+        build = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=300)
+        (cls.artifacts / "build.log").write_text(build.stdout + build.stderr)
+        if build.returncode:
+            raise AssertionError(f"Native fixture build failed ({build.returncode}):\n{build.stderr}")
+
+    def run_case(self, case: str) -> None:
+        run = subprocess.run([str(self.binary), case], cwd=ROOT, text=True,
+                             capture_output=True, timeout=60)
+        output = run.stdout + run.stderr
+        (self.artifacts / f"{case}.log").write_text(output)
+        print(output, end="")
+        self.assertEqual(run.returncode, 0, output)
+
+    def test_fixture_does_not_link_real_input_or_permission_functions(self) -> None:
+        symbols = subprocess.check_output(["/usr/bin/nm", "-u", str(self.binary)], text=True)
+        (self.artifacts / "undefined-symbols.log").write_text(symbols)
+        for name in ("CGEventPost", "AXIsProcessTrustedWithOptions",
+                     "TISCopyCurrentKeyboardLayoutInputSource"):
+            self.assertNotIn("_" + name + "\n", symbols)
+
+    def test_selection_without_escape_pastes_exactly_once(self) -> None:
+        self.run_case("selection")
+
+    def test_escape_after_selection_cancels_scheduled_paste_and_hide(self) -> None:
+        self.run_case("escape-after-selection")
+
+    def test_escape_restores_clipping_store_from_favorites(self) -> None:
+        self.run_case("favorites")
 
 
 if __name__ == "__main__":

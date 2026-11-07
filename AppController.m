@@ -1205,6 +1205,10 @@
 
 - (void)cancelBezelSelection
 {
+	// A selection made while the bezel is still visible has already queued its
+	// paste and delayed hide (see -pasteFromStack); a cancelled selection must not paste.
+	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fakeCommandV) object:nil];
+	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideApp) object:nil];
 	[self restoreStashedStoreAndUpdate];
 	[self hideApp];
 }
