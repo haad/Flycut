@@ -915,6 +915,14 @@
 
 - (void)pasteFromStack
 {
+	// A bezel selection is pasted at most once. Releasing the modifier keys and
+	// pressing Return (or double-clicking) all confirm the same selection, so any
+	// further confirmation before the bezel is opened again is a duplicate.
+	if ( bezelSelectionFinished ) {
+		NSLog(@"pasteFromStack ignored - this bezel selection was already pasted or cancelled");
+		return;
+	}
+	bezelSelectionFinished = YES;
     FlycutClipping *clipping = [flycutOperator clippingAtStackPosition];
     if (clipping) {
         if ([clipping isImageClipping]) {
@@ -1205,6 +1213,7 @@
 
 - (void)cancelBezelSelection
 {
+	bezelSelectionFinished = YES;
 	[self restoreStashedStoreAndUpdate];
 	[self hideApp];
 }
@@ -1440,6 +1449,8 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 - (void)hitMainHotKey:(SGHotKey *)hotKey
 {
 	if ( ! isBezelDisplayed ) {
+		// Opening the bezel starts a new selection, which may be pasted once.
+		bezelSelectionFinished = NO;
 		//Do NOT activate the app so focus stays on app the user is interacting with
 		//https://github.com/TermiT/Flycut/issues/45
 		//[NSApp activateIgnoringOtherApps:YES];
