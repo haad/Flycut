@@ -67,7 +67,7 @@
     int jcMenuBaseItemsCount;
     IBOutlet NSSearchField *searchBox;
     NSResponder *menuFirstResponder;
-    dispatch_queue_t menuQueue;
+    dispatch_queue_t clipboardReadQueue;
     NSRunningApplication *currentRunningApplication;
     NSEvent *menuOpenEvent;
     IBOutlet NSSlider * heightSlider;
@@ -82,6 +82,8 @@
     NSNumber *pbCount;
     //stores PasteboardCount for internal Flycut pasteboard actions so they don't trigger any events
     NSNumber *pbBlockCount;
+    // Advanced whenever clipboard capture is paused or resumed; a capture commits only in the epoch it started in
+    NSUInteger clipboardCaptureEpoch;
     //Preferences
 	NSDictionary *standardPreferences;
     int jcDisplayNum;

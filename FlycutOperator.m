@@ -379,11 +379,6 @@
 	// Check to see if we are skipping passwords based on length and characters.
 	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"skipPasswordFields"] )
 	{
-		// Check to see if they want a little help figuring out what types to enter.
-		if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"] )
-			[clippingStore addClipping:type ofType:type fromAppLocalizedName:@"Flycut" fromAppBundleURL:nil atTimestamp:0];
-		[self actionAfterListModification];
-
 		__block bool skipClipping = NO;
 
 		// Check the array of types to skip.
