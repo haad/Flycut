@@ -277,10 +277,21 @@ a click.
 
 -(IBAction)	changePanes: (id)sender
 {
-	
+	// End editing, and a running shortcut recording, while the current pane is
+	// still on screen. Otherwise the tab view ends it only as it removes the
+	// pane, and hands keyboard focus back to that control, unseen, when the
+	// pane is shown again.
+	NSToolbar *toolbar = [[tabView window] toolbar];
+	if (![[tabView window] makeFirstResponder:nil]) {
+		// A field that will not end editing (its value does not validate)
+		// keeps its pane on screen, and the toolbar shows that pane again.
+		if ([toolbar respondsToSelector: @selector(setSelectedItemIdentifier:)])
+			[toolbar setSelectedItemIdentifier: [[tabView selectedTabViewItem] identifier]];
+		return;
+	}
+
 	[tabView selectTabViewItemAtIndex: [sender tag]];
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_3
-	NSToolbar *toolbar = [[tabView window] toolbar];
 	if( [toolbar respondsToSelector: @selector(setSelectedItemIdentifier:)] )
 		[toolbar setSelectedItemIdentifier: [[tabView selectedTabViewItem] identifier]];
 #endif

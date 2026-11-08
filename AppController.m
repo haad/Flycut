@@ -26,6 +26,52 @@
 #import <ServiceManagement/ServiceManagement.h>
 #import "FlycutPasteKey.h"
 
+@interface AppController ()
+-(void)updateRestoreDefaultButtons;
+-(void)updateSaveLocationButtonTitles;
+-(void)storeSaveLocation:(NSURL *)url forButton:(NSButton *)button;
+@end
+
+// A Restore Default arrow, on every pane: a square of this side, this far
+// right of the control it belongs to.
+static const CGFloat FlycutRestoreArrowSide = 20.0;
+static const CGFloat FlycutRestoreArrowGap = 4.0;
+
+// What VoiceOver says about both hotkey fields (ShortcutRecorder has no
+// accessibility support of its own).
+static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then type the new shortcut. Escape cancels.";
+
+// Keeps the arrows in step with the values: typing in a General field, a
+// bound stepper or field committing through the defaults controller, and the
+// Preferences window coming up. Lives as long as the app; holds the
+// controller weakly.
+@interface FlycutRestoreDefaultsObserver : NSObject
+{
+	__weak AppController *controller;
+}
+- (instancetype)initWithController:(AppController *)aController;
+@end
+
+@implementation FlycutRestoreDefaultsObserver
+- (instancetype)initWithController:(AppController *)aController
+{
+	self = [super init];
+	if (self != nil)
+		controller = aController;
+	return self;
+}
+- (void)valuesChanged:(NSNotification *)notification
+{
+	(void)notification;
+	[controller updateRestoreDefaultButtons];
+}
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
+{
+	(void)keyPath; (void)object; (void)change; (void)context;
+	[controller updateRestoreDefaultButtons];
+}
+@end
+
 // Custom search window that handles Cmd-W properly
 @interface SearchWindow : NSWindow
 @property (weak) AppController *appController;
@@ -238,6 +284,10 @@
 }
 
 
+// The code-built rows of the Appearance pane are inset by this much on both
+// sides of their content: row labels start at it, and whatever a row puts at
+// its right end stops at it.
+static const CGFloat FlycutAppearanceRowInset = 8.0;
 
 
 
@@ -295,19 +345,9 @@
 	
 	[self buildAppearancesPreferencePanel];
 
-	// We no longer get autosave from ShortcutRecorder, so let's set the recorder by hand
-	if ( [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder mainHotkey"] ) {
-		[mainRecorder setKeyCombo:SRMakeKeyCombo([[[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder mainHotkey"] objectForKey:@"keyCode"] intValue],
-												 [[[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder mainHotkey"] objectForKey:@"modifierFlags"] intValue] )
-		];
-	};
-
-	// Set up search hotkey recorder
-	if ( [[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder searchHotkey"] && searchRecorder ) {
-		[searchRecorder setKeyCombo:SRMakeKeyCombo([[[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder searchHotkey"] objectForKey:@"keyCode"] intValue],
-												   [[[[NSUserDefaults standardUserDefaults] dictionaryForKey:@"ShortcutRecorder searchHotkey"] objectForKey:@"modifierFlags"] intValue] )
-		];
-	};
+	[self buildMainHotkeyRestoreDefaultButton];
+	[self buildGeneralRestoreDefaultButtons];
+	[self loadHotkeyRecorderCombos];
 
 	// Initialize the FlycutOperator
 	flycutOperator = [[FlycutOperator alloc] init];
@@ -466,6 +506,7 @@
 	// bezel programatically, meaning that I have to go through AppController as
 	// a cutout to allow the user interface to interact w/the bezel.
 	[bezel setAlpha:[sender floatValue]];
+	[self updateRestoreDefaultButtons];
 }
 
 -(IBAction) setBezelWidth:(id)sender
@@ -478,6 +519,7 @@
 		[bezel setFrame:windowFrame display:NO];
 		[bezel trueCenter];
 	});
+	[self updateRestoreDefaultButtons];
 }
 
 -(IBAction) setBezelHeight:(id)sender
@@ -490,6 +532,7 @@
 		[bezel setFrame:windowFrame display:NO];
 		[bezel trueCenter];
 	});
+	[self updateRestoreDefaultButtons];
 }
 
 -(IBAction) setupBezel:(id)sender
@@ -612,12 +655,17 @@
 	[newRow setTitlePosition:NSNoTitle];
 	[newRow setTransparent:YES];
 
+	// The Restore Default arrow ends at the row inset, in one column with the
+	// other arrows of this pane; the slider ends one gap before it.
+	CGFloat restoreX = NSWidth([[newRow contentView] bounds]) - FlycutAppearanceRowInset - FlycutRestoreArrowSide;
+	CGFloat sliderMaxX = restoreX - FlycutRestoreArrowGap;
+
     [newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSMakeRect(8, 25, 100, 25)]];
 
     [newRow addSubview:[self preferencePanelSliderLabelForText:minText aligned:NSTextAlignmentLeft andFrame:NSMakeRect(113, 0, 151, 25)]];
-    [newRow addSubview:[self preferencePanelSliderLabelForText:maxText aligned:NSTextAlignmentRight andFrame:NSMakeRect(109+310-151-4, 0, 151, 25)]];
+    [newRow addSubview:[self preferencePanelSliderLabelForText:maxText aligned:NSTextAlignmentRight andFrame:NSMakeRect(sliderMaxX-151-4, 0, 151, 25)]];
 
-	NSSlider *newControl = [[NSSlider alloc] initWithFrame:NSMakeRect(109, 29, 310, 25)];
+	NSSlider *newControl = [[NSSlider alloc] initWithFrame:NSMakeRect(109, 29, sliderMaxX - 109, 25)];
 
 	newControl.numberOfTickMarks=ticks;
 	[newControl setMinValue:min];
@@ -626,6 +674,13 @@
 	[self setBinding:@"value" forKey:keyPath andOrAction:action on:newControl];
 
 	[newRow addSubview:newControl];
+
+	NSString *restoreIdentifier = [@"restoreDefault" stringByAppendingString:[[[keyPath substringToIndex:1] uppercaseString] stringByAppendingString:[keyPath substringFromIndex:1]]];
+	NSButton *restoreButton = [self restoreDefaultButtonWithIdentifier:restoreIdentifier
+	                                               accessibilityLabel:[@"Restore default " stringByAppendingString:[title lowercaseString]]];
+	[restoreButton setFrame:NSMakeRect(restoreX, NSMidY([newControl frame]) - FlycutRestoreArrowSide / 2.0,
+	                                   FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
+	[newRow addSubview:restoreButton];
 
 	return newRow;
 }
@@ -694,13 +749,546 @@
 	[newRow setTitlePosition:NSNoTitle];
 	[newRow setTransparent:YES];
 
-    [newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSMakeRect(8, 15, 180, 25)]];
+	// Only the search hotkey row is built in code; the main hotkey's field
+	// comes from the NIB.
+	NSParameterAssert(recorder == &searchRecorder);
 
-	*recorder = [[SRRecorderControl alloc] initWithFrame:NSMakeRect(200, 12, 280, 25)]; // Wider recorder control
+	// The recorder keeps its designed height (SRMaxHeight); the label and the
+	// Restore Default button are centred on it. It ends where the sliders
+	// end, so its arrow stands in their arrows' column.
+	CGFloat restoreX = NSWidth([[newRow contentView] bounds]) - FlycutAppearanceRowInset - FlycutRestoreArrowSide;
+	*recorder = [[SRRecorderControl alloc] initWithFrame:NSZeroRect];
+	[*recorder setFrame:NSMakeRect(200, 14, restoreX - FlycutRestoreArrowGap - 200, 22)];
 	[*recorder setDelegate:self];
+	[*recorder setAccessibilityElement:YES];
+	[*recorder setAccessibilityLabel:[title stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@": "]]];
+	[*recorder setAccessibilityHelp:FlycutHotkeyRecorderHelp];
 	[newRow addSubview:*recorder];
+	CGFloat recorderMidY = NSMidY([*recorder frame]);
+
+	NSTextField *label = [self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSZeroRect];
+	CGFloat labelHeight = ceil([label fittingSize].height);
+	[label setFrame:NSMakeRect(8, recorderMidY - labelHeight / 2.0, 180, labelHeight)];
+	[newRow addSubview:label];
+	[label release];
+
+	NSButton *restoreButton = [self restoreDefaultButtonWithIdentifier:@"restoreDefaultSearchHotkey"
+	                                               accessibilityLabel:[@"Restore default " stringByAppendingString:[[title lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@": "]]]];
+	[restoreButton setFrame:NSMakeRect(restoreX, recorderMidY - FlycutRestoreArrowSide / 2.0, FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
+	[newRow addSubview:restoreButton];
 
 	return newRow;
+}
+
+#pragma mark - Restore Default buttons
+
+// The factory value of a setting is what -init and -[FlycutOperator init]
+// registered: the registration domain is the one defaults table, and the
+// Restore Default buttons keep no copy of their own.
+static id FlycutRegisteredDefault(NSString *key)
+{
+	return [[[NSUserDefaults standardUserDefaults] volatileDomainForName:NSRegistrationDomain] objectForKey:key];
+}
+
+static const NSUInteger FlycutHotkeyModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption |
+                                                   NSEventModifierFlagControl | NSEventModifierFlagShift;
+
+// "restoreDefaultBezelWidth" <-> "bezelWidth"; the hotkeys keep their ShortcutRecorder keys.
+static NSString *FlycutRestoreDefaultsIdentifier(NSString *key)
+{
+	return [@"restoreDefault" stringByAppendingString:[[[key substringToIndex:1] uppercaseString] stringByAppendingString:[key substringFromIndex:1]]];
+}
+
+static NSString *FlycutRestoreDefaultsKey(NSString *identifier)
+{
+	if ([identifier isEqualToString:@"restoreDefaultMainHotkey"]) return @"ShortcutRecorder mainHotkey";
+	if ([identifier isEqualToString:@"restoreDefaultSearchHotkey"]) return @"ShortcutRecorder searchHotkey";
+	if (![identifier hasPrefix:@"restoreDefault"] || [identifier length] <= [@"restoreDefault" length])
+		return nil;
+	NSString *rest = [identifier substringFromIndex:[@"restoreDefault" length]];
+	return [[[rest substringToIndex:1] lowercaseString] stringByAppendingString:[rest substringFromIndex:1]];
+}
+
+// General settings with a factory value, left to right and top to bottom, and
+// what VoiceOver says for their arrow.
+static NSArray *FlycutGeneralRestoreKeys(void)
+{
+	return @[@"rememberNum", @"displayNum", @"favoritesRememberNum", @"skipPboardTypesList", @"skipPasswordLengthsList"];
+}
+
+// The two "Save ... to:" folders. Nothing is registered for them: while no
+// folder is stored, Flycut saves to the Desktop (-[FlycutOperator
+// saveFromStore:atIndex:withPrefix:]).
+static NSArray *FlycutFolderRestoreKeys(void)
+{
+	return @[@"saveToLocation", @"autoSaveToLocation"];
+}
+
+static NSString *FlycutGeneralRestoreLabel(NSString *key)
+{
+	NSDictionary *labels = @{
+		@"rememberNum": @"Restore default number of clippings to remember",
+		@"displayNum": @"Restore default number of clippings in the menu",
+		@"favoritesRememberNum": @"Restore default number of favorites to remember",
+		@"skipPboardTypesList": @"Restore default pasteboard types",
+		@"skipPasswordLengthsList": @"Restore default password lengths",
+		@"saveToLocation": @"Restore default folder for clippings saved from the bezel",
+		@"autoSaveToLocation": @"Restore default folder for forgotten clippings",
+	};
+	return [labels objectForKey:key];
+}
+
+static NSString *FlycutDesktopPath(void)
+{
+	return [NSSearchPathForDirectoriesInDomains(NSDesktopDirectory, NSUserDomainMask, YES) firstObject];
+}
+
+// No folder stored, or the Desktop itself, is the default.
+static BOOL FlycutIsDesktopFolder(NSURL *url)
+{
+	if (url == nil)
+		return YES;
+	return [[[url path] stringByStandardizingPath] isEqualToString:[FlycutDesktopPath() stringByStandardizingPath]];
+}
+
+// The two folder buttons share their left edge (the one further right) and
+// their width (the wider one's), so their arrows stand in one column. Each
+// button's NIB constraint "leading = label.trailing + c" only holds it at
+// least that far right, and pulls it left while nothing else holds it.
+static void FlycutAlignFolderButtons(NSView *pane, NSButton *first, NSButton *second)
+{
+	if (first == nil || second == nil || [first superview] != pane || [second superview] != pane ||
+	    [first translatesAutoresizingMaskIntoConstraints] || [second translatesAutoresizingMaskIntoConstraints])
+		return;
+	NSMutableArray *relaxed = [NSMutableArray array];
+	for (NSButton *button in @[first, second]) {
+		for (NSLayoutConstraint *constraint in [pane constraints]) {
+			if ([constraint firstItem] == button && [constraint firstAttribute] == NSLayoutAttributeLeading &&
+			    [constraint relation] == NSLayoutRelationEqual && [constraint secondAttribute] == NSLayoutAttributeTrailing) {
+				[relaxed addObject:constraint];
+				break;
+			}
+		}
+	}
+	if ([relaxed count] != 2)
+		return;
+	for (NSLayoutConstraint *constraint in relaxed) {
+		[constraint setActive:NO];
+		NSLayoutConstraint *pull = [NSLayoutConstraint constraintWithItem:[constraint firstItem] attribute:NSLayoutAttributeLeading
+		                                                        relatedBy:NSLayoutRelationEqual toItem:[constraint secondItem]
+		                                                        attribute:NSLayoutAttributeTrailing multiplier:1 constant:[constraint constant]];
+		[pull setPriority:NSLayoutPriorityDefaultLow];
+		[pane addConstraints:@[
+			[NSLayoutConstraint constraintWithItem:[constraint firstItem] attribute:NSLayoutAttributeLeading
+			                             relatedBy:NSLayoutRelationGreaterThanOrEqual toItem:[constraint secondItem]
+			                             attribute:NSLayoutAttributeTrailing multiplier:1 constant:[constraint constant]],
+			pull,
+		]];
+	}
+	[pane addConstraints:@[
+		[NSLayoutConstraint constraintWithItem:first attribute:NSLayoutAttributeLeading relatedBy:NSLayoutRelationEqual
+		                                toItem:second attribute:NSLayoutAttributeLeading multiplier:1 constant:0],
+		[NSLayoutConstraint constraintWithItem:first attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationEqual
+		                                toItem:second attribute:NSLayoutAttributeWidth multiplier:1 constant:0],
+	]];
+}
+
+// The NIB control of a pane that is bound to values.<key>.
+static NSControl *FlycutBoundControl(NSView *pane, NSString *key, Class kind)
+{
+	NSString *keyPath = [@"values." stringByAppendingString:key];
+	for (NSView *view in [pane subviews]) {
+		if ([view isKindOfClass:kind] &&
+		    [[[view infoForBinding:NSValueBinding] objectForKey:NSObservedKeyPathKey] isEqualToString:keyPath])
+			return (NSControl *)view;
+	}
+	return nil;
+}
+
+static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *buttons)
+{
+	if (view == nil)
+		return;
+	if ([view isKindOfClass:[NSButton class]] && [[view identifier] hasPrefix:@"restoreDefault"])
+		[buttons addObject:view];
+	for (NSView *child in [view subviews])
+		FlycutCollectRestoreDefaultButtons(child, buttons);
+}
+
+// A borderless arrow button next to a setting that has a factory default,
+// shown only while the value differs from it.
+-(NSButton *)restoreDefaultButtonWithIdentifier:(NSString *)identifier accessibilityLabel:(NSString *)accessibilityLabel
+{
+	NSImage *image = [NSImage imageWithSystemSymbolName:@"arrow.counterclockwise" accessibilityDescription:@"Restore Default"];
+	NSButton *button = [NSButton buttonWithImage:image target:self action:@selector(restoreDefault:)];
+	[button setBordered:NO];
+	[button setImagePosition:NSImageOnly];
+	[button setSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:12 weight:NSFontWeightRegular]];
+	[button setContentTintColor:[NSColor secondaryLabelColor]];
+	[button setToolTip:@"Restore Default"];
+	[button setAccessibilityLabel:accessibilityLabel];
+	[button setIdentifier:identifier];
+	[button setHidden:YES];
+	[button setEnabled:NO];
+	return button;
+}
+
+// The Hotkeys pane comes from the NIB; its button is added next to the
+// recorder, and the recorder gets the accessibility text the NIB lacks.
+-(void)buildMainHotkeyRestoreDefaultButton
+{
+	NSView *pane = [mainRecorder superview];
+	if (pane == nil)
+		return;
+	for (NSView *view in [pane subviews])
+		if ([[view identifier] isEqualToString:@"restoreDefaultMainHotkey"])
+			return;
+
+	[mainRecorder setAccessibilityElement:YES];
+	[mainRecorder setAccessibilityLabel:@"Main hotkey"];
+	[mainRecorder setAccessibilityHelp:FlycutHotkeyRecorderHelp];
+	NSRect recorderFrame = [mainRecorder frame];
+	NSButton *button = [self restoreDefaultButtonWithIdentifier:@"restoreDefaultMainHotkey"
+	                                        accessibilityLabel:@"Restore default main hotkey"];
+	[button setFrame:NSMakeRect(NSMaxX(recorderFrame) + FlycutRestoreArrowGap, NSMidY(recorderFrame) - FlycutRestoreArrowSide / 2.0,
+	                            FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
+	[button setAutoresizingMask:[mainRecorder autoresizingMask]];
+	// The help text starts right after the recorder; it says what the arrow
+	// does, moves over and grows downwards.
+	for (NSView *view in [pane subviews]) {
+		NSRect frame = [view frame];
+		if (![view isKindOfClass:[NSTextField class]] || NSMinX(frame) < NSMaxX(recorderFrame))
+			continue;
+		NSTextField *help = (NSTextField *)view;
+		NSString *text = [help stringValue];
+		NSString *clear = @"click on the \"X\".";
+		NSRange end = [text rangeOfString:clear];
+		if (end.location != NSNotFound && [text rangeOfString:@"arrow"].location == NSNotFound)
+			[help setStringValue:[text stringByReplacingCharactersInRange:end
+			                                                    withString:[clear stringByAppendingString:@" To go back to the default, click the arrow that appears next to a changed hotkey."]]];
+		CGFloat shift = MAX(0.0, NSMaxX([button frame]) + 8 - NSMinX(frame));
+		frame.origin.x += shift;
+		frame.size.width -= shift;
+		CGFloat neededHeight = ceil([[help cell] cellSizeForBounds:NSMakeRect(0, 0, NSWidth(frame), CGFLOAT_MAX)].height);
+		if (neededHeight > NSHeight(frame)) {
+			frame.origin.y -= neededHeight - NSHeight(frame);
+			frame.size.height = neededHeight;
+		}
+		[view setFrame:frame];
+	}
+	[pane addSubview:button];
+}
+
+// The General pane comes from the NIB and is laid out with constraints. Each
+// arrow is tied to the right edge of its field, or of the stepper or folder
+// button next to it. The constraint that held the next control at that edge,
+// or the field at the pane's right margin, makes room for it; the arrow keeps
+// that room while hidden, so nothing moves when it appears.
+// Arrows that end a line stand in one column: a field that reaches the right
+// margin ends where the right-most stepper ends, so its arrow stands under
+// that stepper's arrow. The two folder buttons share their left edge and
+// width, so their arrows share a column as well.
+-(void)buildGeneralRestoreDefaultButtons
+{
+	NSView *pane = [savingSectionLabel superview];
+	if (pane == nil)
+		return;
+	NSMutableArray *existing = [NSMutableArray array];
+	FlycutCollectRestoreDefaultButtons(pane, existing);
+	if ([existing count] > 0)
+		return;
+
+	static FlycutRestoreDefaultsObserver *observer = nil;
+	if (observer == nil)
+		observer = [[FlycutRestoreDefaultsObserver alloc] initWithController:self];
+	const CGFloat side = FlycutRestoreArrowSide, gap = FlycutRestoreArrowGap, margin = 16.0;
+	FlycutAlignFolderButtons(pane, saveToLocationButton, autoSaveToLocationButton);
+	NSMutableArray *heldAtMargin = [NSMutableArray array];  // @[arrow, the constraint holding its field at the margin]
+	NSButton *columnArrow = nil;
+	CGFloat columnAnchorMaxX = 0.0;
+	for (NSString *key in [FlycutGeneralRestoreKeys() arrayByAddingObjectsFromArray:FlycutFolderRestoreKeys()]) {
+		BOOL folder = [FlycutFolderRestoreKeys() containsObject:key];
+		NSControl *field = folder ? [self saveLocationButtonForKey:key] : FlycutBoundControl(pane, key, [NSTextField class]);
+		if (field == nil || [field superview] != pane)
+			continue;
+		NSView *stepper = folder ? nil : FlycutBoundControl(pane, key, [NSStepper class]);
+		NSView *anchor = (stepper != nil && NSMinX([stepper frame]) >= NSMinX([field frame])) ? stepper : field;
+		NSButton *button = [self restoreDefaultButtonWithIdentifier:FlycutRestoreDefaultsIdentifier(key)
+		                                        accessibilityLabel:FlycutGeneralRestoreLabel(key)];
+		[pane addSubview:button];
+
+		if ([anchor translatesAutoresizingMaskIntoConstraints]) {
+			// Frame layout: controls to the right on this line move over, or
+			// a field reaching the right margin gets shorter.
+			CGFloat x = NSMaxX([anchor frame]) + gap;
+			CGFloat need = 0.0;
+			for (NSView *view in [pane subviews]) {
+				if (view == button || view == anchor || NSMinX([view frame]) < NSMaxX([anchor frame]) - 0.5 ||
+				    NSMaxY([view frame]) <= NSMinY([field frame]) || NSMinY([view frame]) >= NSMaxY([field frame]))
+					continue;
+				need = MAX(need, x + side + 8.0 - NSMinX([view frame]));
+			}
+			if (need > 0.0) {
+				for (NSView *view in [pane subviews]) {
+					if (view != button && view != anchor && NSMinX([view frame]) >= NSMaxX([anchor frame]) - 0.5 &&
+					    NSMaxY([view frame]) > NSMinY([field frame]) && NSMinY([view frame]) < NSMaxY([field frame]))
+						[view setFrameOrigin:NSMakePoint(NSMinX([view frame]) + need, NSMinY([view frame]))];
+				}
+			} else if (anchor == field && x + side > NSWidth([pane bounds]) - margin) {
+				NSRect frame = [field frame];
+				frame.size.width -= x + side - (NSWidth([pane bounds]) - margin);
+				[field setFrame:frame];
+				x = NSMaxX(frame) + gap;
+			}
+			[button setFrame:NSMakeRect(x, NSMidY([field frame]) - side / 2.0, side, side)];
+		} else {
+			NSLayoutConstraint *margined = nil;
+			BOOL followed = NO;
+			for (NSLayoutConstraint *constraint in [pane constraints]) {
+				if ([constraint relation] != NSLayoutRelationEqual)
+					continue;
+				id first = [constraint firstItem], second = [constraint secondItem];
+				NSLayoutAttribute firstAttribute = [constraint firstAttribute], secondAttribute = [constraint secondAttribute];
+				// next.leading = anchor.trailing + c, or the field held at the right margin
+				BOOL atMargin = anchor == field && first == pane && firstAttribute == NSLayoutAttributeTrailing &&
+				                second == field && secondAttribute == NSLayoutAttributeTrailing;
+				if ((second == anchor && secondAttribute == NSLayoutAttributeTrailing && firstAttribute == NSLayoutAttributeLeading) || atMargin) {
+					[constraint setConstant:[constraint constant] + side + gap];
+					margined = atMargin ? constraint : nil;
+					followed = !atMargin;
+					break;
+				}
+				atMargin = anchor == field && first == field && firstAttribute == NSLayoutAttributeTrailing &&
+				           second == pane && secondAttribute == NSLayoutAttributeTrailing;
+				if ((first == anchor && firstAttribute == NSLayoutAttributeTrailing && secondAttribute == NSLayoutAttributeLeading) || atMargin) {
+					[constraint setConstant:[constraint constant] - side - gap];
+					margined = atMargin ? constraint : nil;
+					followed = !atMargin;
+					break;
+				}
+			}
+			if (margined != nil)
+				[heldAtMargin addObject:@[button, margined]];
+			else if (!followed && !folder && anchor == stepper && NSMaxX([anchor frame]) > columnAnchorMaxX) {
+				columnArrow = button;
+				columnAnchorMaxX = NSMaxX([anchor frame]);
+			}
+			[button setTranslatesAutoresizingMaskIntoConstraints:NO];
+			[pane addConstraints:@[
+				[NSLayoutConstraint constraintWithItem:button attribute:NSLayoutAttributeLeading relatedBy:NSLayoutRelationEqual
+				                                toItem:anchor attribute:NSLayoutAttributeTrailing multiplier:1 constant:gap],
+				[NSLayoutConstraint constraintWithItem:button attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual
+				                                toItem:field attribute:NSLayoutAttributeCenterY multiplier:1 constant:0],
+				[NSLayoutConstraint constraintWithItem:button attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationEqual
+				                                toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1 constant:side],
+				[NSLayoutConstraint constraintWithItem:button attribute:NSLayoutAttributeHeight relatedBy:NSLayoutRelationEqual
+				                                toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1 constant:side],
+				[NSLayoutConstraint constraintWithItem:pane attribute:NSLayoutAttributeTrailing relatedBy:NSLayoutRelationGreaterThanOrEqual
+				                                toItem:button attribute:NSLayoutAttributeTrailing multiplier:1 constant:margin],
+			]];
+		}
+		if (folder)
+			continue;  // a chosen folder updates the arrows itself (-storeSaveLocation:forButton:)
+		[[NSNotificationCenter defaultCenter] addObserver:observer selector:@selector(valuesChanged:)
+		                                             name:NSControlTextDidChangeNotification object:field];
+		// The defaults controller the NIB binds this setting to (not necessarily
+		// the shared one) reports stepper clicks, committed typing and direct
+		// changes of the stored value.
+		NSDictionary *binding = [field infoForBinding:NSValueBinding];
+		[[binding objectForKey:NSObservedObjectKey] addObserver:observer
+		                                              forKeyPath:[binding objectForKey:NSObservedKeyPathKey]
+		                                                 options:0 context:NULL];
+	}
+	// A field at the margin ends under the right-most stepper instead (only
+	// ever shorter), so its arrow stands in that stepper's arrow column.
+	if (columnArrow != nil && columnAnchorMaxX + gap + side + margin <= NSWidth([pane bounds])) {
+		for (NSArray *entry in heldAtMargin) {
+			[(NSLayoutConstraint *)[entry objectAtIndex:1] setActive:NO];
+			[pane addConstraint:[NSLayoutConstraint constraintWithItem:[entry objectAtIndex:0] attribute:NSLayoutAttributeLeading
+			                                                 relatedBy:NSLayoutRelationEqual toItem:columnArrow
+			                                                 attribute:NSLayoutAttributeLeading multiplier:1 constant:0]];
+		}
+	}
+	if ([pane window] != nil)
+		[[NSNotificationCenter defaultCenter] addObserver:observer selector:@selector(valuesChanged:)
+		                                             name:NSWindowDidBecomeKeyNotification object:[pane window]];
+	if (prefsPanel != nil && prefsPanel != [pane window])
+		[[NSNotificationCenter defaultCenter] addObserver:observer selector:@selector(valuesChanged:)
+		                                             name:NSWindowDidBecomeKeyNotification object:prefsPanel];
+	// Values stored before the pane is built show their arrows right away.
+	[self updateRestoreDefaultButtons];
+}
+
+// We no longer get autosave from ShortcutRecorder, so let's set the recorders by hand.
+-(void)loadHotkeyRecorderCombos
+{
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	NSDictionary *main = [defaults dictionaryForKey:@"ShortcutRecorder mainHotkey"];
+	if ( main )
+		[mainRecorder setKeyCombo:SRMakeKeyCombo([[main objectForKey:@"keyCode"] intValue], [[main objectForKey:@"modifierFlags"] intValue])];
+	NSDictionary *search = [defaults dictionaryForKey:@"ShortcutRecorder searchHotkey"];
+	if ( search && searchRecorder )
+		[searchRecorder setKeyCombo:SRMakeKeyCombo([[search objectForKey:@"keyCode"] intValue], [[search objectForKey:@"modifierFlags"] intValue])];
+	[self updateRestoreDefaultButtons];
+}
+
+-(SRRecorderControl *)restoreDefaultRecorderForIdentifier:(NSString *)identifier
+{
+	if ([identifier isEqualToString:@"restoreDefaultMainHotkey"]) return mainRecorder;
+	if ([identifier isEqualToString:@"restoreDefaultSearchHotkey"]) return searchRecorder;
+	return nil;
+}
+
+// The registered combination of a hotkey; none registered means no shortcut.
+static KeyCombo FlycutRegisteredKeyCombo(NSString *key)
+{
+	NSDictionary *value = FlycutRegisteredDefault(key);
+	if (![value isKindOfClass:[NSDictionary class]] || [value objectForKey:@"keyCode"] == nil)
+		return SRMakeKeyCombo(ShortcutRecorderEmptyCode, ShortcutRecorderEmptyFlags);
+	return SRMakeKeyCombo([[value objectForKey:@"keyCode"] integerValue], [[value objectForKey:@"modifierFlags"] unsignedIntegerValue]);
+}
+
+static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
+{
+	KeyCombo factory = FlycutRegisteredKeyCombo(key);
+	if (factory.code == ShortcutRecorderEmptyCode)
+		return current.code == ShortcutRecorderEmptyCode;
+	return current.code == factory.code && (current.flags & FlycutHotkeyModifierMask) == (factory.flags & FlycutHotkeyModifierMask);
+}
+
+-(NSButton *)saveLocationButtonForKey:(NSString *)key
+{
+	if ([key isEqualToString:@"saveToLocation"]) return saveToLocationButton;
+	if ([key isEqualToString:@"autoSaveToLocation"]) return autoSaveToLocationButton;
+	return nil;
+}
+
+// A save button shows the name of its stored folder, or of the Desktop.
+-(void)updateSaveLocationButtonTitles
+{
+	for (NSString *key in FlycutFolderRestoreKeys()) {
+		NSURL *url = [[NSUserDefaults standardUserDefaults] URLForKey:key];
+		[[self saveLocationButtonForKey:key] setTitle:url != nil ? [url lastPathComponent] : [FlycutDesktopPath() lastPathComponent]];
+	}
+}
+
+// The folder chosen for a save button. The Desktop, where Flycut saves while
+// no folder is stored, is not stored.
+-(void)storeSaveLocation:(NSURL *)url forButton:(NSButton *)button
+{
+	NSString *key = nil;
+	for (NSString *candidate in FlycutFolderRestoreKeys())
+		if (button != nil && [self saveLocationButtonForKey:candidate] == button)
+			key = candidate;
+	if (key == nil || url == nil)
+		return;
+	if (FlycutIsDesktopFolder(url))
+		[[NSUserDefaults standardUserDefaults] removeObjectForKey:key];
+	else
+		[[NSUserDefaults standardUserDefaults] setURL:url forKey:key];
+	[self updateSaveLocationButtonTitles];
+	[self updateRestoreDefaultButtons];
+}
+
+-(BOOL)restoreDefaultValueIsDefaultForIdentifier:(NSString *)identifier
+{
+	NSString *key = FlycutRestoreDefaultsKey(identifier);
+	if (key == nil)
+		return YES;
+	SRRecorderControl *recorder = [self restoreDefaultRecorderForIdentifier:identifier];
+	if ([key hasPrefix:@"ShortcutRecorder "]) {
+		if (recorder == nil)
+			return YES;
+		return FlycutKeyComboIsRegistered([recorder keyCombo], key);
+	}
+	if ([FlycutFolderRestoreKeys() containsObject:key])
+		return FlycutIsDesktopFolder([[NSUserDefaults standardUserDefaults] URLForKey:key]);
+	id registered = FlycutRegisteredDefault(key);
+	if (registered == nil)
+		return YES;  // nothing to go back to
+	// What the control shows right now, typing included.
+	NSTextField *field = (NSTextField *)FlycutBoundControl([savingSectionLabel superview], key, [NSTextField class]);
+	id current = [field currentEditor] != nil ? [[field currentEditor] string] : [[NSUserDefaults standardUserDefaults] objectForKey:key];
+	if ([registered isKindOfClass:[NSString class]]) {
+		// The lists are read with spaces removed (-[FlycutOperator shouldSkip:...]).
+		NSString *(^compact)(id) = ^NSString *(id value) {
+			return [[value description] stringByReplacingOccurrencesOfString:@" " withString:@""];
+		};
+		return [compact(current) isEqualToString:compact(registered)];
+	}
+	if (![current respondsToSelector:@selector(doubleValue)])
+		return NO;
+	double factory = [registered doubleValue];
+	return fabs([current doubleValue] - factory) < 0.0005 * MAX(1.0, fabs(factory));
+}
+
+-(void)updateRestoreDefaultButtons
+{
+	NSMutableArray *buttons = [NSMutableArray array];
+	FlycutCollectRestoreDefaultButtons(appearancePanel, buttons);
+	FlycutCollectRestoreDefaultButtons([mainRecorder superview], buttons);
+	FlycutCollectRestoreDefaultButtons([savingSectionLabel superview], buttons);
+	for (NSButton *button in buttons) {
+		BOOL atDefault = [self restoreDefaultValueIsDefaultForIdentifier:[button identifier]];
+		[button setHidden:atDefault];
+		[button setEnabled:!atDefault];
+	}
+}
+
+-(IBAction)restoreDefault:(id)sender
+{
+	NSString *identifier = [sender identifier];
+	NSString *key = FlycutRestoreDefaultsKey(identifier);
+	if (key == nil)
+		return;
+	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+	SRRecorderControl *recorder = [self restoreDefaultRecorderForIdentifier:identifier];
+	NSTextField *field = (NSTextField *)FlycutBoundControl([savingSectionLabel superview], key, [NSTextField class]);
+	NSSlider *slider = nil;
+	for (NSView *view in [[sender superview] subviews])
+		if ([view isKindOfClass:[NSSlider class]])
+			slider = (NSSlider *)view;
+
+	if ([key hasPrefix:@"ShortcutRecorder "]) {
+		// A running recording ends first. The combination then goes through
+		// the recorder's delegate like a recorded one: the hotkey is
+		// registered again, and as it equals the registered one, the stored
+		// value is dropped (-setHotKeyPreferenceForRecorder:).
+		if (recorder != nil && [[recorder window] firstResponder] == recorder)
+			[[recorder window] makeFirstResponder:nil];
+		[recorder setKeyCombo:FlycutRegisteredKeyCombo(key)];
+	} else if ([FlycutFolderRestoreKeys() containsObject:key]) {
+		// No stored folder means the Desktop again.
+		[defaults removeObjectForKey:key];
+		[self updateSaveLocationButtonTitles];
+	} else if (slider != nil) {
+		// Dropping the stored value brings back the registered default; the
+		// slider shows it and its action applies it to the bezel. The slider's
+		// value binding stores what it shows as it sends the action, so the
+		// value is dropped once more afterwards.
+		[defaults removeObjectForKey:key];
+		[slider setDoubleValue:[defaults doubleForKey:key]];
+		[slider sendAction:[slider action] to:[slider target]];
+		[defaults removeObjectForKey:key];
+	} else if (field != nil) {
+		// Unfinished typing is dropped. Dropping the stored value through the
+		// defaults controller the field is bound to brings back the registered
+		// default, and the bound field and stepper show it at once.
+		if ([field currentEditor] != nil)
+			[field abortEditing];
+		NSDictionary *binding = [field infoForBinding:NSValueBinding];
+		[[binding objectForKey:NSObservedObjectKey] setValue:nil forKeyPath:[binding objectForKey:NSObservedKeyPathKey]];
+		// The limits go the way a stepper click goes: shrinking below the
+		// stored clippings asks first (Resize Stack), and Cancel keeps the
+		// old limit.
+		if ([key isEqualToString:@"rememberNum"])
+			[self checkRememberNumPref:(int)[defaults integerForKey:key] forPrimaryStore:YES];
+		else if ([key isEqualToString:@"favoritesRememberNum"])
+			[self checkFavoritesRememberNumPref:(int)[defaults integerForKey:key]];
+		else if ([key isEqualToString:@"displayNum"])
+			[self setDisplayNumPref:sender];
+	}
+	[self updateRestoreDefaultButtons];
 }
 
 -(void)setBinding:(NSString*)binding forKey:(NSString*)keyPath andOrAction:(SEL)action on:(NSControl*)newControl
@@ -840,20 +1428,16 @@
         newFrame.origin.x = currentFrame.origin.x - (newFrame.size.width - currentFrame.size.width) / 2;
         [prefsPanel setFrame:newFrame display:NO animate:NO];
     }
+	// Folder names and Restore Default arrows as they are now, before the
+	// window shows.
+	[self updateSaveLocationButtonTitles];
+	[self updateRestoreDefaultButtons];
 	[prefsPanel makeKeyAndOrderFront:self];
 	NSString *fileRoot = [[NSBundle mainBundle] pathForResource:@"acknowledgements" ofType:@"txt"];
 	NSString *contents = [NSString stringWithContentsOfFile:fileRoot
 												   encoding:NSUTF8StringEncoding
 													  error:NULL];
 	[acknowledgementsView setString:contents];
-	NSURL* saveToLocation = [[NSUserDefaults standardUserDefaults] URLForKey:@"saveToLocation"];
-	if (saveToLocation) {
-		[saveToLocationButton setTitle:[saveToLocation lastPathComponent]];
-	}
-	NSURL* autoSaveToLocation = [[NSUserDefaults standardUserDefaults] URLForKey:@"autoSaveToLocation"];
-	if (autoSaveToLocation) {
-		[autoSaveToLocationButton setTitle:[autoSaveToLocation lastPathComponent]];
-	}
 	[flycutOperator willShowPreferences];
 }
 
@@ -1611,13 +2195,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 			if (!url) { return; }
 
-			if (sender == saveToLocationButton) {
-				[[NSUserDefaults standardUserDefaults] setURL:url forKey:@"saveToLocation"];
-			}
-			else if (sender == autoSaveToLocationButton) {
-				[[NSUserDefaults standardUserDefaults] setURL:url forKey:@"autoSaveToLocation"];
-			}
-			[sender setTitle:[url lastPathComponent]];
+			[self storeSaveLocation:url forButton:sender];
 		}
 
 	}];
@@ -1897,21 +2475,21 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 }
 
 - (void)setHotKeyPreferenceForRecorder:(SRRecorderControl *)aRecorder {
-    if (aRecorder == mainRecorder) {
-        NSDictionary *hotKeyDict = @{
-            @"keyCode": @([mainRecorder keyCombo].code),
-            @"modifierFlags": @([mainRecorder keyCombo].flags)
-        };
-        [[NSUserDefaults standardUserDefaults] setObject:hotKeyDict
-                                                   forKey:@"ShortcutRecorder mainHotkey"];
-    } else if (aRecorder == searchRecorder) {
-        NSDictionary *hotKeyDict = @{
-            @"keyCode": @([searchRecorder keyCombo].code),
-            @"modifierFlags": @([searchRecorder keyCombo].flags)
-        };
-        [[NSUserDefaults standardUserDefaults] setObject:hotKeyDict
-                                                   forKey:@"ShortcutRecorder searchHotkey"];
+    NSString *key = aRecorder == mainRecorder ? @"ShortcutRecorder mainHotkey" :
+                    aRecorder == searchRecorder ? @"ShortcutRecorder searchHotkey" : nil;
+    if (key == nil)
+        return;
+    // The registered shortcut applies while none is stored, so a shortcut
+    // equal to it is not stored: restoring the default drops the stored one.
+    if (FlycutKeyComboIsRegistered([aRecorder keyCombo], key)) {
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:key];
+        return;
     }
+    NSDictionary *hotKeyDict = @{
+        @"keyCode": @([aRecorder keyCombo].code),
+        @"modifierFlags": @([aRecorder keyCombo].flags)
+    };
+    [[NSUserDefaults standardUserDefaults] setObject:hotKeyDict forKey:key];
 }
 
 - (BOOL)shortcutRecorder:(SRRecorderControl *)aRecorder isKeyCode:(NSInteger)keyCode andFlagsTaken:(NSUInteger)flags reason:(NSString **)aReason {
@@ -1929,6 +2507,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		[self toggleSearchHotKey: aRecorder];
 		[self setHotKeyPreferenceForRecorder: aRecorder];
 	}
+	[self updateRestoreDefaultButtons];
 }
 
 - (NSString*)alertWithMessageText:(NSString*)message informationText:(NSString*)information buttonsTexts:(NSArray*)buttons {
