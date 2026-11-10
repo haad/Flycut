@@ -2235,6 +2235,52 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     [self updateMenu];
 }
 
+// Cap a menu-item title to a consistent rendered width.
+//
+// FlycutClipping truncates display strings by character count (displayLen), not
+// by rendered width. In a proportional font a run of wide glyphs -- a pasted
+// horizontal rule of em dashes or box-drawing characters, or CJK text -- reaches
+// the character limit while taking up far more horizontal space than the same
+// number of average Latin characters. Because NSMenu sizes itself to its widest
+// item, one such clipping balloons the whole menu and leaves every other row
+// padded with trailing space. Bound the rendered width here so the menu width
+// stays consistent regardless of glyph width, using the same measure-and-trim
+// approach the bezel already applies to its source-app label in
+// -[BezelWindow setSource:].
+- (NSString *)menuTitleFittingWidth:(NSString *)title
+{
+	// Headroom above the nominal displayLen-character width, so normal clippings
+	// (already capped at displayLen characters) are not trimmed further here;
+	// only rows of unusually wide glyphs are.
+	const CGFloat kMenuTitleWidthHeadroom = 1.2;
+
+	NSDictionary *attributes = @{NSFontAttributeName: [NSFont menuFontOfSize:0.0]};
+
+	NSInteger displayLen = [[NSUserDefaults standardUserDefaults] integerForKey:@"displayLen"];
+	if ( displayLen <= 0 )
+		displayLen = 40;
+
+	// Estimate the width of displayLen characters of ordinary text from a pangram.
+	NSString *reference = @"The quick brown fox jumps over the lazy dog ";
+	CGFloat averageCharWidth = [reference sizeWithAttributes:attributes].width / (CGFloat)[reference length];
+	CGFloat maxWidth = averageCharWidth * displayLen * kMenuTitleWidthHeadroom;
+
+	if ( [title sizeWithAttributes:attributes].width <= maxWidth )
+		return title;
+
+	// Trim whole composed-character sequences (not UTF-16 units) so we never
+	// split a surrogate pair or a base+combining-mark cluster before the ellipsis.
+	NSString *fitted = title;
+	while ( [fitted length] > 0
+			&& [[fitted stringByAppendingString:@"…"] sizeWithAttributes:attributes].width > maxWidth )
+	{
+		NSRange lastChar = [fitted rangeOfComposedCharacterSequenceAtIndex:[fitted length] - 1];
+		fitted = [fitted substringToIndex:lastChar.location];
+	}
+
+	return [fitted stringByAppendingString:@"…"];
+}
+
 - (void)updateMenu {
     dispatch_async(dispatch_get_main_queue(), ^{
     if ( !statusItem || !statusItem.isEnabled )
@@ -2270,7 +2316,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
         for ( int i = 0; i < newItems; i++ )
         {
             NSMenuItem *item;
-            item = [[NSMenuItem alloc] initWithTitle:[clipStrings objectAtIndex:i]
+            item = [[NSMenuItem alloc] initWithTitle:[self menuTitleFittingWidth:[clipStrings objectAtIndex:i]]
                                               action:@selector(processMenuClippingSelection:)
                                        keyEquivalent:@""];
             [item setTarget:self];
