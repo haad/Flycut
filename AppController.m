@@ -358,6 +358,9 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 						 withDisplayLength:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayLen"]
 						  withSaveSelector:@selector(savePreferencesOnDict:)
 								 forTarget:self];
+	// Creating the image store removes temporary image copies that an earlier Flycut
+	// process left behind (it ended without cleaning up), even if no image is used.
+	[FlycutImageStore sharedStore];
 
     [bezel setColor:NO];
     

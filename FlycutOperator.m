@@ -507,7 +507,12 @@
             return NO;
     }
 
-    [imgStore saveImageData:imageData forHash:hash extension:[FlycutImageStore fileExtensionForType:imageType]];
+    // With Save: Never the bytes stay in memory only, so no image contents reach the disk.
+    NSString *extension = [FlycutImageStore fileExtensionForType:imageType];
+    if ([[NSUserDefaults standardUserDefaults] integerForKey:@"savePreference"] >= 1)
+        [imgStore saveImageData:imageData forHash:hash extension:extension];
+    else
+        [imgStore saveMemoryOnlyImageData:imageData forHash:hash extension:extension];
 
     NSSize pixelSize = NSZeroSize;
     NSImage *tempImage = [[NSImage alloc] initWithData:imageData];
@@ -1177,6 +1182,17 @@
 	[store clearModifiedSinceLastSaveStore];
 }
 
+// Saved history must be able to restore its images after a relaunch, including
+// images captured while Save: Never kept them in memory only.
+- (void)persistMemoryOnlyImagesOfStore:(FlycutStore *)store {
+    for ( int i = 0 ; i < [store jcListCount] ; i++ )
+    {
+        FlycutClipping *clipping = [store clippingAtPosition:i];
+        if ([clipping isImageClipping])
+            [[FlycutImageStore sharedStore] persistMemoryOnlyImageForHash:[clipping imageHash]];
+    }
+}
+
 -(void) saveEngine {
 	// saveEngine saves to NSUserDefaults.  If there have been no modifications, just skip this to avoid busy activity for any observers.
 	if ( !([clippingStore modifiedSinceLastSaveStore]
@@ -1193,6 +1209,8 @@
 
 	[saveTarget performSelector:saveSelector withObject:saveDict];
 
+    [self persistMemoryOnlyImagesOfStore:clippingStore];
+    [self persistMemoryOnlyImagesOfStore:favoritesStore];
     [self saveStore:clippingStore toKey:@"jcList" onDict:saveDict];
     [self saveStore:favoritesStore toKey:@"favoritesList" onDict:saveDict];
 
@@ -1209,7 +1227,10 @@
         [[NSUserDefaults standardUserDefaults] setValue:[NSDictionary dictionary] forKey:@"store"];
         DLog(@"Saving preferences on exit");
         [[NSUserDefaults standardUserDefaults] synchronize];
+        // Nothing refers to stored images any more; do not leave their contents on disk.
+        [[FlycutImageStore sharedStore] removeAllImages];
     }
+    [[FlycutImageStore sharedStore] removeEphemeralFiles];
 }
 
 -(NSArray *) previousIndexes:(int)howMany containing:(NSString*)search // This method is in newest-first order.
