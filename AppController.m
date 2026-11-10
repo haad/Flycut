@@ -590,7 +590,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 -(int) checkRememberNumPref:(int)newRemember forPrimaryStore:(BOOL) isPrimaryStore
 {
 	int oldRemember = [flycutOperator rememberNum];
-	int setRemember = [flycutOperator setRememberNum:newRemember forPrimaryStore:YES];
+	int setRemember = [flycutOperator setRememberNum:newRemember forPrimaryStore:isPrimaryStore];
 
 	if ( isPrimaryStore )
 	{
@@ -611,6 +611,8 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 			}
 		}
 	}
+
+	return setRemember;
 }
 
 -(IBAction) setFavoritesRememberNumPref:(id)sender
@@ -620,9 +622,14 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 
 -(void) checkFavoritesRememberNumPref:(int)newRemember
 {
-	[flycutOperator switchToFavoritesStore];
+	BOOL temporarilySwitched = ![flycutOperator favoritesStoreIsSelected];
+	if ( temporarilySwitched )
+		[flycutOperator switchToFavoritesStore];
+
 	[self checkRememberNumPref:newRemember forPrimaryStore:NO];
-	[flycutOperator restoreStashedStore];
+
+	if ( temporarilySwitched )
+		[flycutOperator restoreStashedStore];
 }
 
 -(IBAction) setDisplayNumPref:(id)sender
