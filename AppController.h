@@ -37,6 +37,9 @@
 	BOOL						isBezelDisplayed;
 	BOOL						isBezelPinned;
 	BOOL						bezelSelectionFinished;	// the shown bezel was pasted or cancelled
+	BOOL						isMenuOpen;
+	NSUInteger nextPasteTransactionGeneration;
+	id currentPasteTransaction;
 	BOOL						hasShownAccessibilityExplanationThisSession;
 	NSString					*currentKeycodeCharacter;
     NSDateFormatter*            dateFormat;
@@ -46,6 +49,7 @@
 	NSSearchField				*searchWindowSearchField;
 	NSTableView					*searchWindowTableView;
 	NSArray						*searchResults;
+	NSArray *searchResultClippings;
 	BOOL						isSearchWindowDisplayed;
 
     NSArray *settingsSyncList;
@@ -75,7 +79,6 @@
     IBOutlet NSSearchField *searchBox;
     NSResponder *menuFirstResponder;
     dispatch_queue_t clipboardReadQueue;
-    NSRunningApplication *currentRunningApplication;
     NSEvent *menuOpenEvent;
     IBOutlet NSSlider * heightSlider;
     IBOutlet NSSlider * widthSlider;
