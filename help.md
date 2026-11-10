@@ -66,7 +66,7 @@ Here's a complete list of keys you can use in the Bezel.
 
 **Search Window**
 
-Press the Search Hotkey (Shift-Command-B, by default) to open the search window. Type to filter your clipboard history. Use the arrow keys to navigate results and press Return to paste the selected item.
+Press the Search Hotkey (Control-Shift-S by default) to open the search window. Type to filter your clipboard history, use the arrow keys to navigate results and press Return to paste the selected item. You can change or clear the shortcut under "Search clipboard hotkey" in Preferences.
 
 **Menu Features**
 

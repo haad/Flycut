@@ -118,7 +118,13 @@ static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then t
 	[[NSUserDefaults standardUserDefaults] registerDefaults:[NSDictionary dictionaryWithObjectsAndKeys:
 		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:9],[NSNumber numberWithLong:1179648],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
 		@"ShortcutRecorder mainHotkey",
-		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:1],[NSNumber numberWithLong:1179648|NSEventModifierFlagShift],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
+		// Search window: Control-Shift-S (keyCode 1 is the S key; Cocoa flags Control|Shift =
+		// 393216, stored like the main hotkey's Shift|Command = 1179648).  The old default,
+		// Shift-Command-S, is Save As... or Duplicate in most document apps, and the other
+		// Command combinations with S are mostly taken as well (Save, Save All, sidebar);
+		// Control-Shift-S is in none of the shortcut lists checked.  A value the user has
+		// stored, a cleared field included, lives in the user domain and wins over this.
+		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:1],[NSNumber numberWithLong:NSEventModifierFlagControl|NSEventModifierFlagShift],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
 		@"ShortcutRecorder searchHotkey",
 		[NSNumber numberWithInt:10],
 		@"displayNum",
