@@ -76,6 +76,10 @@
 
 // Add a clipping
 -(bool) addClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(int) timestamp{
+    return [self addClipping:clipping ofType:type fromAppLocalizedName:appLocalizedName fromAppBundleURL:bundleURL atTimestamp:timestamp withRichData:nil];
+}
+
+-(bool) addClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger) timestamp withRichData:(NSDictionary *)richData{
     if ([clipping length] == 0) {
         return NO;
     }
@@ -88,9 +92,10 @@
 									   withAppLocalizedName:appLocalizedName
 										   withAppBundleURL:bundleURL
 											  withTimestamp:timestamp];
-	
+	[newClipping setRichData:richData];
+
 	[self addClipping:newClipping];
-	
+
 	[newClipping release];
 	return YES;
 }
@@ -152,6 +157,27 @@
 	}
 
 	[self delegateEndUpdates];
+}
+
+-(bool) setRichData:(NSDictionary *)richData forClippingAtPosition:(int)index
+{
+	if ( index < 0 || index >= [jcList count] )
+		return NO;
+	FlycutClipping *clipping = [jcList objectAtIndex:index];
+	if ( [clipping isImageClipping] )
+		return NO;
+
+	NSDictionary *oldRichData = [[clipping richData] retain];
+	[clipping setRichData:richData];
+	bool changed = ! ( oldRichData == [clipping richData] || [oldRichData isEqual:[clipping richData]] );
+	[oldRichData release];
+
+	if ( changed ) {
+		[self delegateBeginUpdates];
+		[self delegateReloadClippingAtIndex:index];
+		[self delegateEndUpdates];
+	}
+	return changed;
 }
 
 -(void) addClipping:(NSString *)clipping ofType:(NSString *)type withPBCount:(int *)pbCount
@@ -325,6 +351,15 @@
 		return nil;
 	} else {
 		return [NSString stringWithString:[[jcList objectAtIndex:index] contents]];
+	}
+}
+
+-(NSDictionary *) clippingRichDataAtPosition:(int)index
+{
+	if ( index >= [jcList count] ) {
+		return nil;
+	} else {
+		return [[jcList objectAtIndex:index] richData];
 	}
 }
 

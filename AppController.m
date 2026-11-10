@@ -1522,9 +1522,10 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
         if ([clipping isImageClipping]) {
             [self addImageClipToPasteboard:clipping];
         } else {
+            NSDictionary *richData = [flycutOperator getRichDataFromStackPosition];
             NSString *content = [flycutOperator getPasteFromStackPosition];
             if (content) {
-                [self addClipToPasteboard:content];
+                [self addClipToPasteboard:content withRichData:richData];
             }
         }
         [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
@@ -1561,10 +1562,11 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
         }
         [self updateMenu];
     } else {
+        NSDictionary *richData = [flycutOperator getRichDataFromIndex: position];
         NSString *content = [flycutOperator getPasteFromIndex: position];
         if ( nil != content )
         {
-            [self addClipToPasteboard:content];
+            [self addClipToPasteboard:content withRichData:richData];
             [self updateMenu];
         }
     }
@@ -1763,10 +1765,30 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
     if ( type != nil ) {
         dispatch_async(clipboardReadQueue, ^{
             NSString *contents = [jcPasteboard stringForType:type];
-            NSInteger pasteboardGenerationAfterRead = [jcPasteboard changeCount];
             BOOL contentShouldBeSkipped = contents == nil;
             if (!contentShouldBeSkipped)
                 contentShouldBeSkipped = [flycutOperator shouldSkip:contents ofType:type fromAvailableTypes:availableTypes];
+
+            // Capture rich representations of the text so pasting an older clipping
+            // can keep its formatting.  Only done after the skip checks above, and read
+            // before the generation is sampled below, so a clipboard change during these
+            // reads discards the whole capture and rich data of concealed/transient
+            // clippings is never stored.
+            NSMutableDictionary *richData = nil;
+            if ( !contentShouldBeSkipped && [[NSUserDefaults standardUserDefaults] boolForKey:@"preserveTextFormatting"] ) {
+                for ( NSString *richType in [NSArray arrayWithObjects:NSPasteboardTypeRTF, NSPasteboardTypeHTML, nil] ) {
+                    if ( nil != [jcPasteboard availableTypeFromArray:[NSArray arrayWithObject:richType]] ) {
+                        NSData *data = [jcPasteboard dataForType:richType];
+                        // Cap the size so one giant rich clipping can't bloat the saved store.
+                        if ( nil != data && [data length] > 0 && [data length] <= 1048576 ) {
+                            if ( nil == richData )
+                                richData = [NSMutableDictionary dictionaryWithCapacity:2];
+                            [richData setObject:data forKey:richType];
+                        }
+                    }
+                }
+            }
+            NSInteger pasteboardGenerationAfterRead = [jcPasteboard changeCount];
 
             dispatch_async(dispatch_get_main_queue(), ^{
                 BOOL revealPasteboardTypes = [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
@@ -1799,6 +1821,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 
                 [flycutOperator addClipping:contents
                                      ofType:type
+                               withRichData:richData
                                     fromApp:[currRunningApp localizedName]
                            withAppBundleURL:currRunningApp.bundleURL.path
                                      target:self
@@ -2382,8 +2405,20 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(void)addClipToPasteboard:(NSString*)pbFullText
 {
-    [jcPasteboard declareTypes:@[NSPasteboardTypeString] owner:nil];
+    [self addClipToPasteboard:pbFullText withRichData:nil];
+}
+
+-(void)addClipToPasteboard:(NSString*)pbFullText withRichData:(NSDictionary *)richData
+{
+    NSMutableArray *pbTypes = [NSMutableArray arrayWithObject:NSPasteboardTypeString];
+    if ( nil != richData )
+        [pbTypes addObjectsFromArray:[richData allKeys]];
+
+    [jcPasteboard declareTypes:pbTypes owner:nil];
+
     [jcPasteboard setString:pbFullText forType:NSPasteboardTypeString];
+    for ( NSString *richType in richData )
+        [jcPasteboard setData:[richData objectForKey:richType] forType:richType];
     [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
 }
 
@@ -2860,9 +2895,10 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 				[flycutOperator getPasteFromIndex:position];
 			}
 		} else {
+			NSDictionary *richData = [flycutOperator getRichDataFromIndex:position];
 			NSString *content = [flycutOperator getPasteFromIndex:position];
 			if (content) {
-				[self addClipToPasteboard:content];
+				[self addClipToPasteboard:content withRichData:richData];
 			}
 		}
 		[self updateMenu];
