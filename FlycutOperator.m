@@ -1329,7 +1329,9 @@
 
 	[saveTarget performSelector:saveSelector withObject:saveDict];
 
-    [self persistMemoryOnlyImagesOfStore:clippingStore];
+    // Persist the main store from wherever it currently is (see above), so its
+    // memory-only images are written too while the favorites store is swapped in.
+    [self persistMemoryOnlyImagesOfStore:mainStore];
     [self persistMemoryOnlyImagesOfStore:favoritesStore];
     [self saveStore:mainStore toKey:@"jcList" onDict:saveDict];
     [self saveStore:favoritesStore toKey:@"favoritesList" onDict:saveDict];
