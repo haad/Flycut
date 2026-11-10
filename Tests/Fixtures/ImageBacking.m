@@ -390,8 +390,14 @@ static void Settle(void) {
 #define NSURLSession FixtureURLSession
 #define NSURLSessionConfiguration FixtureURLSessionConfiguration
 #define dispatch_get_global_queue FixtureGlobalQueue
+// Integration: #18 binds a capture to one pasteboard generation and capture epoch.
+#if __has_include("ClipboardGenerationPolicy.h")
+#import "ClipboardGenerationPolicy.h"
+#endif
 @interface ImageHarness : NSObject {
 @public
+    NSUInteger clipboardCaptureEpoch;
+    dispatch_queue_t clipboardReadQueue;
     FixturePasteboard *jcPasteboard;
     NSNumber *pbCount;
     NSNumber *pbBlockCount;
@@ -506,6 +512,8 @@ static ImageHarness *NewHarness(FlycutOperator *op) {
     harness->searchWindowTableView = [[FixtureControl alloc] init];
     harness->scheduled = [[NSMutableArray alloc] init];
     harness->calls = [[NSMutableArray alloc] init];
+    // #18 reads on its own serial queue; the fixture keeps controlling that queue.
+    harness->clipboardReadQueue = fixtureBackgroundQueue;
     return harness;
 }
 static NSString *PastedFilePath(ImageHarness *harness) {

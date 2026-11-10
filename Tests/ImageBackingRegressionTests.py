@@ -31,7 +31,9 @@ APP_METHODS = ("setPBBlockCount:", "addClipToPasteboard:", "addImageClipToPasteb
                "pollPB:", "animatedGifURLFromPasteboard", "downloadAndCaptureGIFFromURL:")
 # Helpers that only exist once the image capture fix is applied; optional so the
 # regression also compiles against the pre-fix source.
-OPTIONAL_APP_METHODS = ("isImageCaptureCurrentForGeneration:",)
+OPTIONAL_APP_METHODS = ("isImageCaptureCurrentForGeneration:",
+                        # #4: text is written with its rich data through this variant.
+                        "addClipToPasteboard:(NSString*)pbFullText withRichData:")
 # Symbols the fixture binary must never reference: real defaults, pasteboard,
 # workspace, network, and the real directory lookups.
 FORBIDDEN_SYMBOLS = ("_OBJC_CLASS_$_NSUserDefaults", "_OBJC_CLASS_$_NSPasteboard",
