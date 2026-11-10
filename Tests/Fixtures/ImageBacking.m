@@ -207,6 +207,7 @@ static NSString *FixtureTemporaryDirectory(void) {
 - (BOOL)setString:(NSString *)string forType:(NSString *)type;
 - (BOOL)writeObjects:(NSArray *)objects;
 - (NSArray *)types;
+- (NSArray *)pasteboardItems;
 - (NSString *)availableTypeFromArray:(NSArray *)types;
 - (NSData *)dataForType:(NSString *)type;
 - (NSString *)stringForType:(NSString *)type;
@@ -256,6 +257,15 @@ static NSString *FixtureTemporaryDirectory(void) {
     }
 }
 - (NSArray *)types { @synchronized (self) { return [[declaredTypes copy] autorelease]; } }
+// #7 snapshots the current clipboard before an owned placement (restored on cancel).
+- (NSArray *)pasteboardItems {
+    @synchronized (self) {
+        if ([dataByType count] == 0) return @[];
+        NSPasteboardItem *item = [[[NSPasteboardItem alloc] init] autorelease];
+        for (NSString *type in dataByType) [item setData:[dataByType objectForKey:type] forType:type];
+        return @[item];
+    }
+}
 - (NSString *)availableTypeFromArray:(NSArray *)types {
     @synchronized (self) {
         for (NSString *type in types)
@@ -374,7 +384,8 @@ static void Settle(void) {
 @implementation FixtureMenu
 - (NSInteger)indexOfItem:(id)item { (void)item; return 0; }
 @end
-@interface FixtureMenuItem : NSObject {
+// An NSMenuItem: #7 resolves the clicked clipping from the item's represented object.
+@interface FixtureMenuItem : NSMenuItem {
     FixtureMenu *fixtureMenu;
 }
 - (id)menu;
@@ -390,13 +401,35 @@ static void Settle(void) {
 #define NSURLSession FixtureURLSession
 #define NSURLSessionConfiguration FixtureURLSessionConfiguration
 #define dispatch_get_global_queue FixtureGlobalQueue
-// Integration: #18 binds a capture to one pasteboard generation and capture epoch.
+// OS boundary: #7 beeps when a menu selection cannot be pasted; record it instead.
+static int fixtureBeeps;
+static void FixtureBeep(void) { fixtureBeeps++; }
+#define NSBeep FixtureBeep
+// Integration: #18 binds a capture to one pasteboard generation and capture epoch; #7
+// owns every paste in a transaction (its class is extracted verbatim by the runner).
 #if __has_include("ClipboardGenerationPolicy.h")
 #import "ClipboardGenerationPolicy.h"
 #endif
+#if __has_include("AppControllerTypes.inc")
+#include "AppControllerTypes.inc"
+#endif
+// OS boundary: the application that was frontmost when the selection opened.
+@interface FixtureTargetApplication : NSObject
+@end
+@implementation FixtureTargetApplication
+- (pid_t)processIdentifier { return 4242; }
+- (BOOL)isTerminated { return NO; }
+- (BOOL)activateWithOptions:(NSUInteger)options { (void)options; return YES; }
+@end
 @interface ImageHarness : NSObject {
 @public
+    id currentPasteTransaction;
+    NSUInteger nextPasteTransactionGeneration;
     BOOL bezelSelectionFinished;
+    NSArray *searchResultClippings;
+    BOOL isMenuOpen;
+    BOOL isSearchWindowDisplayed;
+    BOOL isBezelDisplayed;
     NSUInteger clipboardCaptureEpoch;
     dispatch_queue_t clipboardReadQueue;
     FixturePasteboard *jcPasteboard;
@@ -419,6 +452,13 @@ static void Settle(void) {
 }
 - (void)hideApp { [calls addObject:@"hideApp"]; }
 - (void)fakeCommandV { [calls addObject:@"fakeCommandV"]; }
+- (NSRunningApplication *)frontmostApplicationForPaste {
+    static FixtureTargetApplication *target;
+    if (!target) target = [[FixtureTargetApplication alloc] init];
+    return (NSRunningApplication *)target;
+}
+- (void)hideSearchWindowPreservingPasteTransaction { [calls addObject:@"hideSearchWindowPreservingPasteTransaction"]; }
+- (void)updateBezel { [calls addObject:@"updateBezel"]; }
 - (void)restoreStashedStoreAndUpdate { [calls addObject:@"restoreStashedStoreAndUpdate"]; }
 - (void)updateMenu { [calls addObject:@"updateMenu"]; }
 - (void)hideSearchWindow { [calls addObject:@"hideSearchWindow"]; }
@@ -429,6 +469,7 @@ static void Settle(void) {
 #undef NSURLSession
 #undef NSURLSessionConfiguration
 #undef dispatch_get_global_queue
+#undef NSBeep
 #undef NSUserDefaults
 #undef NSSearchPathForDirectoriesInDomains
 #undef NSTemporaryDirectory
@@ -516,6 +557,19 @@ static ImageHarness *NewHarness(FlycutOperator *op) {
     // #18 reads on its own serial queue; the fixture keeps controlling that queue.
     harness->clipboardReadQueue = fixtureBackgroundQueue;
     return harness;
+}
+// What -hitMainHotKey: (bezel) or the search hotkey does before a selection is made:
+// a new selection owns a new paste transaction (#7) and may be confirmed once (#9).
+static void BeginSelection(ImageHarness *harness) {
+    harness->bezelSelectionFinished = NO;
+    [harness cancelPendingPasteCompletion];
+    [harness rememberFrontmostApplicationForPaste];
+}
+// A Paste keystroke was scheduled: the global Cmd-V or #7's completion in the
+// remembered application.
+static BOOL ScheduledPaste(ImageHarness *harness) {
+    return [harness->scheduled containsObject:@"fakeCommandV"] ||
+           [harness->scheduled containsObject:@"completePasteInRememberedApplication:"];
 }
 static NSString *PastedFilePath(ImageHarness *harness) {
     NSArray *objects = harness->jcPasteboard->writtenObjects;
@@ -848,18 +902,20 @@ static void CaseLostImageBytesAreNotPasted(void) {
     ImageHarness *harness = NewHarness(op);
     FixtureMenuItem *menuItem = [[[FixtureMenuItem alloc] init] autorelease];
     harness->searchResults = [@[@"[Image]"] retain];
+    // #7 resolves menu and search rows by clipping identity.
+    harness->searchResultClippings = [@[[op clippingAtPosition:0]] retain];
+    [menuItem setRepresentedObject:@[@0, [op clippingAtPosition:0]]];
 
     // Control: with its bytes available the image is placed and pasted on every path.
-    harness->bezelSelectionFinished = NO;   // a new bezel selection (#9)
-    [harness pasteFromStack];
-    CHECK([harness->scheduled containsObject:@"fakeCommandV"], "control: bezel pastes a stored image");
+    BeginSelection(harness); [harness pasteFromStack];
+    CHECK(ScheduledPaste(harness), "control: bezel pastes a stored image");
     CHECK([[harness->jcPasteboard dataForType:NSPasteboardTypePNG] isEqualToData:png], "control: image placed on the clipboard");
     [harness->scheduled removeAllObjects];
     [harness processMenuClippingSelection:menuItem];
-    CHECK([harness->scheduled containsObject:@"fakeCommandV"], "control: menu selection pastes a stored image");
+    CHECK(ScheduledPaste(harness), "control: menu selection pastes a stored image");
     [harness->scheduled removeAllObjects];
-    [harness searchWindowItemSelected:nil];
-    CHECK([harness->scheduled containsObject:@"fakeCommandV"], "control: search window pastes a stored image");
+    BeginSelection(harness); [harness searchWindowItemSelected:nil];
+    CHECK(ScheduledPaste(harness), "control: search window pastes a stored image");
 
     // The stored file disappears behind Flycut's back.
     NSString *stored = [ImagesDirectory() stringByAppendingPathComponent:[HashOf(png) stringByAppendingPathExtension:@"png"]];
@@ -868,16 +924,18 @@ static void CaseLostImageBytesAreNotPasted(void) {
     NSInteger generation = [harness->jcPasteboard changeCount];
 
     [harness->scheduled removeAllObjects];
-    harness->bezelSelectionFinished = NO;   // a new bezel selection (#9)
-    [harness pasteFromStack];
-    CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "bezel synthesized Paste for an image that could not be placed");
-    CHECK([harness->scheduled containsObject:@"hideApp"], "bezel still closes");
+    [harness->calls removeAllObjects];
+    BeginSelection(harness); [harness pasteFromStack];
+    CHECK(!ScheduledPaste(harness), "bezel synthesized Paste for an image that could not be placed");
+    // #7 closes the bezel of a cleared selection at once instead of after a delay.
+    CHECK([harness->scheduled containsObject:@"hideApp"] || [harness->calls containsObject:@"hideApp"],
+          "bezel still closes");
     [harness->scheduled removeAllObjects];
     [harness processMenuClippingSelection:menuItem];
-    CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "menu synthesized Paste for an image that could not be placed");
+    CHECK(!ScheduledPaste(harness), "menu synthesized Paste for an image that could not be placed");
     [harness->scheduled removeAllObjects];
-    [harness searchWindowItemSelected:nil];
-    CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "search window synthesized Paste for an image that could not be placed");
+    BeginSelection(harness); [harness searchWindowItemSelected:nil];
+    CHECK(!ScheduledPaste(harness), "search window synthesized Paste for an image that could not be placed");
     CHECK([harness->jcPasteboard changeCount] == generation, "the previous clipboard was left untouched");
 }
 
@@ -888,14 +946,12 @@ static void CaseRefusedPasteboardWriteIsNotPasted(void) {
     CHECK(AddImage(op, PNGData(27, 28, 29), NSPasteboardTypePNG) && AddImage(op, AnimatedGIFData(), @"com.compuserve.gif"), "images captured");
     ImageHarness *harness = NewHarness(op);
     harness->jcPasteboard->failWrites = YES;
-    harness->bezelSelectionFinished = NO;   // a new bezel selection (#9)
-    [harness pasteFromStack];
-    CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "GIF file reference was refused but Paste was synthesized");
+    BeginSelection(harness); [harness pasteFromStack];
+    CHECK(!ScheduledPaste(harness), "GIF file reference was refused but Paste was synthesized");
     CHECK([op setStackPositionTo:1], "PNG selected");
     [harness->scheduled removeAllObjects];
-    harness->bezelSelectionFinished = NO;   // a new bezel selection (#9)
-    [harness pasteFromStack];
-    CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "image data was refused but Paste was synthesized");
+    BeginSelection(harness); [harness pasteFromStack];
+    CHECK(!ScheduledPaste(harness), "image data was refused but Paste was synthesized");
 }
 
 // PR3-4: capture reads the clipboard on a background queue. Only bytes of the

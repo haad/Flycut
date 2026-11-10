@@ -65,6 +65,8 @@ void FCTestNSBeep(void) { beeps++; }
 - (NSString *)imageFilePathForHash:(NSString *)hash { return self.images[hash] ? self.gifPath : nil; }
 - (NSString *)hashForData:(NSData *)data { return [NSString stringWithFormat:@"hash-%lu", (unsigned long)[data hash]]; }
 - (BOOL)saveImageData:(NSData *)data forHash:(NSString *)hash extension:(NSString *)ext { self.images[hash] = data; return YES; }
+// fix-image-2: with Save: Never a captured image is kept in memory only.
+- (BOOL)saveMemoryOnlyImageData:(NSData *)data forHash:(NSString *)hash extension:(NSString *)ext { self.images[hash] = data; return YES; }
 - (BOOL)hasImageForHash:(NSString *)hash { return self.images[hash] != nil; }
 - (void)deleteImageForHash:(NSString *)hash { [self.images removeObjectForKey:hash]; }
 @end
@@ -152,7 +154,12 @@ static int CaptureFollowsSelection(void) {
         [op addClipping:text ofType:NSPasteboardTypeString fromApp:@"Fixture" withAppBundleURL:nil
                  target:added clippingAddedSelector:@selector(clippingWasAdded)];
     if (![op setStackPositionTo:1] || ![[[op clippingAtPosition:[op stackPosition]] contents] isEqual:@"chosen"]) return 70;
-    bool stored = [op addImageClipping:[@"png bytes" dataUsingEncoding:NSUTF8StringEncoding] fromApp:@"Fixture"
+    // fix-image-2 accepts only bytes that decode as an image, so capture a real 2x2 PNG.
+    NSBitmapImageRep *rep = [[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:2 pixelsHigh:2
+        bitsPerSample:8 samplesPerPixel:3 hasAlpha:NO isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace
+        bytesPerRow:0 bitsPerPixel:0] autorelease];
+    NSData *capturedPNG = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    bool stored = [op addImageClipping:capturedPNG fromApp:@"Fixture"
         withAppBundleURL:nil imageType:NSPasteboardTypePNG target:added clippingAddedSelector:@selector(clippingWasAdded)];
     if (!stored || ![[op clippingAtPosition:0] isImageClipping]) return 71;
     FlycutClipping *selected = [op clippingAtPosition:[op stackPosition]];
@@ -286,8 +293,10 @@ class ImagePasteTransactionRegressionTests(unittest.TestCase):
         # The opt-in GIF download adds its clipping later, on the main queue. It must
         # redraw the settled bezel selection exactly like the direct image capture.
         source = (ROOT / 'AppController.m').read_text()
+        # fix-image-2/#18 bind the download to the pasteboard generation it was read from.
         download = method_body(source, '-(void)downloadAndCaptureGIFFromURL:(NSURL *)url '
-                               'fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL\n{')
+                               'fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL '
+                               'pasteboardGeneration:(NSInteger)generation\n{')
         calls = re.findall(r'addImageClipping:[^;]*;', download)
         self.assertTrue(calls, 'the GIF download no longer captures images')
         for call in calls:

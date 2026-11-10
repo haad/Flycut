@@ -27,13 +27,25 @@ ENGINE_SOURCES = ("FlycutEngine/FlycutClipping.m", "FlycutEngine/FlycutStore.m",
                   "FlycutEngine/FlycutImageStore.m", "FlycutOperator.m")
 # AppController methods compiled into the fixture harness, by selector.
 APP_METHODS = ("setPBBlockCount:", "addClipToPasteboard:", "addImageClipToPasteboard:", "pasteFromStack",
-               "pasteIndexAndUpdate:", "processMenuClippingSelection:", "searchWindowItemSelected:",
+               # #7 replaced -pasteIndexAndUpdate: by the store-position variant.
+               "pasteStorePositionAndUpdate:", "processMenuClippingSelection:", "searchWindowItemSelected:",
                "pollPB:", "animatedGifURLFromPasteboard", "downloadAndCaptureGIFFromURL:")
 # Helpers that only exist once the image capture fix is applied; optional so the
 # regression also compiles against the pre-fix source.
 OPTIONAL_APP_METHODS = ("isImageCaptureCurrentForGeneration:",
                         # #4: text is written with its rich data through this variant.
-                        "addClipToPasteboard:(NSString*)pbFullText withRichData:")
+                        "addClipToPasteboard:(NSString*)pbFullText withRichData:",
+                        # #7's paste transaction and identity-based row resolution.
+                        "storePositionForMenuItem:", "rememberFrontmostApplicationForPaste",
+                        "pasteTransactionIsCurrent:", "clearPasteTransactionIfCurrent:",
+                        "finishPasteTransactionKeepingSelection:", "clearRememberedPasteTarget",
+                        "cancelPendingPasteCompletion", "snapshotPasteboardItems",
+                        "restorePasteboardForCancelledTransaction:",
+                        # #7: a captured clipping redraws the settled bezel selection.
+                        "clippingWasAdded")
+# #7: the paste transaction class, verbatim (interface and implementation).
+TYPES = (r"@interface FCPasteTransaction : NSObject \{.*?\n@end\n",
+         r"@implementation FCPasteTransaction\n.*?\n@end\n")
 # Symbols the fixture binary must never reference: real defaults, pasteboard,
 # workspace, network, and the real directory lookups.
 FORBIDDEN_SYMBOLS = ("_OBJC_CLASS_$_NSUserDefaults", "_OBJC_CLASS_$_NSPasteboard",
@@ -77,6 +89,8 @@ class ImageBackingRegressionTests(unittest.TestCase):
             if body is not None:
                 methods.append(body)
         (cls.artifacts / "AppControllerImageMethods.inc").write_text("\n\n".join(methods) + "\n")
+        types = [match.group(0) for pattern in TYPES for match in [re.search(pattern, source, re.S)] if match]
+        (cls.artifacts / "AppControllerTypes.inc").write_text("\n".join(types) + "\n")
         inputs = [APP_CONTROLLER, FIXTURE, pathlib.Path(__file__)] + [ROOT / path for path in ENGINE_SOURCES]
         (cls.artifacts / "source-hashes.json").write_text(json.dumps({
             str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
