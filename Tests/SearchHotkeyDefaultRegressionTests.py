@@ -63,6 +63,17 @@ OSStatus CopySymbolicHotKeys(CFArrayRef *outHotKeyArray)
 
 static const NSUInteger ControlShift = NSEventModifierFlagControl | NSEventModifierFlagShift;
 
+// restore-defaults reads the factory value from the registration domain.
+// FCMemoryDefaults keeps the registered values in memory; it hands them back
+// as that domain, like NSUserDefaults (same shim as the recorder tests).
+static NSDictionary *MemoryRegistrationDomain(id self, SEL cmd, NSString *name)
+{
+    (void)cmd;
+    if (![name isEqualToString:NSRegistrationDomain]) return @{};
+    Ivar ivar = class_getInstanceVariable([FCMemoryDefaults class], "registeredValues");
+    return [[(NSDictionary *)object_getIvar(self, ivar) copy] autorelease];
+}
+
 static SRRecorderControl *MakeRecorder(AppController *controller)
 {
     SRRecorderControl *recorder = [[[SRRecorderControl alloc] initWithFrame:NSMakeRect(20, 20, 256, 22)] autorelease];
@@ -208,6 +219,7 @@ int main(int argc, const char **argv)
     @autoreleasepool {
         if (argc < 2) return 2;
         if (![[NSUserDefaults standardUserDefaults] isMemberOfClass:[FCMemoryDefaults class]]) return 3;
+        if (!class_addMethod([FCMemoryDefaults class], @selector(volatileDomainForName:), (IMP)MemoryRegistrationDomain, "@@:@")) return 5;
         [NSApplication sharedApplication];
         NSString *mode = [NSString stringWithUTF8String:argv[1]];
         NSDictionary *cleared = @{@"keyCode": @(-1), @"modifierFlags": @0};
