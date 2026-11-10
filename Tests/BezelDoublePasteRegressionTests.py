@@ -115,6 +115,11 @@ static void InstallBoundaries(BOOL sticky) {
 - (void)fixtureClippingAdded { }
 // OS boundary: clipboard write.
 - (void)addClipToPasteboard:(NSString *)text { [_placed addObject:text]; }
+// #4 writes text with its rich data through the two-argument variant.
+- (void)addClipToPasteboard:(NSString *)text withRichData:(NSDictionary *)richData {
+    (void)richData;
+    [self addClipToPasteboard:text];
+}
 - (void)addImageClipToPasteboard:(FlycutClipping *)clipping { [_placed addObject:@"<image>"]; }
 // OS boundary: Accessibility check and synthetic Cmd-V posting.
 - (void)fakeCommandV { _pastes += 1; }

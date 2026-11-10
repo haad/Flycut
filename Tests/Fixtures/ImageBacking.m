@@ -396,6 +396,7 @@ static void Settle(void) {
 #endif
 @interface ImageHarness : NSObject {
 @public
+    BOOL bezelSelectionFinished;
     NSUInteger clipboardCaptureEpoch;
     dispatch_queue_t clipboardReadQueue;
     FixturePasteboard *jcPasteboard;
@@ -849,6 +850,7 @@ static void CaseLostImageBytesAreNotPasted(void) {
     harness->searchResults = [@[@"[Image]"] retain];
 
     // Control: with its bytes available the image is placed and pasted on every path.
+    harness->bezelSelectionFinished = NO;   // a new bezel selection (#9)
     [harness pasteFromStack];
     CHECK([harness->scheduled containsObject:@"fakeCommandV"], "control: bezel pastes a stored image");
     CHECK([[harness->jcPasteboard dataForType:NSPasteboardTypePNG] isEqualToData:png], "control: image placed on the clipboard");
@@ -866,6 +868,7 @@ static void CaseLostImageBytesAreNotPasted(void) {
     NSInteger generation = [harness->jcPasteboard changeCount];
 
     [harness->scheduled removeAllObjects];
+    harness->bezelSelectionFinished = NO;   // a new bezel selection (#9)
     [harness pasteFromStack];
     CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "bezel synthesized Paste for an image that could not be placed");
     CHECK([harness->scheduled containsObject:@"hideApp"], "bezel still closes");
@@ -885,10 +888,12 @@ static void CaseRefusedPasteboardWriteIsNotPasted(void) {
     CHECK(AddImage(op, PNGData(27, 28, 29), NSPasteboardTypePNG) && AddImage(op, AnimatedGIFData(), @"com.compuserve.gif"), "images captured");
     ImageHarness *harness = NewHarness(op);
     harness->jcPasteboard->failWrites = YES;
+    harness->bezelSelectionFinished = NO;   // a new bezel selection (#9)
     [harness pasteFromStack];
     CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "GIF file reference was refused but Paste was synthesized");
     CHECK([op setStackPositionTo:1], "PNG selected");
     [harness->scheduled removeAllObjects];
+    harness->bezelSelectionFinished = NO;   // a new bezel selection (#9)
     [harness pasteFromStack];
     CHECK(![harness->scheduled containsObject:@"fakeCommandV"], "image data was refused but Paste was synthesized");
 }
