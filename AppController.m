@@ -368,9 +368,8 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	dateFormat = [[NSDateFormatter alloc] init];
 	[dateFormat setDateFormat:@"EEEE, MMMM dd 'at' h:mm a"];
 
-	// Create our pasteboard interface
+	// Observe the current pasteboard without replacing its contents.
     jcPasteboard = [NSPasteboard generalPasteboard];
-    [jcPasteboard declareTypes:[NSArray arrayWithObject:NSPasteboardTypeString] owner:nil];
     pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
 
 	// Build the statusbar menu
