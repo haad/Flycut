@@ -65,6 +65,8 @@ FIXTURE = r'''
 #import <Cocoa/Cocoa.h>
 #import <Carbon/Carbon.h>
 #import "AccessibilityPromptPolicy.h"
+// master resolves the Paste key per keyboard layout (f94d650), after this PR branched.
+#import "FlycutPasteKey.h"
 #import "ShortcutRecorder/SRKeyCodeTransformer.h"
 #import "ShortcutRecorder/SRCommon.h"
 #import "UI/BezelWindow.h"
