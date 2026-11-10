@@ -1178,8 +1178,20 @@
 }
 
 -(void) saveEngine {
+	// While the favorites store is swapped in, clippingStore IS favoritesStore and the main
+	// store is held in stashedStore, so persist the main store from wherever it currently
+	// is.  Saving clippingStore under "jcList" wrote the favorites list as the clipping
+	// history and never wrote the real history at all - and with savePreference at "after
+	// each change" that happens on the very next copy, no quit required.
+	//
+	// This relies on -switchToFavoritesStore / -restoreStashedStore keeping stashedStore
+	// non-NULL exactly while clippingStore is favoritesStore.  A re-entrant
+	// -switchToFavoritesStore would break that (it would stash the favorites store over the
+	// main one), so keep that invariant in mind when touching either method.
+	FlycutStore *mainStore = ( NULL != stashedStore ) ? stashedStore : clippingStore;
+
 	// saveEngine saves to NSUserDefaults.  If there have been no modifications, just skip this to avoid busy activity for any observers.
-	if ( !([clippingStore modifiedSinceLastSaveStore]
+	if ( !([mainStore modifiedSinceLastSaveStore]
 		   || [favoritesStore modifiedSinceLastSaveStore]) )
 		return;
 
@@ -1193,7 +1205,7 @@
 
 	[saveTarget performSelector:saveSelector withObject:saveDict];
 
-    [self saveStore:clippingStore toKey:@"jcList" onDict:saveDict];
+    [self saveStore:mainStore toKey:@"jcList" onDict:saveDict];
     [self saveStore:favoritesStore toKey:@"favoritesList" onDict:saveDict];
 
     [[NSUserDefaults standardUserDefaults] setObject:saveDict forKey:@"store"];
