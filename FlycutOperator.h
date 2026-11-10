@@ -88,6 +88,9 @@
 // Initialization / cleanup related
 -(void)applicationWillTerminate;;
 -(void)awakeFromNibDisplaying:(int) displayNum withDisplayLength:(int) displayLength withSaveSelector:(SEL) selector forTarget:(NSObject*) target;
+// Once per install, at launch before any copy is filtered: where master
+// kept concealed copies, skipConcealedTypes becomes NO (see the .m).
++(void)carryOverConcealedTypesSetting;
 
 // Favorites Store related
 -(bool)favoritesStoreIsSelected;

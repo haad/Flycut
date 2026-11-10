@@ -357,6 +357,8 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 
 	// Initialize the FlycutOperator
 	flycutOperator = [[FlycutOperator alloc] init];
+	// The operator has registered its defaults; nothing has filtered a copy yet.
+	[FlycutOperator carryOverConcealedTypesSetting];
 	flycutOperator.delegate = self;
 	[flycutOperator setClippingsStoreDelegate:self];
 	[flycutOperator setFavoritesStoreDelegate:self];
