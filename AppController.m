@@ -106,8 +106,11 @@ static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then t
 // Returns the source GIF URL embedded in the clipboard HTML (e.g. Chrome "Copy Image"),
 // but only for https URLs that point at a .gif. nil otherwise.
 -(NSURL *)animatedGifURLFromPasteboard;
-// Asynchronously downloads url and, if it is an animated GIF, adds it as a clipping.
--(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL;
+// Asynchronously downloads url and, if it is an animated GIF, adds it as a clipping
+// while the clipboard is still at the given generation.
+-(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL pasteboardGeneration:(NSInteger)generation;
+// YES while an asynchronously read image may still be added for that clipboard generation.
+-(BOOL)isImageCaptureCurrentForGeneration:(NSInteger)generation;
 @end
 
 @implementation AppController
@@ -1522,8 +1525,10 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 {
     FlycutClipping *clipping = [flycutOperator clippingAtStackPosition];
     if (clipping) {
+        BOOL placed = YES;
         if ([clipping isImageClipping]) {
-            [self addImageClipToPasteboard:clipping];
+            // If the image cannot be placed, Paste would insert the previous clipboard.
+            placed = [self addImageClipToPasteboard:clipping];
         } else {
             NSDictionary *richData = [flycutOperator getRichDataFromStackPosition];
             NSString *content = [flycutOperator getPasteFromStackPosition];
@@ -1532,7 +1537,8 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
             }
         }
         [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
-        [self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.5];
+        if (placed)
+            [self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.5];
     } else {
         [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
     }
@@ -1549,7 +1555,8 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 	}
 }
 
-- (void)pasteIndexAndUpdate:(int) position {
+// Returns NO only when an image clipping could not be placed on the clipboard.
+- (BOOL)pasteIndexAndUpdate:(int) position {
     NSString* search = [searchBox stringValue];
     if ( nil != search && 0 != search.length )
     {
@@ -1559,7 +1566,8 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 
     FlycutClipping *clipping = [flycutOperator clippingAtIndex:position];
     if (clipping && [clipping isImageClipping]) {
-        [self addImageClipToPasteboard:clipping];
+        if (![self addImageClipToPasteboard:clipping])
+            return NO;
         if ([[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"]) {
             [flycutOperator getPasteFromIndex:position];
         }
@@ -1573,6 +1581,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
             [self updateMenu];
         }
     }
+    return YES;
 }
 
 - (void)metaKeysReleased
@@ -1851,7 +1860,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 
             if ( gifURL != nil ) {
                 // Skip the still entirely; the async download adds the animated GIF on success.
-                [self downloadAndCaptureGIFFromURL:gifURL fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path];
+                [self downloadAndCaptureGIFFromURL:gifURL fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path pasteboardGeneration:pasteboardGeneration];
             } else {
                 NSString *captureType = imageType;
                 BOOL textTypeRecordsDiagnostics = type != nil;
@@ -1874,7 +1883,10 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
                                 captureEpoch,
                                 clipboardCaptureEpoch,
                                 [flycutOperator storeDisabled]
-                            )) {
+                            )
+                            // Also bound to the generation whose types were checked (the
+                            // clipboard must still hold it) and to image capture being on.
+                            && [self isImageCaptureCurrentForGeneration:pasteboardGeneration]) {
                             if (revealPasteboardTypes) {
                                 // Diagnostics record the type instead of the payload, once per copy.
                                 if (!textTypeRecordsDiagnostics)
@@ -2392,11 +2404,12 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 -(IBAction)processMenuClippingSelection:(id)sender
 {
 	int index=[[sender menu] indexOfItem:sender];
-	[self pasteIndexAndUpdate:index];
+	BOOL placed = [self pasteIndexAndUpdate:index];
 
 	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"menuSelectionPastes"] ) {
 		[self performSelector:@selector(hideApp) withObject:nil];
-		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
+		if ( placed )
+			[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
 	}
 }
 
@@ -2426,7 +2439,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
 }
 
--(void)addImageClipToPasteboard:(FlycutClipping *)clipping
+-(BOOL)addImageClipToPasteboard:(FlycutClipping *)clipping
 {
     NSString *type = [clipping type];
     if (!type || [type length] == 0)
@@ -2435,23 +2448,25 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     // Animated GIFs must be offered as a FILE reference ONLY. Apps like Slack/Discord
     // upload the actual .gif file (preserving animation); if raw image data is also on
     // the pasteboard they grab that instead and flatten it to a single frame. Pointing
-    // at the persistent store file is safe — it lives as long as the clipping does.
+    // at the store file (with Save: Never, its temporary copy) is safe — it lives as
+    // long as the clipping does.
     if ([type isEqualToString:@"com.compuserve.gif"]) {
         NSString *path = [[FlycutImageStore sharedStore] imageFilePathForHash:[clipping imageHash]];
         if (path) {
             [jcPasteboard clearContents];
-            [jcPasteboard writeObjects:@[[NSURL fileURLWithPath:path]]];
+            BOOL written = [jcPasteboard writeObjects:@[[NSURL fileURLWithPath:path]]];
             [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
-            return;
+            return written;
         }
     }
 
     NSData *imageData = [[FlycutImageStore sharedStore] imageDataForHash:[clipping imageHash]];
-    if (imageData) {
-        [jcPasteboard declareTypes:@[type] owner:nil];
-        [jcPasteboard setData:imageData forType:type];
-        [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
-    }
+    if (!imageData)
+        return NO;
+    [jcPasteboard declareTypes:@[type] owner:nil];
+    BOOL written = [jcPasteboard setData:imageData forType:type];
+    [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
+    return written;
 }
 
 -(NSURL *)animatedGifURLFromPasteboard
@@ -2488,7 +2503,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     return url;
 }
 
--(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL
+-(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL pasteboardGeneration:(NSInteger)generation
 {
     // Pausing capture while the download runs discards it, as for clipboard reads.
     NSUInteger captureEpoch = clipboardCaptureEpoch;
@@ -2524,9 +2539,13 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
         NSData *gifData = [data retain];
         dispatch_async(dispatch_get_main_queue(), ^{
+            // The download can finish after the user copied something else, paused
+            // capture, turned diagnostics on, or turned image capture or GIF downloads off.
             // Diagnostics turned on during the download: save no payload.
             BOOL revealPasteboardTypes = [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
-            if ( captureEpoch == clipboardCaptureEpoch && ! [pbCount isEqualTo:pbBlockCount] && !revealPasteboardTypes ) {
+            if ( captureEpoch == clipboardCaptureEpoch && ! [pbCount isEqualTo:pbBlockCount] && !revealPasteboardTypes
+                 && [self isImageCaptureCurrentForGeneration:generation]
+                 && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"] ) {
                 [flycutOperator addImageClipping:gifData fromApp:appName withAppBundleURL:bundleURL imageType:@"com.compuserve.gif" target:self clippingAddedSelector:@selector(updateMenu)];
             }
             [gifData release];
@@ -2534,6 +2553,14 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     }];
     [task resume];
     [session finishTasksAndInvalidate];
+}
+
+-(BOOL)isImageCaptureCurrentForGeneration:(NSInteger)generation
+{
+    return [jcPasteboard changeCount] == generation
+        && [pbBlockCount integerValue] != generation
+        && ![flycutOperator storeDisabled]
+        && [[NSUserDefaults standardUserDefaults] boolForKey:@"captureImages"];
 }
 
 -(void) stackDown
@@ -2893,9 +2920,10 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		}
 
 		FlycutClipping *clipping = [flycutOperator clippingAtIndex:position];
+		BOOL placed = YES;
 		if (clipping && [clipping isImageClipping]) {
-			[self addImageClipToPasteboard:clipping];
-			if ([[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"]) {
+			placed = [self addImageClipToPasteboard:clipping];
+			if (placed && [[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"]) {
 				[flycutOperator getPasteFromIndex:position];
 			}
 		} else {
@@ -2907,7 +2935,8 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		}
 		[self updateMenu];
 		[self hideSearchWindow];
-		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
+		if (placed)
+			[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
 	}
 }
 

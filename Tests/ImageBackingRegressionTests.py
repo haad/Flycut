@@ -26,7 +26,12 @@ FIXTURE = ROOT / "Tests/Fixtures/ImageBacking.m"
 ENGINE_SOURCES = ("FlycutEngine/FlycutClipping.m", "FlycutEngine/FlycutStore.m",
                   "FlycutEngine/FlycutImageStore.m", "FlycutOperator.m")
 # AppController methods compiled into the fixture harness, by selector.
-APP_METHODS = ("setPBBlockCount:", "addImageClipToPasteboard:")
+APP_METHODS = ("setPBBlockCount:", "addClipToPasteboard:", "addImageClipToPasteboard:", "pasteFromStack",
+               "pasteIndexAndUpdate:", "processMenuClippingSelection:", "searchWindowItemSelected:",
+               "pollPB:", "animatedGifURLFromPasteboard", "downloadAndCaptureGIFFromURL:")
+# Helpers that only exist once the image capture fix is applied; optional so the
+# regression also compiles against the pre-fix source.
+OPTIONAL_APP_METHODS = ("isImageCaptureCurrentForGeneration:",)
 # Symbols the fixture binary must never reference: real defaults, pasteboard,
 # workspace, network, and the real directory lookups.
 FORBIDDEN_SYMBOLS = ("_OBJC_CLASS_$_NSUserDefaults", "_OBJC_CLASS_$_NSPasteboard",
@@ -35,21 +40,23 @@ FORBIDDEN_SYMBOLS = ("_OBJC_CLASS_$_NSUserDefaults", "_OBJC_CLASS_$_NSPasteboard
                      "_NSHomeDirectory")
 
 
-def method_body(source: str, selector: str) -> str:
-    match = re.search(r"(?m)^-\s*\([^)]*\)\s*" + re.escape(selector), source)
-    if match is None:
-        raise AssertionError(f"Method not found: {selector}")
-    start = match.start()
-    opening = source.index("{", start)
-    depth = 0
-    for index in range(opening, len(source)):
-        if source[index] == "{":
-            depth += 1
-        elif source[index] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start:index + 1]
-    raise AssertionError(f"Unclosed method: {selector}")
+def method_body(source: str, selector: str) -> str | None:
+    """Return the implementation of selector; declarations (ending in ';') are skipped."""
+    for match in re.finditer(r"(?m)^-\s*\([^)]*\)\s*" + re.escape(selector), source):
+        start = match.start()
+        opening = source.index("{", start)
+        if source.find(";", start, opening) != -1:
+            continue
+        depth = 0
+        for index in range(opening, len(source)):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[start:index + 1]
+        raise AssertionError(f"Unclosed method: {selector}")
+    return None
 
 
 class ImageBackingRegressionTests(unittest.TestCase):
@@ -60,8 +67,14 @@ class ImageBackingRegressionTests(unittest.TestCase):
         cls.artifacts = pathlib.Path(os.environ.get("FLYCUT_TEST_ARTIFACTS") or cls.temporary.name).resolve()
         cls.artifacts.mkdir(parents=True, exist_ok=True)
         source = APP_CONTROLLER.read_text()
-        methods = "\n\n".join(method_body(source, selector) for selector in APP_METHODS)
-        (cls.artifacts / "AppControllerImageMethods.inc").write_text(methods + "\n")
+        methods = []
+        for selector in APP_METHODS + OPTIONAL_APP_METHODS:
+            body = method_body(source, selector)
+            if body is None and selector not in OPTIONAL_APP_METHODS:
+                raise AssertionError(f"Method not found: {selector}")
+            if body is not None:
+                methods.append(body)
+        (cls.artifacts / "AppControllerImageMethods.inc").write_text("\n\n".join(methods) + "\n")
         inputs = [APP_CONTROLLER, FIXTURE, pathlib.Path(__file__)] + [ROOT / path for path in ENGINE_SOURCES]
         (cls.artifacts / "source-hashes.json").write_text(json.dumps({
             str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -142,6 +155,59 @@ class ImageBackingRegressionTests(unittest.TestCase):
         root = self.new_root()
         self.run_case("never-then-saving-exit", root)
         self.run_case("never-then-saving-relaunch", root)
+
+    # PR3-1: the reference scan must include the stashed main history.
+    def test_deleting_favorite_keeps_image_of_main_history(self) -> None:
+        for case in ("favorite-delete-main-image-saved", "favorite-delete-main-image-never"):
+            with self.subTest(case=case):
+                self.run_case(case)
+
+    # PR3-6: Clear All must release images that are listed more than once.
+    def test_clear_all_releases_duplicated_images(self) -> None:
+        for case in ("clear-all-duplicates-saved", "clear-all-duplicates-never"):
+            with self.subTest(case=case):
+                self.run_case(case)
+
+    # PR3-2: forgotten-clipping export runs before the bytes are released, and
+    # saving reports the real write result.
+    def test_evicted_image_is_exported_before_its_bytes_are_released(self) -> None:
+        for case in ("evicted-image-autosaved-saved", "evicted-image-autosaved-never"):
+            with self.subTest(case=case):
+                self.run_case(case)
+
+    def test_save_to_file_reports_write_failure(self) -> None:
+        self.run_case("save-reports-write-failure")
+
+    # PR3-5: failed backing writes/reads must not produce a clipping or a paste.
+    def test_failed_image_write_is_not_captured(self) -> None:
+        self.run_case("failed-image-write-not-captured")
+
+    def test_undecodable_image_bytes_are_not_captured(self) -> None:
+        for case in ("undecodable-bytes-not-captured-saved", "undecodable-bytes-not-captured-never"):
+            with self.subTest(case=case):
+                self.run_case(case)
+
+    def test_lost_image_bytes_are_not_pasted(self) -> None:
+        self.run_case("lost-image-not-pasted")
+
+    def test_refused_pasteboard_write_is_not_pasted(self) -> None:
+        self.run_case("refused-pasteboard-write-not-pasted")
+
+    # PR3-4: image and GIF capture are bound to the checked clipboard generation.
+    def test_image_capture_control(self) -> None:
+        self.run_case("image-capture-control")
+
+    def test_image_from_replaced_clipboard_generation_is_dropped(self) -> None:
+        self.run_case("image-replaced-before-read")
+
+    def test_gif_download_control(self) -> None:
+        self.run_case("gif-download-control")
+
+    def test_gif_download_after_clipboard_change_or_pause_is_dropped(self) -> None:
+        for case in ("gif-download-after-clipboard-change", "gif-download-after-capture-paused",
+                     "gif-download-after-image-capture-off", "gif-download-after-downloads-off"):
+            with self.subTest(case=case):
+                self.run_case(case)
 
     # The fixture's own containment must hold.
     def test_containment_guard_stops_writes_outside_fixture_root(self) -> None:
