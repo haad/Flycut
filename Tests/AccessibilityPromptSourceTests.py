@@ -55,6 +55,23 @@ class AccessibilityPromptSourceTests(unittest.TestCase):
         self.assertLess(mark_shown, show)
         self.assertNotIn("dispatch_async", fake_command_v)
 
+    def test_targeted_paste_routes_through_session_policy(self) -> None:
+        # With the owned paste transaction (#7) the Cmd-V is posted by
+        # -postCommandVToProcessIdentifier:, so the once-per-session gate must sit there too.
+        # Anchor on the implementation; the class extension declares the same signature first.
+        targeted = objective_c_method(
+            self.implementation, "- (BOOL)postCommandVToProcessIdentifier:(pid_t)processIdentifier\n{"
+        )
+        policy_call = "FlycutShouldShowAccessibilityExplanation("
+        mark_statement = "hasShownAccessibilityExplanationThisSession = YES;"
+        show_statement = "[self showAccessibilityAlert];"
+        for statement in (policy_call, mark_statement, show_statement):
+            self.assertIn(statement, targeted)
+        self.assertLess(targeted.index(policy_call), targeted.index(mark_statement))
+        self.assertLess(targeted.index(mark_statement), targeted.index(show_statement))
+        self.assertNotIn("kAXTrustedCheckOptionPrompt: @YES", targeted)
+        self.assertNotIn("NSAlert", targeted)
+
     def test_denied_paste_requests_native_consent_without_prerequisite_ui(self) -> None:
         show_alert = objective_c_method(
             self.implementation, "- (void)showAccessibilityAlert"

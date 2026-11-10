@@ -381,7 +381,8 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
           bundlePath, bundleID, trusted ? @"YES" : @"NO");
     
     if (&AXIsProcessTrustedWithOptions != NULL && !trusted) {
-        // fakeCommandV gates this explicit paste action once per session.
+        // The paste paths (-fakeCommandV, -postCommandVToProcessIdentifier:) gate this
+        // explicit paste action once per session.
         // Let macOS own consent and Settings navigation, without a prerequisite alert.
         [self requestAccessibilityWithPrompt];
     }
@@ -2366,8 +2367,16 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
     BOOL accessibilityEnabled = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @NO});
     if ( !accessibilityEnabled ) {
         // An explicit paste may request native consent, never a prerequisite app
-        // dialog. Do not resume this transaction even if permission changes here.
-        AXIsProcessTrustedWithOptions((CFDictionaryRef)@{(id)kAXTrustedCheckOptionPrompt: @YES});
+        // dialog, and only once per session (the same gate as -fakeCommandV), so a
+        // repeated paste without access does not bring up the system dialog again.
+        // Do not resume this transaction even if permission changes here.
+        if (FlycutShouldShowAccessibilityExplanation(
+                true,
+                accessibilityEnabled,
+                hasShownAccessibilityExplanationThisSession)) {
+            hasShownAccessibilityExplanationThisSession = YES;
+            [self showAccessibilityAlert];
+        }
         return NO;
     }
 

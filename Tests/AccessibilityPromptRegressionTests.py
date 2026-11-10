@@ -179,6 +179,9 @@ static FCApplication *testApplication;
 
 @interface AppController : NSObject {
     BOOL hasShownAccessibilityExplanationThisSession;
+    // -hideApp also clears the menu/search capture freeze flags.
+    BOOL isMenuOpen;
+    BOOL isSearchWindowDisplayed;
     SRKeyCodeTransformer *srTransformer;
     BezelWindow *bezel;
     BOOL isBezelDisplayed;

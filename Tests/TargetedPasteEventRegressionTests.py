@@ -86,9 +86,19 @@ void FCTestCGEventPostToPid(pid_t pid, CGEventRef event) {
 int main(int argc, const char **argv) {
     @autoreleasepool {
         AppController *controller = [[FCTargetTestController alloc] init];
-        trusted = strcmp(argv[1],"denied") != 0;
+        trusted = strcmp(argv[1],"denied") != 0 && strcmp(argv[1],"denied-twice") != 0;
         missingLayout = strcmp(argv[1],"nil-layout") == 0;
         BOOL postedResult = [controller postCommandVToProcessIdentifier:4242];
+        if (strcmp(argv[1],"denied-twice") == 0) {
+            // A second paste without access in the same session must not bring up the
+            // native consent dialog again (the Accessibility once-per-session gate).
+            BOOL secondResult = [controller postCommandVToProcessIdentifier:4242];
+            if (postedResult || secondResult || postedCount || legacyCalls || prompts != 1) {
+                fprintf(stderr,"repeated denied paste requested consent again or posted: legacy=%d prompts=%d posted=%d\n",legacyCalls,prompts,postedCount);
+                return 62;
+            }
+            return 0;
+        }
         if (missingLayout) {
             if (postedResult || postedCount || sourceCreates || layoutReads != 1) {
                 fprintf(stderr,"missing layout did not fail closed before allocations\n"); return 61;
@@ -145,5 +155,8 @@ class KeyboardLayoutPasteRegressionTests(unittest.TestCase):
         self.check_mode('nil-layout')
     def test_denied_paste_uses_native_consent_without_legacy_dialog(self):
         self.check_mode('denied')
+    def test_repeated_denied_paste_requests_native_consent_only_once(self):
+        # Integration of #7 (targeted post) with #15 (one consent request per session).
+        self.check_mode('denied-twice')
 if __name__ == '__main__':
     unittest.main()
