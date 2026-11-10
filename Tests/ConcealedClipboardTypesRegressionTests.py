@@ -476,6 +476,21 @@ class ConcealedClipboardTypesRegressionTests(unittest.TestCase):
                  if key in ("title", "toolTip", "placeholderString")]
         self.assertEqual([text for text in texts if "\u2014" in text], [])
 
+    def test_diagnostics_option_says_it_saves_types_not_content(self) -> None:
+        # The diagnostics option records a copy's data type instead of its content (#18),
+        # and the row its old tooltip pointed to ("Pasteboard Types above") is now "by
+        # data type:". Title and tooltip must describe that and name no removed row.
+        import xml.etree.ElementTree as ET
+        xib = ET.parse(ROOT / "English.lproj" / "MainMenu.xib")
+        button = next(element for element in xib.iter("button")
+                      if any(binding.get("keyPath") == "values.revealPasteboardTypes"
+                             for binding in element.iter("binding")))
+        title = button.find("buttonCell").get("title")
+        tooltip = button.get("toolTip") or ""
+        self.assertEqual(title, "Diagnostics: save data type, not content")
+        self.assertIn("instead of the copied content", tooltip)
+        self.assertNotIn("Pasteboard Types", tooltip)
+
 
 if __name__ == "__main__":
     unittest.main()

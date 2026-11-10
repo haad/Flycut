@@ -396,9 +396,9 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPasswordLengthsList" id="NJg-wN-gsn"/>
                                                         </connections>
                                                     </textField>
-                                                    <button toolTip="For identifying types to include in Pasteboard Types above." translatesAutoresizingMaskIntoConstraints="NO" id="mka-NZ-Esg">
-                                                        <rect key="frame" x="36" y="240" width="269.5" height="16"/>
-                                                        <buttonCell key="cell" type="check" title="Include pasteboard types in clippings list" bezelStyle="regularSquare" imagePosition="left" inset="2" id="9Vi-RY-G0b">
+                                                    <button toolTip="For troubleshooting: saves the data type of each copy (for example public.utf8-plain-text) in the clippings list instead of the copied content. Use it to find identifiers for the password data-type list." translatesAutoresizingMaskIntoConstraints="NO" id="mka-NZ-Esg">
+                                                        <rect key="frame" x="36" y="240" width="266" height="16"/>
+                                                        <buttonCell key="cell" type="check" title="Diagnostics: save data type, not content" bezelStyle="regularSquare" imagePosition="left" inset="2" id="9Vi-RY-G0b">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
                                                         </buttonCell>
