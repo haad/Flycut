@@ -1,7 +1,9 @@
 // Native fixture for the bezel selection -> Escape -> delayed paste lifecycle.
 // It links the real Flycut sources and drives the real AppController and
 // FlycutOperator methods. Only OS boundaries are replaced:
-//   CGEventPost                          input posting (records, never posts)
+//   CGEventPost, CGEventPostToPid        input posting (records, never posts)
+//   +[NSWorkspace sharedWorkspace]       frontmost application (an inert object; #7
+//                                        pastes into the app remembered when the bezel opened)
 //   AXIsProcessTrustedWithOptions        TCC consent (injected, never queried)
 //   TISCopyCurrentKeyboardLayoutInputSource  current layout (pinned to U.S.)
 //   NSApp                                app hiding (records hide: calls)
@@ -24,16 +26,28 @@ static int failures;
     failures++; } } while (0)
 
 // The definitions below replace the framework symbols at static link time.
-typedef struct { CGKeyCode code; bool down; CGEventFlags flags; } PostedEvent;
+typedef struct { CGKeyCode code; bool down; CGEventFlags flags; pid_t pid; } PostedEvent;
 static PostedEvent posted[16];
 static int postCount, trustChecks, layoutCopies;
+static const pid_t kTargetPid = 4242;
 
 void CGEventPost(CGEventTapLocation tap, CGEventRef event) {
     CHECK(tap == kCGHIDEventTap, "event tap");
     if (event && postCount < 16) {
         posted[postCount] = (PostedEvent){
             (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode),
-            CGEventGetType(event) == kCGEventKeyDown, CGEventGetFlags(event)};
+            CGEventGetType(event) == kCGEventKeyDown, CGEventGetFlags(event), 0};
+    }
+    postCount++;
+}
+
+// #7 posts the bezel paste to the remembered application only.
+void CGEventPostToPid(pid_t pid, CGEventRef event) {
+    CHECK(pid == kTargetPid, "targeted paste goes to the remembered application");
+    if (event && postCount < 16) {
+        posted[postCount] = (PostedEvent){
+            (CGKeyCode)CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode),
+            CGEventGetType(event) == kCGEventKeyDown, CGEventGetFlags(event), pid};
     }
     postCount++;
 }
@@ -56,12 +70,42 @@ TISInputSourceRef TISCopyCurrentKeyboardLayoutInputSource(void) {
     return source;
 }
 
+// A paste is one Command-V key-down, whichever way it is posted (the global Cmd-V or
+// #7's targeted Command, V, V, Command sequence).
 static int Pastes(void) {
     int pastes = 0;
     for (int index = 0; index < postCount && index < 16; index++)
-        if (posted[index].down && (posted[index].flags & kCGEventFlagMaskCommand)) pastes++;
+        if (posted[index].code == kVK_ANSI_V && posted[index].down &&
+            (posted[index].flags & kCGEventFlagMaskCommand)) pastes++;
     return pastes;
 }
+// The V key-down precedes its key-up.
+static BOOL VDownThenUp(void) {
+    int down = -1, up = -1;
+    for (int index = 0; index < postCount && index < 16; index++) {
+        if (posted[index].code != kVK_ANSI_V) continue;
+        if (posted[index].down && down < 0) down = index;
+        if (!posted[index].down && up < 0) up = index;
+    }
+    return down >= 0 && up > down;
+}
+
+// The application that was frontmost when the bezel opened; it activates at once.
+@interface FCTargetApplication : NSObject { @public int activations; }
+@end
+@implementation FCTargetApplication
+- (pid_t)processIdentifier { return kTargetPid; }
+- (BOOL)isTerminated { return NO; }
+- (BOOL)activateWithOptions:(NSApplicationActivationOptions)options { (void)options; activations++; return YES; }
+@end
+static FCTargetApplication *targetApplication;
+@interface FCWorkspaceBoundary : NSObject
+@end
+@implementation FCWorkspaceBoundary
+- (NSRunningApplication *)frontmostApplication { return (NSRunningApplication *)targetApplication; }
+@end
+static FCWorkspaceBoundary *workspaceBoundary;
+static id FakeSharedWorkspace(id object, SEL selector) { (void)object; (void)selector; return workspaceBoundary; }
 
 @interface FCApplicationBoundary : NSObject { @public int hides; }
 - (void)hide:(id)sender;
@@ -81,6 +125,11 @@ static int Pastes(void) {
     return YES;
 }
 - (NSInteger)changeCount { return changes; }
+// #7 snapshots the previous clipboard (empty here) and restores it on cancel.
+- (NSString *)stringForType:(NSString *)type { (void)type; return string; }
+- (NSArray *)pasteboardItems { return @[]; }
+- (NSInteger)clearContents { [string release]; string = nil; return ++changes; }
+- (BOOL)writeObjects:(NSArray *)objects { (void)objects; return YES; }
 - (void)dealloc { [string release]; [super dealloc]; }
 @end
 
@@ -117,6 +166,10 @@ static void InstallGuard(Class cls, SEL selector) {
     CHECK(method_getImplementation(class_getClassMethod(cls, selector)) == (IMP)ForbiddenBoundary,
           "guard installed on +[%s %s]", class_getName(cls), sel_getName(selector));
 }
+
+@interface AppController (BezelPendingPasteFixture)
+- (void)rememberFrontmostApplicationForPaste;
+@end
 
 // Only sets state the nib and -showBezel would set; no production method is overridden.
 @interface FCBezelFixtureController : AppController
@@ -157,6 +210,7 @@ typedef struct {
 static Session OpenVisibleBezel(void) {
     postCount = trustChecks = layoutCopies = 0;
     memset(posted, 0, sizeof(posted));
+    targetApplication->activations = 0;
     Session session;
     session.application = [[FCApplicationBoundary alloc] init];
     NSApp = (id)session.application;
@@ -170,6 +224,9 @@ static Session OpenVisibleBezel(void) {
                        withAppBundleURL:nil target:nil clippingAddedSelector:@selector(class)];
     session.controller = [[FCBezelFixtureController alloc] init];
     [session.controller useOperator:session.flycutOperator pasteboard:session.pasteboard];
+    // Opening the bezel remembers the frontmost application (the production step of
+    // -hitMainHotKey: that #7 added); the paste transaction belongs to this selection.
+    [session.controller rememberFrontmostApplicationForPaste];
     [session.controller setBezelDisplayed:YES pinned:NO];
     return session;
 }
@@ -189,9 +246,9 @@ static void TestSelectionPastesOnce(void) {
     printf("selection: pasteboard=\"%s\" posts=%d pastes=%d trustChecks=%d hides=%d\n",
            session.pasteboard->string ? session.pasteboard->string.UTF8String : "", postCount, Pastes(), trustChecks, session.application->hides);
     CHECK([session.pasteboard->string isEqualToString:@"selected clip"], "selected clip written to the pasteboard");
-    CHECK(postCount == 2 && Pastes() == 1, "a normal selection pastes exactly once (posts=%d)", postCount);
-    CHECK(posted[0].code == kVK_ANSI_V && posted[1].code == kVK_ANSI_V && posted[0].down && !posted[1].down,
-          "Command-V key-down then key-up on the U.S. layout");
+    CHECK(Pastes() == 1, "a normal selection pastes exactly once (posts=%d)", postCount);
+    CHECK(VDownThenUp(), "Command-V key-down then key-up on the U.S. layout");
+    CHECK(targetApplication->activations == 1, "the remembered application is activated once");
     CHECK(trustChecks == 1 && layoutCopies == 1, "one nonprompting permission check and one layout read");
     CHECK(session.application->hides == 1 && ![session.controller bezelDisplayed], "bezel hidden once");
     CloseSession(session);
@@ -238,6 +295,10 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
                              (IMP)MemoryStandardDefaults);
     InstallGuard([FlycutImageStore class], @selector(sharedStore));
     InstallGuard([NSPasteboard class], @selector(generalPasteboard));
+    targetApplication = [[FCTargetApplication alloc] init];
+    workspaceBoundary = [[FCWorkspaceBoundary alloc] init];
+    method_setImplementation(class_getClassMethod([NSWorkspace class], @selector(sharedWorkspace)),
+                             (IMP)FakeSharedWorkspace);
     if (!strcmp(argv[1], "selection")) {
         TestSelectionPastesOnce();
     } else if (!strcmp(argv[1], "escape-after-selection")) {

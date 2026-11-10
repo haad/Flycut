@@ -2674,9 +2674,12 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 - (void)cancelBezelSelection
 {
 	bezelSelectionFinished = YES;
+	// Escape cancels what the selection already scheduled. The bezel paste is owned by a
+	// transaction, so -cancelPendingPasteCompletion cancels its delayed hide, activation
+	// and Cmd-V and restores the clipboard while the transaction still owns it.
 	[self cancelPendingPasteCompletion];
-	// A selection made while the bezel is still visible has already queued its
-	// paste and delayed hide (see -pasteFromStack); a cancelled selection must not paste.
+	// Delayed requests queued without a transaction (the copy-only action's delayed hide)
+	// must not run after the cancellation either, e.g. into a bezel opened again.
 	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fakeCommandV) object:nil];
 	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideApp) object:nil];
 	[self restoreStashedStoreAndUpdate];

@@ -94,9 +94,20 @@ static void InstallBoundaries(BOOL sticky) {
 - (void)stackDown;
 @end
 
+// OS boundary: the application that was frontmost when the bezel opened (#7 pastes into
+// it). It activates at once and stays frontmost; nothing reaches a real process.
+@interface FCPasteTargetApplication : NSObject
+@end
+@implementation FCPasteTargetApplication
+- (pid_t)processIdentifier { return 4242; }
+- (BOOL)isTerminated { return NO; }
+- (BOOL)activateWithOptions:(NSApplicationActivationOptions)options { (void)options; return YES; }
+@end
+
 @interface FCDoublePasteController : AppController {
     NSMutableArray *_placed;
     int _pastes;
+    FCPasteTargetApplication *_target;
 }
 - (void)installOperator:(FlycutOperator *)op;
 - (NSArray *)placed;
@@ -108,6 +119,7 @@ static void InstallBoundaries(BOOL sticky) {
 - (void)installOperator:(FlycutOperator *)op {
     flycutOperator = op;
     _placed = [[NSMutableArray alloc] init];
+    _target = [[FCPasteTargetApplication alloc] init];
 }
 - (NSArray *)placed { return _placed; }
 - (int)pastes { return _pastes; }
@@ -121,8 +133,19 @@ static void InstallBoundaries(BOOL sticky) {
     [self addClipToPasteboard:text];
 }
 - (void)addImageClipToPasteboard:(FlycutClipping *)clipping { [_placed addObject:@"<image>"]; }
-// OS boundary: Accessibility check and synthetic Cmd-V posting.
+// OS boundary: Accessibility check and synthetic Cmd-V posting. With #7 the bezel pastes
+// into the remembered application through -postCommandVToProcessIdentifier:.
 - (void)fakeCommandV { _pastes += 1; }
+- (BOOL)postCommandVToProcessIdentifier:(pid_t)processIdentifier {
+    (void)processIdentifier;
+    _pastes += 1;
+    return YES;
+}
+// OS boundary: the frontmost application (NSWorkspace stays forbidden).
+- (NSRunningApplication *)frontmostApplicationForPaste { return (NSRunningApplication *)_target; }
+// The clipboard write is recorded above instead of reaching a pasteboard, so the
+// transaction's ownership check is injected (as in PendingPasteTransactionRegressionTests).
+- (BOOL)pasteboardIsOwnedByTransaction:(id)transaction { (void)transaction; return YES; }
 @end
 
 static NSEvent *KeyEvent(unsigned short keyCode, NSString *characters) {
@@ -211,7 +234,11 @@ int main(int argc, const char *argv[]) {
         if (strcmp(mode, "new-selection-after-hide") == 0) {
             [controller hitMainHotKey:nil];
             [controller metaKeysReleased];
-            RunLoopFor(0.25);                 // the first selection's bezel hides at 0.2 s
+            // The first selection's bezel hides at 0.2 s and its paste completes at 0.55 s.
+            // With #7 a hotkey press before that paste cancels it (the new selection owns the
+            // next paste; PendingPasteTransactionRegressionTests), so open the new selection
+            // right after the previous paste.
+            RunLoopFor(0.7);
             if ([controller bezelDisplayed]) return 21;
             [controller hitMainHotKey:nil];   // a new, intentional selection
             if (![controller bezelDisplayed]) return 22;
@@ -223,7 +250,7 @@ int main(int argc, const char *argv[]) {
         if (strcmp(mode, "new-selection-by-release-after-hide") == 0) {
             [controller hitMainHotKey:nil];
             [controller processBezelKeyDown:ReturnKey()];
-            RunLoopFor(0.25);
+            RunLoopFor(0.7);                  // right after the previous paste (see above)
             if ([controller bezelDisplayed]) return 21;
             [controller hitMainHotKey:nil];
             [controller stackDown];
