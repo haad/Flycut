@@ -1777,7 +1777,8 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
             NSMutableDictionary *richData = nil;
             if ( !contentShouldBeSkipped && [[NSUserDefaults standardUserDefaults] boolForKey:@"preserveTextFormatting"] ) {
                 for ( NSString *richType in [NSArray arrayWithObjects:NSPasteboardTypeRTF, NSPasteboardTypeHTML, nil] ) {
-                    if ( nil != [jcPasteboard availableTypeFromArray:[NSArray arrayWithObject:richType]] ) {
+                    // Types come from the snapshot of the generation detected above.
+                    if ( [availableTypes containsObject:richType] ) {
                         NSData *data = [jcPasteboard dataForType:richType];
                         // Cap the size so one giant rich clipping can't bloat the saved store.
                         if ( nil != data && [data length] > 0 && [data length] <= 1048576 ) {

@@ -199,6 +199,12 @@ static NSArray *FCFakeSearchPath(NSSearchPathDirectory directory, NSSearchPathDo
 #define NSWorkspace FCFakeWorkspace
 #define dispatch_async FCDispatchAsync
 
+// Integration: #18 binds a capture to one pasteboard generation and capture epoch
+// (ClipboardGenerationPolicy.h).
+#if __has_include("ClipboardGenerationPolicy.h")
+#import "ClipboardGenerationPolicy.h"
+#endif
+
 @interface FCAppHarness : NSObject {
 @public
     FCFakePasteboard *jcPasteboard;
@@ -206,6 +212,8 @@ static NSArray *FCFakeSearchPath(NSSearchPathDirectory directory, NSSearchPathDo
     NSNumber *pbBlockCount;
     FlycutOperator *flycutOperator;
     int menuUpdates;
+    NSUInteger clipboardCaptureEpoch;
+    dispatch_queue_t clipboardReadQueue;
 }
 - (void)pollPB:(NSTimer *)timer;
 - (void)addClipToPasteboard:(NSString *)pbFullText withRichData:(NSDictionary *)richData;
@@ -251,6 +259,7 @@ static FCAppHarness *FreshHarness(FCOperator *op) {
     app->pbCount = [[NSNumber numberWithInt:0] retain];
     app->pbBlockCount = [[NSNumber numberWithInt:0] retain];
     app->flycutOperator = op;
+    app->clipboardReadQueue = dispatch_queue_create("com.generalarcade.flycut.fixture.clipboard-read", DISPATCH_QUEUE_SERIAL);
     mainQueueBlocks = backgroundQueueBlocks = 0;
     return app;
 }
