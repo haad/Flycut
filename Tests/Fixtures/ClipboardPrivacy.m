@@ -158,15 +158,21 @@ static int RunNoRevealNoSave(void) {
     return failures;
 }
 
+// #18 supersedes #5's recording of the type inside -shouldSkip:. The diagnostics option
+// is recorded once, on the main thread, by pollPB:'s commit path (see
+// ClipboardCaptureSafetyTests and ClipboardCapturePauseRegressionTests). Evaluating a
+// clipping therefore never inserts the type itself, on either thread, so a copy cannot
+// be recorded twice and the capture worker never touches the store.
 static int RunRevealOnMain(void) {
     FCRecordingOperator *op = FreshOperator();
     [[FCFakeDefaults standardUserDefaults] setObject:@YES forKey:@"revealPasteboardTypes"];
-    [op shouldSkip:@"" ofType:NSPasteboardTypeTIFF fromAvailableTypes:@[NSPasteboardTypeTIFF]];
+    BOOL skipped = [op shouldSkip:@"" ofType:NSPasteboardTypeTIFF fromAvailableTypes:@[NSPasteboardTypeTIFF]];
+    DrainMainQueue(^BOOL { return [op jcListCount] != 0; });
     int failures = 0;
-    failures += Check([op jcListCount] == 1 && [[op getClipFromCount:0] isEqualToString:NSPasteboardTypeTIFF],
-                      "main-thread caller sees the revealed type immediately");
-    failures += Check(op->mainThreadActions == 1 && op->workerThreadActions == 0,
-                      "main-thread reveal runs the list-modification action once on the main thread");
+    failures += Check(!skipped, "reveal mode does not skip an ordinary image");
+    failures += Check([op jcListCount] == 0, "main-thread evaluation does not record the type itself");
+    failures += Check(op->mainThreadActions + op->workerThreadActions == 0,
+                      "main-thread evaluation runs no list-modification action");
     [op release];
     return failures;
 }
@@ -185,14 +191,13 @@ static int RunRevealFromWorker(void) {
     dispatch_semaphore_wait(finished, DISPATCH_TIME_FOREVER);
     dispatch_release(finished);
     int workerActions = op->workerThreadActions;
-    DrainMainQueue(^BOOL { return [op jcListCount] == 1; });
+    DrainMainQueue(^BOOL { return [op jcListCount] != 0; });
     int failures = 0;
     failures += Check(!skipped, "reveal mode does not skip ordinary text");
     failures += Check(countOnWorker == 0, "capture worker does not insert into the store");
     failures += Check(workerActions == 0, "capture worker does not run the list-modification action");
-    failures += Check([op jcListCount] == 1 && [[op getClipFromCount:0] isEqualToString:NSPasteboardTypeString],
-                      "revealed type is committed on the main queue");
-    failures += Check(op->mainThreadActions == 1, "list-modification action runs once on the main thread");
+    failures += Check([op jcListCount] == 0, "evaluation enqueues no second recording on the main queue");
+    failures += Check(op->mainThreadActions == 0, "no list-modification action runs for the evaluation");
     [op release];
     return failures;
 }

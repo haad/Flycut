@@ -65,10 +65,12 @@ class ClipboardPrivacyRegressionTests(unittest.TestCase):
     def test_evaluating_a_clipping_does_not_modify_or_save_the_store(self) -> None:
         self.run_case("no-reveal-no-save")
 
-    def test_reveal_pasteboard_types_on_main_thread_is_immediate(self) -> None:
+    # Integration: #18's commit-path diagnostics supersede #5's recording inside
+    # -shouldSkip: (otherwise each copy would be recorded twice); see the fixture.
+    def test_reveal_pasteboard_types_evaluation_on_main_thread_records_nothing(self) -> None:
         self.run_case("reveal-main")
 
-    def test_reveal_pasteboard_types_from_capture_worker_commits_on_main_queue(self) -> None:
+    def test_reveal_pasteboard_types_evaluation_on_capture_worker_records_nothing(self) -> None:
         self.run_case("reveal-worker")
 
     def test_debug_menu_log_omits_clipping_previews(self) -> None:
