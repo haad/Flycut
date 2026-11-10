@@ -478,6 +478,8 @@ static int GeneralLive(void)
 @implementation FCRememberOperator
 - (int)rememberNum { return favorites ? favoritesRemember : remember; }
 - (int)jcListCount { return count; }
+// #17: -checkFavoritesRememberNumPref: asks which store is selected before switching.
+- (bool)favoritesStoreIsSelected { return favorites; }
 - (void)switchToFavoritesStore { favorites = YES; [calls addObject:@"switchToFavoritesStore"]; }
 - (void)restoreStashedStore { favorites = NO; [calls addObject:@"restoreStashedStore"]; }
 // The contract of -[FlycutOperator setRememberNum:forPrimaryStore:]: shrinking
