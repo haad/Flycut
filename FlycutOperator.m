@@ -411,8 +411,10 @@
 		return YES;
 
 	// Skip content the source app marks as concealed/transient/auto-generated. Password
-	// managers use these markers too, so this is on by default; private/incognito browser
-	// windows also tag their copies this way, and turning it off keeps those clippings.
+	// managers use these markers too, so this is on by default. Firefox marks every copy
+	// from a private window as concealed, so turning this off keeps those clippings.
+	// Chromium-based browsers and Safari add no marker for private windows; they set a
+	// pasteboard expiration date instead, which this check does not see.
 	if ( availableTypes && [[NSUserDefaults standardUserDefaults] boolForKey:@"skipConcealedTypes"]
 		&& [self availableTypes:availableTypes matchListForKey:@"skipConcealedTypesList"] )
 		return YES;
