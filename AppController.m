@@ -462,7 +462,8 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 {
     (void)menu;
     [self updateClipboardTrackingMenuItem];
-    // Option-click is handled before AppKit starts tracking the menu.
+    // Option-click is handled before AppKit starts tracking the menu (pause/resume goes
+    // through -setClipboardTrackingPaused:, which also advances the capture epoch).
 }
 
 -(void)menuDidClose:(NSMenu *)menu
@@ -566,6 +567,11 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 {
     BOOL wasPaused = [flycutOperator storeDisabled];
     [flycutOperator setDisableStoreTo:paused];
+
+    // Captures still in flight belong to the previous epoch and are discarded,
+    // even when capture is resumed before they finish.
+    if (wasPaused != paused)
+        clipboardCaptureEpoch += 1;
 
     // Ignore clipboard changes made intentionally while tracking was paused.
     if (wasPaused && !paused) {

@@ -4,8 +4,8 @@ and diagnostics mode stores the copy's type, never a payload (also for the
 opt-in animated-GIF download).
 
 The fixture compiles the real AppController, FlycutOperator and engine sources and
-runs the production pollPB:, menuWillOpen: (Option-click pause/resume) and GIF
-download completion. Only OS boundaries are replaced: user defaults live in
+runs the production pollPB:, the status item's Option-click handler (pause/resume;
+#20 moved it from menuWillOpen: to -handleStatusItemEvent:) and GIF download completion. Only OS boundaries are replaced: user defaults live in
 memory, the pasteboard is an in-process object whose reads can be held on a
 semaphore, NSApp (only while the Option-click handler runs), the status item and
 its icon lookup, and running-application queries are inert objects, the
@@ -76,13 +76,23 @@ FIXTURE = r'''
 - (void)hide:(id)sender { }
 @end
 
-@interface FCFakeStatusButton : NSObject { NSString *_title; NSImage *_image; }
+@interface FCFakeStatusButton : NSObject {
+    NSString *_title; NSImage *_image;
+    NSColor *_contentTintColor; NSString *_toolTip; NSString *_accessibilityLabel;
+}
 @property(nonatomic, copy) NSString *title;
 @property(nonatomic, retain) NSImage *image;
+// #20 draws the paused/active state with a tint, tooltip and accessibility label.
+@property(nonatomic, retain) NSColor *contentTintColor;
+@property(nonatomic, copy) NSString *toolTip;
+@property(nonatomic, copy) NSString *accessibilityLabel;
 @end
 @implementation FCFakeStatusButton
 @synthesize title = _title;
 @synthesize image = _image;
+@synthesize contentTintColor = _contentTintColor;
+@synthesize toolTip = _toolTip;
+@synthesize accessibilityLabel = _accessibilityLabel;
 @end
 
 @interface FCFakeStatusItem : NSObject { FCFakeStatusButton *_button; }
@@ -202,6 +212,7 @@ static void InstallBoundaries(const char *imageDirectory) {
 @interface AppController (CapturePauseTesting)
 - (void)pollPB:(NSTimer *)timer;
 - (void)menuWillOpen:(NSMenu *)menu;
+- (void)handleStatusItemEvent:(NSEvent *)event;
 - (void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL;
 @end
 
@@ -263,11 +274,14 @@ static NSData *AnimatedGIF(void) {
     return finalized ? data : nil;
 }
 
-// The production Option-click handler reads the triggering event from NSApp, which the
-// fixture provides only for the duration of that call.
+// An Option-click on the menu bar icon. #20 handles it in -handleStatusItemEvent:
+// before AppKit tracks the menu; the event is built in process and never posted.
 static void OptionClickMenuIcon(FCCapturePauseController *controller) {
+    NSEvent *click = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:NSZeroPoint
+                                   modifierFlags:NSEventModifierFlagOption timestamp:0 windowNumber:0
+                                         context:nil eventNumber:0 clickCount:1 pressure:1];
     NSApp = (id)fakeApplication;
-    [controller menuWillOpen:nil];
+    [controller handleStatusItemEvent:click];
     NSApp = nil;
 }
 
