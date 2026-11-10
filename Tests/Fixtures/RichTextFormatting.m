@@ -200,9 +200,13 @@ static NSArray *FCFakeSearchPath(NSSearchPathDirectory directory, NSSearchPathDo
 #define dispatch_async FCDispatchAsync
 
 // Integration: #18 binds a capture to one pasteboard generation and capture epoch
-// (ClipboardGenerationPolicy.h).
+// (ClipboardGenerationPolicy.h); #7 owns pastes in a transaction whose interface the
+// runner extracts verbatim from AppController.m. No transaction exists in these cases.
 #if __has_include("ClipboardGenerationPolicy.h")
 #import "ClipboardGenerationPolicy.h"
+#endif
+#if __has_include("AppControllerTypes.inc")
+#include "AppControllerTypes.inc"
 #endif
 
 @interface FCAppHarness : NSObject {
@@ -212,8 +216,12 @@ static NSArray *FCFakeSearchPath(NSSearchPathDirectory directory, NSSearchPathDo
     NSNumber *pbBlockCount;
     FlycutOperator *flycutOperator;
     int menuUpdates;
+    BOOL isMenuOpen;
+    BOOL isSearchWindowDisplayed;
+    BOOL isBezelDisplayed;
     NSUInteger clipboardCaptureEpoch;
     dispatch_queue_t clipboardReadQueue;
+    id currentPasteTransaction;
 }
 - (void)pollPB:(NSTimer *)timer;
 - (void)addClipToPasteboard:(NSString *)pbFullText withRichData:(NSDictionary *)richData;
@@ -221,6 +229,13 @@ static NSArray *FCFakeSearchPath(NSSearchPathDirectory directory, NSSearchPathDo
 - (bool)toggleMenuIconDisabled;
 - (NSURL *)animatedGifURLFromPasteboard;
 - (void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL;
+- (void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL pasteboardGeneration:(NSInteger)generation;
+- (BOOL)isImageCaptureCurrentForGeneration:(NSInteger)generation;
+- (NSArray *)snapshotPasteboardItems;
+- (BOOL)pasteTransactionIsCurrent:(id)transaction;
+- (void)clearPasteTransactionIfCurrent:(id)transaction;
+- (void)clippingWasAdded;
+- (void)updateBezel;
 - (void)updateMenu;
 @end
 
@@ -231,7 +246,14 @@ static NSArray *FCFakeSearchPath(NSSearchPathDirectory directory, NSSearchPathDo
 - (void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL {
     Check(NO, "unexpected network download");
 }
+- (void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL pasteboardGeneration:(NSInteger)generation {
+    Check(NO, "unexpected network download");
+}
+- (NSArray *)snapshotPasteboardItems { Check(NO, "unexpected paste transaction snapshot"); return nil; }
+- (BOOL)pasteTransactionIsCurrent:(id)transaction { Check(transaction == nil, "no paste transaction in this fixture"); return NO; }
+- (void)clearPasteTransactionIfCurrent:(id)transaction { Check(transaction == nil, "no paste transaction in this fixture"); }
 - (void)updateMenu { menuUpdates++; }
+- (void)updateBezel { Check(NO, "unexpected bezel redraw (no bezel is shown)"); }
 @end
 
 #undef dispatch_async

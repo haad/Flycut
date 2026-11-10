@@ -23,7 +23,13 @@ METHODS = (
     "-(void)pollPB:(NSTimer *)timer",
     "-(void) setPBBlockCount:(NSNumber *)newPBBlockCount",
     "-(void)addClipToPasteboard:(NSString*)pbFullText withRichData:(NSDictionary *)richData",
+    # fix-image-2: an image capture commits only while its generation is current.
+    "-(BOOL)isImageCaptureCurrentForGeneration:(NSInteger)generation\n{",
+    # #7: a captured clipping redraws the settled bezel selection.
+    "- (void)clippingWasAdded\n{",
 )
+# #7: the paste transaction's interface (the fixture never creates one).
+TYPES = (r"@interface FCPasteTransaction : NSObject \{.*?\n@end\n",)
 
 
 def method_body(source: str, signature: str) -> str:
@@ -51,6 +57,9 @@ class RichTextFormattingRegressionTests(unittest.TestCase):
         source = APP_CONTROLLER.read_text()
         methods = "\n".join(method_body(source, signature) for signature in METHODS)
         (cls.artifacts / "AppControllerMethods.inc").write_text(methods + "\n")
+        import re
+        types = [match.group(0) for pattern in TYPES for match in [re.search(pattern, source, re.S)] if match]
+        (cls.artifacts / "AppControllerTypes.inc").write_text("\n".join(types) + "\n")
         cls.binary = cls.artifacts / "RichTextFormatting"
         command = ["/usr/bin/xcrun", "clang", "-fno-objc-arc", "-fobjc-weak", "-fblocks", "-fmodules",
                    "-mmacosx-version-min=13.5", "-arch", "arm64",

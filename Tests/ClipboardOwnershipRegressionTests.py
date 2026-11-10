@@ -65,6 +65,10 @@ FIXTURE = r'''
 - (int)jcListCount { return 1; }
 - (FlycutClipping *)clippingAtIndex:(int)index { return [self clippingAtStackPosition]; }
 - (NSString *)getPasteFromIndex:(int)index { return self.selected; }
+// #4 reads a clipping's rich text (RTF/HTML) before its text; this fixture's
+// clippings are plain text, so there is none.
+- (NSDictionary *)getRichDataFromStackPosition { return nil; }
+- (NSDictionary *)getRichDataFromIndex:(int)index { (void)index; return nil; }
 @end
 @interface OwnerController : AppController
 @property(retain) OwnerTarget *target;

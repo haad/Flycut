@@ -28,6 +28,10 @@ FIXTURE = r'''
         [rows addObject:[self.clippings[[i intValue]] displayString]];
     return rows;
 }
+// #4 reads a clipping's rich text (RTF/HTML) before its text; this fixture's
+// clippings are plain text, so there is none.
+- (NSDictionary *)getRichDataFromStackPosition { return nil; }
+- (NSDictionary *)getRichDataFromIndex:(int)index { (void)index; return nil; }
 @end
 @interface FCSearchField : NSObject
 @property(copy) NSString *stringValue;
@@ -54,6 +58,13 @@ FIXTURE = r'''
     searchWindowSearchField = (id)field;
 }
 - (void)addClipToPasteboard:(NSString *)text { self.placed = text; }
+// #4 writes text with its rich data through the two-argument variant; the
+// clipboard write stays this fixture's recorded boundary.
+- (void)addClipToPasteboard:(NSString *)content withRichData:(NSDictionary *)richData {
+    (void)richData;
+    [self addClipToPasteboard:content];
+}
+
 - (void)updateMenu {}
 - (void)hideSearchWindowPreservingPasteTransaction {}
 - (void)hideSearchWindow {}

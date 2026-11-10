@@ -98,6 +98,10 @@ static FlycutClipping *ImageClipping(NSString *hash, NSString *type) {
 - (int)jcListCount { return (int)[self.clippings count]; }
 - (FlycutClipping *)clippingAtPosition:(int)i { return i >= 0 && i < (int)[self.clippings count] ? self.clippings[i] : nil; }
 - (FlycutClipping *)clippingAtIndex:(int)i { return [self clippingAtPosition:i]; }
+// #4 reads a clipping's rich text (RTF/HTML) before its text; this fixture's
+// clippings are plain text, so there is none.
+- (NSDictionary *)getRichDataFromStackPosition { return nil; }
+- (NSDictionary *)getRichDataFromIndex:(int)index { (void)index; return nil; }
 @end
 
 @interface ImageController : AppController

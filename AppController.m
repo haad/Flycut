@@ -2184,10 +2184,12 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 		selected = YES;
 		[self addImageClipToPasteboard:clipping];
 	} else {
+		// Read the rich data before the paste may move the clipping to the top.
+		NSDictionary *richData = [flycutOperator getRichDataFromStackPosition];
 		NSString *content = [flycutOperator getPasteFromStackPosition];
 		if ( nil != content ) {
 			selected = YES;
-			[self addClipToPasteboard:content];
+			[self addClipToPasteboard:content withRichData:richData];
 		}
 	}
 	if ( selected ) {
@@ -2254,11 +2256,13 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
         return true;
     }
 
+    // Read the rich data before getPasteFromIndex: may move the clipping to the top.
+    NSDictionary *richData = [flycutOperator getRichDataFromIndex: position];
     NSString *content = [flycutOperator getPasteFromIndex: position];
     if ( nil == content )
         return false;
 
-    [self addClipToPasteboard:content];
+    [self addClipToPasteboard:content withRichData:richData];
     [self updateMenu];
     return true;
 }
@@ -3333,6 +3337,14 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(void)addClipToPasteboard:(NSString*)pbFullText
 {
+    [self addClipToPasteboard:pbFullText withRichData:nil];
+}
+
+// Writes the text (plus its RTF/HTML representations, when given) to the pasteboard.
+// Inside a paste transaction the placement is owned: the previous clipboard is
+// snapshotted first, and the written text becomes the transaction's payload.
+-(void)addClipToPasteboard:(NSString*)pbFullText withRichData:(NSDictionary *)richData
+{
     FCPasteTransaction *transaction = [currentPasteTransaction retain];
     if (transaction != nil) {
         if ([transaction hasSelectedPayload]) {
@@ -3351,27 +3363,18 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
         [transaction setSelectedPayload:pbFullText];
         pbFullText = [transaction selectedPayload];
     }
-    NSInteger declaredCount = [jcPasteboard declareTypes:@[NSPasteboardTypeString] owner:nil];
+    NSMutableArray *pbTypes = [NSMutableArray arrayWithObject:NSPasteboardTypeString];
+    if ( nil != richData )
+        [pbTypes addObjectsFromArray:[richData allKeys]];
+    NSInteger declaredCount = [jcPasteboard declareTypes:pbTypes owner:nil];
     [transaction setOwnedChangeCount:declaredCount];
     BOOL written = [jcPasteboard setString:pbFullText forType:NSPasteboardTypeString];
+    for ( NSString *richType in richData )
+        [jcPasteboard setData:[richData objectForKey:richType] forType:richType];
     [self setPBBlockCount:@(declaredCount)];
     if (!written || [jcPasteboard changeCount] != declaredCount)
         [self clearPasteTransactionIfCurrent:transaction];
     [transaction release];
-}
-
--(void)addClipToPasteboard:(NSString*)pbFullText withRichData:(NSDictionary *)richData
-{
-    NSMutableArray *pbTypes = [NSMutableArray arrayWithObject:NSPasteboardTypeString];
-    if ( nil != richData )
-        [pbTypes addObjectsFromArray:[richData allKeys]];
-
-    [jcPasteboard declareTypes:pbTypes owner:nil];
-
-    [jcPasteboard setString:pbFullText forType:NSPasteboardTypeString];
-    for ( NSString *richType in richData )
-        [jcPasteboard setData:[richData objectForKey:richType] forType:richType];
-    [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
 }
 
 // Returns YES when the image (or the GIF's file reference) was placed on the pasteboard.

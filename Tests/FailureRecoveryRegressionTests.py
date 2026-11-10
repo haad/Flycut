@@ -91,6 +91,10 @@ FIXTURE = r'''
     return text ? [[[FlycutClipping alloc] initWithContents:text withType:NSPasteboardTypeString
         withDisplayLength:40 withAppLocalizedName:nil withAppBundleURL:nil withTimestamp:0] autorelease] : nil;
 }
+// #4 reads a clipping's rich text (RTF/HTML) before its text; this fixture's
+// clippings are plain text, so there is none.
+- (NSDictionary *)getRichDataFromStackPosition { return nil; }
+- (NSDictionary *)getRichDataFromIndex:(int)index { (void)index; return nil; }
 @end
 @interface RecoveryController : AppController
 @property(retain) RecoveryTarget *target;

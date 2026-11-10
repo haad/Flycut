@@ -54,6 +54,10 @@ class ImmediatePasteRegressionTests(unittest.TestCase):
     return text ? [[[FlycutClipping alloc] initWithContents:text withType:NSPasteboardTypeString
         withDisplayLength:40 withAppLocalizedName:nil withAppBundleURL:nil withTimestamp:0] autorelease] : nil;
 }
+// #4 reads a clipping's rich text (RTF/HTML) before its text; this fixture's
+// clippings are plain text, so there is none.
+- (NSDictionary *)getRichDataFromStackPosition { return nil; }
+- (NSDictionary *)getRichDataFromIndex:(int)index { (void)index; return nil; }
 @end
 
 @interface FCImmediatePasteController : AppController {
@@ -99,6 +103,12 @@ class ImmediatePasteRegressionTests(unittest.TestCase):
 // Clipboard effects are injected here; ClipboardOwnershipRegressionTests exercises
 // the actual placement, generation fence and restore code with an in-memory board.
 - (BOOL)pasteboardIsOwnedByTransaction:(id)transaction { return YES; }
+// #4 writes text with its rich data through the two-argument variant; the
+// clipboard write stays this fixture's recorded boundary.
+- (void)addClipToPasteboard:(NSString *)content withRichData:(NSDictionary *)richData {
+    (void)richData;
+    [self addClipToPasteboard:content];
+}
 - (void)addClipToPasteboard:(NSString *)content {
     if ([content isEqualToString:@"selected clipping"])
         self.pasteboardCount += 1;
