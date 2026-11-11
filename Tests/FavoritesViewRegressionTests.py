@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Copies made while the bezel shows the Favorites list belong to the history.
+"""The bezel's Favorites view: copies go to the history, closing the bezel ends it.
+
+Copies made while the bezel shows the Favorites list belong to the history. However the
+bezel closes (Escape, a paste, Cmd-, opening Preferences, a click elsewhere while it is
+pinned, the delayed hide after Shift-F or the copy-only key, Flycut resigning active),
+the history is the current list again afterwards; the "f" toggle, the Favorites
+stepper's check and a paste from the Favorites view keep working.
 
 The fixture compiles the real AppController, FlycutOperator, FlycutStore and the rest
 of the app sources (git ls-files '*.m' minus main.m, FlycutHelper and Tests) and drives
@@ -16,7 +22,8 @@ store. The general pasteboard, the status bar and -saveFromStore:atIndex:withPre
 (writes files) end the fixture if reached. No NIB is loaded, nothing is shown.
 
 Every mode prints one "REPORT {json}" line with the observed stores and exits 0 when
-the behaviour is right. Exit codes: 2x setup, 3x-7x the copy checks, 8x control.
+the behaviour is right. Exit codes: 2x setup, 3x-7x the copy checks, 8x control,
+10x-14x the ways the bezel closes, 15x-17x what must keep working.
 """
 
 from __future__ import annotations
@@ -167,12 +174,22 @@ static BOOL FCForbiddenSave(id self, SEL _cmd, id store, int index, id prefix) {
     _exit(98);
 }
 
+static int alerts;
+static BOOL resignActiveDuringAlert;
+
 @interface FCFavController : AppController
 - (void)installOperator:(FlycutOperator *)op pasteboard:(FCMemoryPasteboard *)pasteboard bezel:(FCFakeBezel *)fake;
 - (BOOL)bezelDisplayed;
 - (void)drainCaptures;
 @end
 @implementation FCFavController
+// The "Resize Stack" alert is modal UI: answer "Resize". The user may switch to another
+// application while it is up, which makes Flycut resign active.
+- (NSString *)alertWithMessageText:(NSString *)message informationText:(NSString *)information buttonsTexts:(NSArray *)buttons {
+    alerts++;
+    if (resignActiveDuringAlert) [self applicationWillResignActive:nil];
+    return [buttons containsObject:@"Resize"] ? @"Resize" : [buttons firstObject];
+}
 - (void)installOperator:(FlycutOperator *)op pasteboard:(FCMemoryPasteboard *)pasteboard bezel:(FCFakeBezel *)fake {
     flycutOperator = op;
     jcPasteboard = (id)pasteboard;
@@ -196,6 +213,9 @@ static BOOL FCForbiddenSave(id self, SEL _cmd, id store, int index, id prefix) {
 - (void)processBezelKeyDown:(NSEvent *)event;
 - (void)hitMainHotKey:(id)hotKey;
 - (void)savePreferencesOnDict:(NSMutableDictionary *)dict;
+- (void)metaKeysReleased;
+- (void)windowDidResignKey:(NSNotification *)notification;
+- (void)checkFavoritesRememberNumPref:(int)newRemember;
 @end
 
 static FCFavController *controller;
@@ -238,6 +258,15 @@ static void Key(NSString *characters, unsigned short keyCode, NSEventModifierFla
 static void Escape(void) { Key(@"", 53, 0); }
 static void Down(void) { Key(@"j", 38, 0); }
 static void ToggleFavorites(void) { Key(@"f", 3, 0); }
+
+// Another window takes key focus (Preferences, a click into another application): the
+// key bezel resigns, and AppKit tells its delegate.
+static BOOL OtherWindowBecomesKey(void) {
+    if (!fakeBezel->key) return NO;
+    fakeBezel->key = NO;
+    [controller windowDidResignKey:[NSNotification notificationWithName:NSWindowDidResignKeyNotification object:fakeBezel]];
+    return YES;
+}
 
 static NSArray *Contents(FlycutStore *store) {
     NSMutableArray *out = [NSMutableArray array];
@@ -349,6 +378,39 @@ static BOOL FavoritesUnchanged(void) {
            [Saved(@"favoritesList") isEqualToArray:(@[@"fav-2", @"fav-1"])];
 }
 
+static NSArray *AfterRelaunch(void) {
+    // A new operator loads the saved store the way the next launch does.
+    FlycutOperator *next = [[FlycutOperator alloc] init];
+    [next awakeFromNibDisplaying:10 withDisplayLength:40 withSaveSelector:@selector(savePreferencesOnDict:) forTarget:controller];
+    return Contents([next valueForKey:@"clippingStore"]);
+}
+
+// After the bezel closed: the history is the current list again (the next copy, the
+// menu, the search window and the next bezel all use it), and the favorites are intact.
+static int CheckClosed(int base) {
+    Observe(@"1-bezel-closed");
+    BOOL displayed = [controller bezelDisplayed] || fakeBezel->visible;
+    BOOL stuck = [op favoritesStoreIsSelected];
+    BOOL favoritesColor = fakeBezel->color;
+    NSArray *menuList = [op previousDisplayStrings:10 containing:nil] ?: @[];
+    Copy(@"copied-after-bezel-closed");
+    Observe(@"2-after-later-copy");
+    report[@"currentListAfterClose"] = menuList;
+    report[@"relaunchHistory"] = AfterRelaunch();
+    [controller hitMainHotKey:nil];
+    BOOL nextShowsFavorites = [op favoritesStoreIsSelected];
+    report[@"nextHotkeyShowsFavorites"] = @(nextShowsFavorites);
+    Escape();
+    if (displayed) return base;                      // precondition: the bezel did close
+    if (stuck) return base + 1;
+    if (favoritesColor) return base + 2;
+    if (![menuList isEqualToArray:(@[@"h3", @"h2", @"h1"])]) return base + 3;
+    if (![[Contents(historyStore) firstObject] isEqualToString:@"copied-after-bezel-closed"]) return base + 4;
+    if (!FavoritesUnchanged()) return base + 5;
+    if (nextShowsFavorites) return base + 6;
+    return 0;
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         if (argc != 2) return 2;
@@ -357,8 +419,26 @@ int main(int argc, const char *argv[]) {
         report[@"mode"] = mode;
         Install();
         countForgottenExports = [mode isEqualToString:@"copies-keep-full-favorites"];
-        int failed = Setup(countForgottenExports ? 2 : 10);
+        BOOL stepperMode = [mode isEqualToString:@"favorites-stepper-alert-keeps-history"];
+        int failed = Setup((countForgottenExports || stepperMode) ? 2 : 10);
         if (failed) return Emit(failed);
+
+        if (stepperMode) {
+            // Preferences: the Favorites stepper goes from 2 to 1 while 2 favorites are
+            // stored, so "Resize Stack" asks; the user switches apps before answering.
+            // The check swaps the favorites in for itself; the history keeps its limit.
+            resignActiveDuringAlert = YES;
+            [controller checkFavoritesRememberNumPref:1];
+            Observe(@"1-after-resize");
+            report[@"alerts"] = @(alerts);
+            report[@"historyRememberNum"] = @([historyStore rememberNum]);
+            report[@"favoritesRememberNum"] = @([favoritesStore rememberNum]);
+            if (alerts != 1) return Emit(170);
+            if ([op favoritesStoreIsSelected]) return Emit(171);
+            if (![Contents(historyStore) isEqualToArray:(@[@"h3", @"h2", @"h1"])] || [historyStore rememberNum] != 40) return Emit(172);
+            if (![Contents(favoritesStore) isEqualToArray:(@[@"fav-2"])] || [favoritesStore rememberNum] != 1) return Emit(173);
+            return Emit(0);
+        }
         if ((failed = OpenFavoritesView())) return Emit(failed);
 
         if ([mode isEqualToString:@"control-escape"]) {
@@ -444,6 +524,69 @@ int main(int argc, const char *argv[]) {
             Escape();
             return Emit(0);
         }
+        if ([mode isEqualToString:@"closed-by-cmd-comma"]) {
+            Key(@",", 43, NSEventModifierFlagCommand);   // Cmd-, opens Preferences from the bezel
+            if (!OtherWindowBecomesKey()) return Emit(109);   // the Preferences window becomes key
+            [controller metaKeysReleased];               // the user lets go of the hotkey modifiers
+            Spin(0.6);
+            return Emit(CheckClosed(100));
+        }
+        if ([mode isEqualToString:@"closed-by-focus-loss-while-pinned"]) {
+            Key(@" ", 49, 0);                            // Space pins the bezel
+            if (!OtherWindowBecomesKey()) return Emit(119);   // a click into another app's window
+            Spin(0.6);
+            return Emit(CheckClosed(110));
+        }
+        if ([mode isEqualToString:@"closed-by-shift-f-in-favorites"]) {
+            Key(@"F", 3, NSEventModifierFlagShift);      // Shift-F while Favorites are shown
+            Spin(0.6);                                   // its delayed -hideApp closes the bezel
+            return Emit(CheckClosed(120));
+        }
+        if ([mode isEqualToString:@"closed-by-copy-only-key-in-favorites"]) {
+            Key(@"\x03", 8, NSEventModifierFlagControl); // the copy-only key on the shown favorite
+            Spin(0.6);                                   // its delayed -hideApp closes the bezel
+            report[@"pasteboard"] = [pasteboard stringForType:NSPasteboardTypeString] ?: @"<nil>";
+            if (![[pasteboard stringForType:NSPasteboardTypeString] isEqualToString:@"fav-2"]) return Emit(139);
+            [controller pollPB:nil]; [controller drainCaptures];   // Flycut's own write is not captured
+            return Emit(CheckClosed(130));
+        }
+        if ([mode isEqualToString:@"closed-by-resign-active"]) {
+            // The bezel shows Favorites while Flycut is active (e.g. Preferences open),
+            // then the user switches to another application.
+            [controller applicationWillResignActive:nil];
+            Spin(0.3);
+            return Emit(CheckClosed(140));
+        }
+        if ([mode isEqualToString:@"f-toggle-keeps-the-favorites-view"]) {
+            // "f" orders the key bezel out and in again; that must not end the view.
+            Observe(@"1-favorites-shown");
+            if (fakeBezel->orderOuts < 1 || !fakeBezel->visible || !fakeBezel->color ||
+                ![fakeBezel->text isEqualToString:@"fav-2"]) return Emit(150);
+            Down();
+            if (![op favoritesStoreIsSelected] || ![Selected() isEqualToString:@"fav-1"]) return Emit(151);
+            ToggleFavorites();                           // back to the history
+            Observe(@"2-history-shown");
+            if ([op favoritesStoreIsSelected] || fakeBezel->color || ![controller bezelDisplayed] ||
+                ![Selected() isEqualToString:@"h3"]) return Emit(152);
+            ToggleFavorites();                           // Favorites again, on the same favorite
+            Observe(@"3-favorites-again");
+            if (![op favoritesStoreIsSelected] || !fakeBezel->color || ![controller bezelDisplayed] ||
+                ![Selected() isEqualToString:@"fav-1"] || ![fakeBezel->text isEqualToString:@"fav-1"]) return Emit(153);
+            Escape();
+            if ([op favoritesStoreIsSelected]) return Emit(154);
+            return Emit(0);
+        }
+        if ([mode isEqualToString:@"paste-from-favorites"]) {
+            Down();                                      // fav-1
+            Key(@"\r", 36, 0);                          // Return pastes it
+            Spin(0.7);
+            Observe(@"1-after-paste");
+            report[@"pasteboard"] = [pasteboard stringForType:NSPasteboardTypeString] ?: @"<nil>";
+            if (![[pasteboard stringForType:NSPasteboardTypeString] isEqualToString:@"fav-1"]) return Emit(160);
+            if ([op favoritesStoreIsSelected] || [controller bezelDisplayed]) return Emit(161);
+            if (!FavoritesUnchanged()) return Emit(162);
+            return Emit(0);
+        }
         return Emit(4);
     }
 }
@@ -456,6 +599,14 @@ MODES = {
     "copy-equal-to-favorite": "a copy equal to the shown favorite was compared with the favorites, not the history",
     "selections-follow-their-lists": "a copy while Favorites were shown moved a selection or missed the history",
     "copies-keep-full-favorites": "copies made while Favorites were shown pushed a favorite out",
+    "closed-by-cmd-comma": "Cmd-, from the Favorites view left the favorites as the current list",
+    "closed-by-focus-loss-while-pinned": "focus loss of the pinned bezel left the favorites as the current list",
+    "closed-by-shift-f-in-favorites": "Shift-F in the Favorites view closed the bezel and left the favorites current",
+    "closed-by-copy-only-key-in-favorites": "the copy-only key in the Favorites view left the favorites current",
+    "closed-by-resign-active": "Flycut resigning active left the favorites as the current list",
+    "f-toggle-keeps-the-favorites-view": "the f toggle no longer switches between history and Favorites",
+    "paste-from-favorites": "Return in the Favorites view did not paste the favorite exactly as before",
+    "favorites-stepper-alert-keeps-history": "the Favorites stepper's check applied the favorites limit to the history",
 }
 
 
@@ -514,6 +665,30 @@ class FavoritesViewRegressionTests(unittest.TestCase):
 
     def test_copies_do_not_push_out_full_favorites(self) -> None:
         self.run_mode("copies-keep-full-favorites")
+
+    def test_cmd_comma_from_favorites_restores_history(self) -> None:
+        self.run_mode("closed-by-cmd-comma")
+
+    def test_focus_loss_of_pinned_bezel_restores_history(self) -> None:
+        self.run_mode("closed-by-focus-loss-while-pinned")
+
+    def test_shift_f_in_favorites_restores_history(self) -> None:
+        self.run_mode("closed-by-shift-f-in-favorites")
+
+    def test_copy_only_key_in_favorites_restores_history(self) -> None:
+        self.run_mode("closed-by-copy-only-key-in-favorites")
+
+    def test_resigning_active_restores_history(self) -> None:
+        self.run_mode("closed-by-resign-active")
+
+    def test_f_toggle_keeps_the_favorites_view_open(self) -> None:
+        self.run_mode("f-toggle-keeps-the-favorites-view")
+
+    def test_paste_from_favorites_still_pastes_the_favorite(self) -> None:
+        self.run_mode("paste-from-favorites")
+
+    def test_favorites_stepper_check_keeps_the_history_limit(self) -> None:
+        self.run_mode("favorites-stepper-alert-keeps-history")
 
 
 if __name__ == "__main__":

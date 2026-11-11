@@ -195,9 +195,12 @@ static FCApplication *testApplication;
 - (void)fakeKey:(NSNumber *)keyCode withCommandFlag:(BOOL)setFlag;
 - (void)hideApp;
 - (void)hideBezel;
+- (void)restoreStashedStoreAndUpdate;
 @end
 @implementation AppController
 __PRODUCTION_METHODS__
+// -hideApp ends the bezel's Favorites view; this harness has no stores to restore.
+- (void)restoreStashedStoreAndUpdate { }
 @end
 
 int main(int argc, const char *argv[]) {

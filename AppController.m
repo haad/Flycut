@@ -2793,11 +2793,18 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
                 }
                 break;
             case 'f':
-                [flycutOperator toggleToFromFavoritesStore];
-                [bezel setColor:[flycutOperator favoritesStoreIsSelected]];
-                [self updateBezel];
-                [self hideBezel];
-                [self showBezel];
+                {
+                    // Ordering the key bezel out can end its Favorites view on the way
+                    // (-windowDidResignKey: -> -hideApp), so pick the list first and
+                    // switch to it once the bezel is hidden.
+                    BOOL showFavorites = ![flycutOperator favoritesStoreIsSelected];
+                    [self hideBezel];
+                    if ( [flycutOperator favoritesStoreIsSelected] != showFavorites )
+                        [flycutOperator toggleToFromFavoritesStore];
+                    [bezel setColor:[flycutOperator favoritesStoreIsSelected]];
+                    [self updateBezel];
+                    [self showBezel];
+                }
                 break;
             case 'F':
                 if ( [flycutOperator saveFromStackToFavorites] )
@@ -2912,6 +2919,13 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(void)hideApp
 {
+	// The bezel's Favorites view ends with the bezel, however it closes: focus moved
+	// elsewhere (Cmd-, opening Preferences, a click while it is pinned) or the delayed
+	// hide after Shift-F or the copy-only key. Escape and a paste restore the history
+	// themselves. Left swapped in, the favorites stayed the current list: the menu, the
+	// search window and the next bezel showed them in place of the history.
+	if ( isBezelDisplayed )
+		[self restoreStashedStoreAndUpdate];
 	isBezelPinned = NO;
 	// Hiding the app tears down any open menu and the search window anyway, so clear both
 	// freeze flags here as a backstop.  Neither is meant to outlive its surface, and a
@@ -2924,6 +2938,11 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 - (void) applicationWillResignActive:(NSApplication *)app; {
 	// This should be hidden anyway, but just in case it's not.
+	// Only the bezel's Favorites view ends here: the Favorites stepper swaps the
+	// favorites in for its check and may be waiting in its "Resize Stack" alert, and
+	// restoring under it would apply the favorites limit to the history.
+	if ( isBezelDisplayed )
+		[self restoreStashedStoreAndUpdate];
 	[self hideBezel];
 }
 
