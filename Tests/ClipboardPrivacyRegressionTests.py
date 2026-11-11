@@ -74,12 +74,21 @@ class ClipboardPrivacyRegressionTests(unittest.TestCase):
         self.run_case("reveal-worker")
 
     def test_debug_menu_log_omits_clipping_previews(self) -> None:
-        method = method_body(APP_CONTROLLER.read_text(), "- (void)updateMenuContaining:")
-        log_calls = re.findall(r"\b(?:DLog|NSLog)\s*\((.*?)\);", method, re.S)
-        self.assertTrue(log_calls, "expected the menu rebuild to keep its count log")
+        # The status menu's clipping rows (-updateMenuContaining: with its count log) were
+        # replaced by the menu-bar list. Neither its paste path in AppController nor the
+        # list itself may log clipping text.
+        source = APP_CONTROLLER.read_text()
+        self.assertNotIn("updateMenuContaining:", source)
+        texts = [method_body(source, signature) for signature in (
+            "- (void)listController:(FlycutListController *)controller didChooseClipping:(FlycutClipping *)clipping inList:(FlycutList)list\n{",
+            "-(bool)pasteClipping:(FlycutClipping *)clipping fromList:(FlycutList)list\n{",
+            "-(bool)pasteFavoriteAtPosition:(int)position\n{")]
+        texts += [(ROOT / "UI/FlycutListPanel.m").read_text(), (ROOT / "FlycutClipList.m").read_text()]
+        log_calls = [call for text in texts for call in re.findall(r"\b(?:DLog|NSLog)\s*\((.*?)\);", text, re.S)]
+        self.assertTrue(log_calls, "expected the list selection to keep its \"nothing pasted\" log")
         for call in log_calls:
-            self.assertNotIn("returnedDisplayStrings", call)
-            self.assertNotIn("clipStrings", call)
+            for token in ("contents", "displayString", "richData", "stringValue", "title", "search"):
+                self.assertNotIn(token, call)
 
     def test_fixture_uses_no_real_defaults_or_application_support(self) -> None:
         symbols = subprocess.check_output(["/usr/bin/nm", "-u", str(self.binary)], text=True)

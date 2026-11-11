@@ -219,6 +219,7 @@ static NSArray *FCFakeSearchPath(NSSearchPathDirectory directory, NSSearchPathDo
     BOOL isMenuOpen;
     BOOL isSearchWindowDisplayed;
     BOOL isBezelDisplayed;
+    id listController;   // -clippingWasAdded tells the menu-bar list; this harness has none
     NSUInteger clipboardCaptureEpoch;
     dispatch_queue_t clipboardReadQueue;
     id currentPasteTransaction;

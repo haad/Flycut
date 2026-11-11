@@ -378,21 +378,8 @@ static void Settle(void) {
 - (NSString *)stringValue { return @""; }
 - (NSInteger)selectedRow { return 0; }
 @end
-@interface FixtureMenu : NSObject
-- (NSInteger)indexOfItem:(id)item;
-@end
-@implementation FixtureMenu
-- (NSInteger)indexOfItem:(id)item { (void)item; return 0; }
-@end
-// An NSMenuItem: #7 resolves the clicked clipping from the item's represented object.
-@interface FixtureMenuItem : NSMenuItem {
-    FixtureMenu *fixtureMenu;
-}
-- (id)menu;
-@end
-@implementation FixtureMenuItem
-- (id)menu { if (!fixtureMenu) fixtureMenu = [[FixtureMenu alloc] init]; return fixtureMenu; }
-@end
+// The menu-bar list (its rows stand for their clippings) is only named here.
+@class FlycutListController;
 
 // The AppController image paste and capture methods, verbatim, on a harness with
 // the same instance variable names. Unrelated UI methods are recorded stubs.
@@ -401,7 +388,7 @@ static void Settle(void) {
 #define NSURLSession FixtureURLSession
 #define NSURLSessionConfiguration FixtureURLSessionConfiguration
 #define dispatch_get_global_queue FixtureGlobalQueue
-// OS boundary: #7 beeps when a menu selection cannot be pasted; record it instead.
+// OS boundary: #7 beeps when a list selection cannot be pasted; record it instead.
 static int fixtureBeeps;
 static void FixtureBeep(void) { fixtureBeeps++; }
 #define NSBeep FixtureBeep
@@ -430,6 +417,7 @@ static void FixtureBeep(void) { fixtureBeeps++; }
     BOOL isMenuOpen;
     BOOL isSearchWindowDisplayed;
     BOOL isBezelDisplayed;
+    id listController;   // -clippingWasAdded tells the menu-bar list; this harness has none
     NSUInteger clipboardCaptureEpoch;
     dispatch_queue_t clipboardReadQueue;
     FixturePasteboard *jcPasteboard;
@@ -443,6 +431,7 @@ static void FixtureBeep(void) { fixtureBeeps++; }
     NSMutableArray *scheduled;   // selectors passed to -performSelector:withObject:afterDelay:
     NSMutableArray *calls;       // stubbed UI methods that ran
 }
+- (void)listController:(FlycutListController *)controller didChooseClipping:(FlycutClipping *)clipping inList:(FlycutList)list;
 @end
 @implementation ImageHarness
 #include "AppControllerImageMethods.inc"
@@ -900,19 +889,19 @@ static void CaseLostImageBytesAreNotPasted(void) {
     NSData *png = PNGData(24, 25, 26);
     CHECK(AddImage(op, png, NSPasteboardTypePNG), "image captured");
     ImageHarness *harness = NewHarness(op);
-    FixtureMenuItem *menuItem = [[[FixtureMenuItem alloc] init] autorelease];
     harness->searchResults = [@[@"[Image]"] retain];
-    // #7 resolves menu and search rows by clipping identity.
+    // #7 resolves search rows by clipping identity; a row of the menu-bar list stands
+    // for its clipping.
     harness->searchResultClippings = [@[[op clippingAtPosition:0]] retain];
-    [menuItem setRepresentedObject:@[@0, [op clippingAtPosition:0]]];
+    FlycutClipping *listRow = [op clippingAtPosition:0];
 
     // Control: with its bytes available the image is placed and pasted on every path.
     BeginSelection(harness); [harness pasteFromStack];
     CHECK(ScheduledPaste(harness), "control: bezel pastes a stored image");
     CHECK([[harness->jcPasteboard dataForType:NSPasteboardTypePNG] isEqualToData:png], "control: image placed on the clipboard");
     [harness->scheduled removeAllObjects];
-    [harness processMenuClippingSelection:menuItem];
-    CHECK(ScheduledPaste(harness), "control: menu selection pastes a stored image");
+    [harness listController:nil didChooseClipping:listRow inList:FlycutListHistory];
+    CHECK(ScheduledPaste(harness), "control: menu-bar list selection pastes a stored image");
     [harness->scheduled removeAllObjects];
     BeginSelection(harness); [harness searchWindowItemSelected:nil];
     CHECK(ScheduledPaste(harness), "control: search window pastes a stored image");
@@ -931,8 +920,8 @@ static void CaseLostImageBytesAreNotPasted(void) {
     CHECK([harness->scheduled containsObject:@"hideApp"] || [harness->calls containsObject:@"hideApp"],
           "bezel still closes");
     [harness->scheduled removeAllObjects];
-    [harness processMenuClippingSelection:menuItem];
-    CHECK(!ScheduledPaste(harness), "menu synthesized Paste for an image that could not be placed");
+    [harness listController:nil didChooseClipping:listRow inList:FlycutListHistory];
+    CHECK(!ScheduledPaste(harness), "menu-bar list synthesized Paste for an image that could not be placed");
     [harness->scheduled removeAllObjects];
     BeginSelection(harness); [harness searchWindowItemSelected:nil];
     CHECK(!ScheduledPaste(harness), "search window synthesized Paste for an image that could not be placed");

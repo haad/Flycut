@@ -222,6 +222,23 @@
     [self delegateEndUpdates];
 }
 
+-(NSArray *) clippingsSnapshot
+{
+	return [[jcList copy] autorelease];
+}
+
+-(void) restoreClippingsSnapshot:(NSArray *)clippings
+{
+	if ( clippings == nil )
+		return;
+	[self delegateBeginUpdates];
+	[jcList setArray:clippings];
+	modifiedSinceLastSaveStore = YES;
+	for ( int i = 0 ; i < (int)[jcList count] ; i++ )
+		[self delegateReloadClippingAtIndex:i];
+	[self delegateEndUpdates];
+}
+
 -(void) clippingMoveToTop:(int)index
 {
 	[self clippingMoveFrom:index To:0];

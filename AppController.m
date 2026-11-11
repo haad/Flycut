@@ -26,7 +26,14 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import "FlycutPasteKey.h"
+#import "FlycutListPanel.h"
 #import <Carbon/Carbon.h>
+
+@interface AppController () <FlycutListControllerDelegate>
+-(NSArray *)listCommandItems;
+-(bool)pasteClipping:(FlycutClipping *)clipping fromList:(FlycutList)list;
+-(bool)pasteFavoriteAtPosition:(int)position;
+@end
 
 @interface AppController ()
 -(void)updateRestoreDefaultButtons;
@@ -38,6 +45,9 @@
 // right of the control it belongs to.
 static const CGFloat FlycutRestoreArrowSide = 20.0;
 static const CGFloat FlycutRestoreArrowGap = 4.0;
+// The status item's button action that comes this soon after the mouse-down monitor
+// answered a press is that press again (seconds).
+static const NSTimeInterval kStatusItemSamePressInterval = 0.5;
 
 // What VoiceOver says about both hotkey fields (ShortcutRecorder has no
 // accessibility support of its own).
@@ -376,11 +386,6 @@ static const NSInteger FlycutDisplayNumLowest = 5;
 -(NSString *)bezelCounterString;
 @end
 
-// Clipping items that -updateMenuContaining: has removed from the status menu. jcMenu is
-// their only owner (see the -release right after -insertItem: below), so they would be
-// deallocated at once - while AppKit may still be about to deliver a click for one of them.
-// Keeping the previous generation alive makes such a sender safe to inspect.
-static NSArray *sRetiredMenuClippingItems = nil;
 static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 
 @implementation AppController
@@ -399,7 +404,9 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 		// stored, a cleared field included, lives in the user domain and wins over this.
 		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:1],[NSNumber numberWithLong:NSEventModifierFlagControl|NSEventModifierFlagShift],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
 		@"ShortcutRecorder searchHotkey",
-		[NSNumber numberWithInt:10],
+		// "Display in menu": the height of the menu-bar list in rows (it lists every
+		// clipping and scrolls), capped to the screen.
+		[NSNumber numberWithInt:20],
 		@"displayNum",
 		[NSNumber numberWithInt:40],
 		@"displayLen",
@@ -602,14 +609,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	[self updateMenuBarIcon];
     [jcMenu setDelegate:self];
 	[self configureStatusItemInteraction];
-    jcMenuBaseItemsCount = [[[[jcMenu itemArray] reverseObjectEnumerator] allObjects] count];
     [statusItem setEnabled:YES];
-
-    // If our preferences indicate that we are saving, we may have loaded the dictionary from the
-    // saved plist and should update the menu.
-	if ( [[NSUserDefaults standardUserDefaults] integerForKey:@"savePreference"] >= 1 ) {
-        [self updateMenu];
-	}
 
 	// Build our listener timer
 	NSDate *oneSecondFromNow = [NSDate dateWithTimeIntervalSinceNow:1.0];
@@ -690,6 +690,15 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 -(IBAction)statusItemButtonPressed:(id)sender
 {
     (void)sender;
+    // The button's action: VoiceOver's press, or a press the mouse-down monitor did not see.
+    // One press is answered once: right after the monitor answered a press, the action is
+    // that press arriving a second time.
+    NSTimeInterval now = [[NSProcessInfo processInfo] systemUptime];
+    if (now - statusItemMouseDownHandledAt < kStatusItemSamePressInterval)
+        return;
+    // A press that closed the list on its way here (key focus, the menu bar) leaves it closed.
+    if ([listController closeForStatusItemPressAt:now])
+        return;
     [self showStatusItemMenu];
 }
 
@@ -722,7 +731,25 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
         return;
     }
 
+    // A press that found the list open is the second click and closes it, as with a menu.
+    // The press may have closed the list before it got here: on macOS 27 the menu bar
+    // (MenuBarAgent) hands the press to Flycut about 50 ms after the list closed (system
+    // log of build 9's sight test), and the panel may lose key focus to it. Such a close within a moment of the press is
+    // this press's; it must not open the list again (-closeForStatusItemPressAt:).
+    NSTimeInterval pressTime = isMouseDown ? [event timestamp] : [[NSProcessInfo processInfo] systemUptime];
+    if ([listController closeForStatusItemPressAt:pressTime]) {
+        if (isMouseDown)
+            statusItemMouseDownHandledAt = [[NSProcessInfo processInfo] systemUptime];
+        return;
+    }
+    BOOL listWasOpen = [listController isOpen];
     [self showStatusItemMenu];
+    // Like a menu: the list follows the pressed button, so press, drag and release on a
+    // row chooses it.
+    if (isMouseDown && !listWasOpen && [listController isOpen])
+        [listController trackMouseFromEvent:event];
+    if (isMouseDown)
+        statusItemMouseDownHandledAt = [[NSProcessInfo processInfo] systemUptime];
 }
 
 -(void)showStatusItemMenu
@@ -730,10 +757,22 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     if (statusItem == nil || jcMenu == nil)
         return;
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    [statusItem popUpStatusItemMenu:jcMenu];
-#pragma clang diagnostic pop
+    // A list in a non-activating panel instead of the status menu: views inside an
+    // NSMenu get no keyboard events, and the list needs keys (search, Cmd-Delete,
+    // Cmd-Z) without activating Flycut, so pasting still goes to the user's application.
+    if (listController == nil)
+        listController = [[FlycutListController alloc] initWithOperator:flycutOperator delegate:self];
+    // A second click on the status item closes the list, as with a menu.
+    if ([listController isOpen]) {
+        [listController close];
+        return;
+    }
+    [listController setCommandItems:[self listCommandItems]];
+    // "Display in menu" is the list's height in rows; the list holds every clipping.
+    [listController setVisibleRows:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"]];
+    NSStatusBarButton *button = [statusItem button];
+    NSRect anchor = [[button window] convertRectToScreen:[button convertRect:[button bounds] toView:nil]];
+    [listController openBelowRect:anchor onScreen:[[button window] screen]];
 }
 
 -(void)updateMenuBarIcon
@@ -1046,12 +1085,6 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     menuOpenEvent = nil;
 }
 
-- (void)activateSearchBox
-{
-    menuFirstResponder = [[searchBox window] firstResponder]; // So we can return control to normal menu function if the user presses an arrow key.
-    [[searchBox window] makeFirstResponder:searchBox]; // So the search box works.
-}
-
 -(IBAction) activateAndOrderFrontStandardAboutPanel:(id)sender
 {
     [self cancelPendingPasteCompletion];
@@ -1126,11 +1159,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 
 	if ( isPrimaryStore )
 	{
-		if ( setRemember == oldRemember )
-		{
-			[self updateMenu];
-		}
-		else if ( setRemember < oldRemember )
+		if ( setRemember < oldRemember )
 		{
 			// Trim down the number displayed in the menu if it is greater than the new
 			// number to remember.
@@ -1138,7 +1167,6 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 				if ( setRemember < [[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] ) {
 					[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithInt:setRemember]
 															 forKey:@"displayNum"];
-					[self updateMenu];
 				}
 			}
 		}
@@ -1166,7 +1194,8 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 
 -(IBAction) setDisplayNumPref:(id)sender
 {
-	[self updateMenu];
+	// Nothing to rebuild: the menu-bar list reads "Display in menu" each time it opens.
+	(void)sender;
 }
 
 -(NSTextField*) preferencePanelSliderLabelForText:(NSString*)text aligned:(NSTextAlignment)alignment andFrame:(NSRect)frame
@@ -1368,7 +1397,7 @@ static NSString *FlycutGeneralRestoreLabel(NSString *key)
 {
 	NSDictionary *labels = @{
 		@"rememberNum": @"Restore default number of clippings to remember",
-		@"displayNum": @"Restore default number of clippings in the menu",
+		@"displayNum": @"Restore default number of rows in the menu",
 		@"favoritesRememberNum": @"Restore default number of favorites to remember",
 		@"skipPboardTypesList": @"Restore default pasteboard types",
 		@"skipPasswordLengthsList": @"Restore default password lengths",
@@ -1544,8 +1573,6 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		if ([view isKindOfClass:[NSPopUpButton class]] && [keyPath isEqualToString:@"values.savePreference"])
 			FlycutSetAccessibilityLabel((NSPopUpButton *)view, @"Save");
 	}
-	// The status menu's search field; its menu item is titled "Search...".
-	FlycutSetAccessibilityLabel(searchBox, @"Search");
 }
 
 // The General pane comes from the NIB and is laid out with constraints. Each
@@ -2556,7 +2583,6 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
         if ([[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"]) {
             [flycutOperator getPasteFromIndex:position];
         }
-        [self updateMenu];
         return true;
     }
 
@@ -2567,7 +2593,6 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
         return false;
 
     [self addClipToPasteboard:content withRichData:richData];
-    [self updateMenu];
     return true;
 }
 
@@ -2730,46 +2755,11 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
     return YES;
 }
 
-/*" +fakeDownArrow synthesizes keyboard events for the down-arrow key. "*/
--(void)fakeDownArrow { [self fakeKey:@125 withCommandFlag:FALSE]; }
-
-/*" +fakeUpArrow synthesizes keyboard events for the up-arrow key. "*/
--(void)fakeUpArrow { [self fakeKey:@126 withCommandFlag:FALSE]; }
-
-// Perform the search and display updated results when the user types.
--(void)controlTextDidChange:(NSNotification *)aNotification
-{
-    NSString* search = [searchBox stringValue];
-    [self updateMenuContaining:search];
-}
-
-// Perform the search and display updated results when the search field performs its action.
--(IBAction)searchItems:(id)sender
-{
-    NSString* search = [searchBox stringValue];
-    [self updateMenuContaining:search];
-}
-
 // Catch keystrokes in the search field and look for arrows.
 -(BOOL)control:(NSControl *)control textView:(NSTextView *)fieldEditor doCommandBySelector:(SEL)commandSelector
 {
-    // Handle menu search box navigation
-    if (control == searchBox) {
-        if( commandSelector == @selector(moveUp:) )
-        {
-            [[searchBox window] makeFirstResponder:menuFirstResponder];
-            [self fakeUpArrow];
-            return YES;    // We handled this command; don't pass it on
-        }
-        if( commandSelector == @selector(moveDown:) )
-        {
-            [[searchBox window] makeFirstResponder:menuFirstResponder];
-            [self fakeDownArrow];
-            return YES;    // We handled this command; don't pass it on
-        }
-    }
     // Handle search window navigation
-    else if (control == searchWindowSearchField) {
+    if (control == searchWindowSearchField) {
         if( commandSelector == @selector(moveUp:) )
         {
             NSInteger currentRow = [searchWindowTableView selectedRow];
@@ -2813,7 +2803,7 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
     // tracking, and inserting a new clipping at the top of the store would make every row
     // jump down by one while the user is aiming at it. Correctness no longer depends on
     // this freeze - a selection is resolved by clipping identity, see
-    // -storePositionForMenuItem: - but the list should not move under the pointer.
+    // -pasteClipping:fromList: - but the list should not move under the pointer.
     // pbCount is left untouched so the change is still detected and captured once the menu
     // or search window closes (menuDidClose: fires a catch-up poll).
     if ( isMenuOpen || isSearchWindowDisplayed )
@@ -3063,7 +3053,6 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
             case NSDeleteCharacter:
                 if ( [flycutOperator clearItemAtStackPosition] ) {
                     [self updateBezel];
-                    [self updateMenu];
                 }
                 break;
             case NSDeleteFunctionKey: break;
@@ -3089,7 +3078,6 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
                     if ( success && ( modifiers & NSEventModifierFlagShift ) ) {
                         [flycutOperator clearItemAtStackPosition];
                         [self updateBezel];
-                        [self updateMenu];
                     }
 
                     [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
@@ -3113,7 +3101,6 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
                     [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
                     [self restoreStashedStoreAndUpdate];
                     [self updateBezel];
-                    [self updateMenu];
                 }
 
                 [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
@@ -3198,18 +3185,25 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	// The bezel's Favorites view ends with the bezel, however it closes: focus moved
 	// elsewhere (Cmd-, opening Preferences, a click while it is pinned) or the delayed
 	// hide after Shift-F or the copy-only key. Escape and a paste restore the history
-	// themselves. Left swapped in, the favorites stayed the current list: the menu, the
-	// search window and the next bezel showed them in place of the history.
+	// themselves. Left swapped in, the favorites stayed the current list: the search
+	// window and the next bezel showed them in place of the history.
 	if ( isBezelDisplayed )
 		[self restoreStashedStoreAndUpdate];
 	isBezelPinned = NO;
+	// A click on the status item while the bezel is shown opens the list, whose panel
+	// takes key focus from the bezel, and that ends up here (-windowDidResignKey:).
+	// Hiding Flycut would close the list again, and the list keeps capture frozen until
+	// it closes (-listControllerDidClose:), so both stay while it is open.
+	BOOL listIsOpen = [listController isOpen];
 	// Hiding the app tears down any open menu and the search window anyway, so clear both
 	// freeze flags here as a backstop.  Neither is meant to outlive its surface, and a
 	// stale one silently stops -pollPB: from capturing anything at all.
-	isMenuOpen = NO;
+	if ( ! listIsOpen )
+		isMenuOpen = NO;
 	isSearchWindowDisplayed = NO;
 	[self hideBezel];
-	[NSApp hide:self];
+	if ( ! listIsOpen )
+		[NSApp hide:self];
 }
 
 - (void) applicationWillResignActive:(NSApplication *)app; {
@@ -3307,7 +3301,6 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
     if ( choice == NSAlertFirstButtonReturn ) {
         [self restoreStashedStoreAndUpdate]; // Only clear the clipping store.  Never the favorites.
         [flycutOperator clearList];
-        [self updateMenu];
 		if ( [[NSUserDefaults standardUserDefaults] integerForKey:@"savePreference"] >= 1 ) {
 			[flycutOperator saveEngine];
 		}
@@ -3317,7 +3310,6 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 
 -(IBAction)mergeClippingList:(id)sender {
     [flycutOperator mergeList];
-    [self updateMenu];
 }
 
 // Cap a menu-item title to a consistent rendered width.
@@ -3331,7 +3323,8 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 // padded with trailing space. Bound the rendered width here so the menu width
 // stays consistent regardless of glyph width, using the same measure-and-trim
 // approach the bezel already applies to its source-app label in
-// -[BezelWindow setSource:].
+// -[BezelWindow setSource:]. The rows of the menu-bar list use it too
+// (-listController:titleForClipping:), so such a title ends where others do.
 - (NSString *)menuTitleFittingWidth:(NSString *)title
 {
 	// Headroom above the nominal displayLen-character width, so normal clippings
@@ -3366,189 +3359,118 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	return [fitted stringByAppendingString:@"…"];
 }
 
-- (void)updateMenu {
-    dispatch_async(dispatch_get_main_queue(), ^{
-    if ( !statusItem || !statusItem.isEnabled )
-        return;
-
-        [self updateMenuContaining:nil];
-        // Clear the search box whenever the is reason for updateMenu to be called, since the nil call will produce non-searched results.
-        [searchBox setStringValue:@""];
-        [[[searchBox cell] cancelButtonCell] performClick:self];
-    });
-}
-
-- (void)updateMenuContaining:(NSString*)search {
-	// Use GDC to prevent concurrent modification of the menu, since that would be messy.
-	dispatch_async(dispatch_get_main_queue(), ^{
-		[jcMenu setMenuChangedMessagesEnabled:NO];
-
-		int menuDisplayNum = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"];
-		BOOL filtering = ( nil != search && 0 != [search length] );
-
-		NSArray *returnedDisplayStrings = [flycutOperator previousDisplayStrings:menuDisplayNum containing:search];
-
-		// previousDisplayStrings: and previousIndexes: are both newest-first and element-wise
-		// aligned, so the store position of every row is known right here. Recording it now is
-		// what allows the selection to be resolved later without asking the menu where the
-		// clicked item sits and without re-reading the search box.
-		NSArray *returnedIndexes = filtering ? [flycutOperator previousIndexes:menuDisplayNum containing:search] : nil;
-
-		NSArray *menuItems = [[[jcMenu itemArray] reverseObjectEnumerator] allObjects];
-
-		NSArray *clipStrings = [[returnedDisplayStrings reverseObjectEnumerator] allObjects];
-
-		// Figure out if the number of menu items is changing and add or remove entries as necessary.
-		// If we remove all of them and add all new ones, the menu won't redraw if the count is unchanged, so just reuse them by changing their title.
-		int oldItems = [menuItems count]-jcMenuBaseItemsCount;
-		int newItems = [clipStrings count];
-        DLog(@"oldItems=%d, newItems=%d", oldItems, newItems);
-
-        // Hold on to the outgoing items for one generation instead of letting jcMenu drop
-        // their last reference, so that a click AppKit delivers after this rebuild still
-        // has a valid sender.
-        NSMutableArray *retiringItems = [NSMutableArray array];
-        for ( int i = 0; i < oldItems; i++ )
-        {
-            [retiringItems addObject:[jcMenu itemAtIndex:0]];
-            [jcMenu removeItemAtIndex:0];
-        }
-        [sRetiredMenuClippingItems release];
-        sRetiredMenuClippingItems = [[NSArray alloc] initWithArray:retiringItems];
-
-        for ( int i = 0; i < newItems; i++ )
-        {
-            // clipStrings is oldest-first (it was reversed above), everything coming from
-            // the store is newest-first.
-            int newestFirst = newItems - 1 - i;
-            int storePosition = newestFirst;
-            if ( filtering )
-            {
-                if ( newestFirst >= (int)[returnedIndexes count] )
-                    continue; // The store changed while the menu was being built.
-                storePosition = [[returnedIndexes objectAtIndex:newestFirst] intValue];
-            }
-
-            // Remember what the row stands for rather than where it sits: the clipping object
-            // itself is the identity, the position is only a hint that
-            // -storePositionForMenuItem: re-validates.
-            //
-            // The display string deliberately is NOT the identity: it is the first line
-            // truncated to displayLen, and short strings are tagged pointers, so two
-            // different clippings whose first lines happen to match compare pointer-equal.
-            FlycutClipping *clipping = [flycutOperator clippingAtPosition:storePosition];
-            if ( nil == clipping )
-                continue; // The store changed while the menu was being built.
-
-            NSMenuItem *item;
-            item = [[NSMenuItem alloc] initWithTitle:[self menuTitleFittingWidth:[clipStrings objectAtIndex:i]]
-                                              action:@selector(processMenuClippingSelection:)
-                                       keyEquivalent:@""];
-            [item setTarget:self];
-            [item setEnabled:YES];
-            // representedObject is a strong property, so the item keeps the clipping alive
-            // even if the store drops it in the meantime.
-            [item setRepresentedObject:[NSArray arrayWithObjects:
-                                        [NSNumber numberWithInt:storePosition],
-                                        clipping,
-                                        nil]];
-            if ([[clipStrings objectAtIndex:i] hasPrefix:@"[Image"]) {
-                NSImage *imgIcon = [NSImage imageNamed:NSImageNameQuickLookTemplate];
-                [imgIcon setSize:NSMakeSize(16, 16)];
-                [item setImage:imgIcon];
-            }
-            [jcMenu insertItem:item atIndex:0];
-            [item release];
-        }
-    });
-}
-
-// Works out which clipping a menu item stands for. The item carries the clipping itself
-// plus the store position it had when the menu was built; that position is only trusted
-// while the store still agrees with it. Returns -1 when the clipping can no longer be
-// found, in which case the caller must not paste anything.
-- (int)storePositionForMenuItem:(NSMenuItem *)item
+-(void) setPBBlockCount:(NSNumber *)newPBBlockCount
 {
-	id represented = [item representedObject];
-	if ( ! [represented isKindOfClass:[NSArray class]] || 2 != [(NSArray *)represented count] )
-		return -1;
-
-	id hintNumber = [(NSArray *)represented objectAtIndex:0];
-	id clipping = [(NSArray *)represented objectAtIndex:1];
-	if ( ! [hintNumber isKindOfClass:[NSNumber class]] || ! [clipping isKindOfClass:[FlycutClipping class]] )
-		return -1;
-
-	int hint = [hintNumber intValue];
-	int count = [flycutOperator jcListCount];
-
-	// The clipping object itself is the identity, so the position it happened to have when
-	// the menu was built is only a hint - checking it first keeps the common case O(1).
-	if ( hint >= 0 && hint < count && [flycutOperator clippingAtPosition:hint] == clipping )
-		return hint;
-
-	for ( int i = 0; i < count; i++ )
-		if ( [flycutOperator clippingAtPosition:i] == clipping )
-			return i;
-
-	// Reloading the store from disk builds new clipping objects, so fall back to clipping
-	// equality: identical text contents, or for an image the same image hash. Image
-	// clippings all have empty contents, so comparing contents alone would let a deleted
-	// image row paste whichever other image is listed.
-	for ( int i = 0; i < count; i++ )
-		if ( [(FlycutClipping *)clipping isEqual:[flycutOperator clippingAtPosition:i]] )
-			return i;
-
-	return -1;
+    [newPBBlockCount retain];
+    [pbBlockCount release];
+    pbBlockCount = newPBBlockCount;
 }
 
--(IBAction)processMenuClippingSelection:(id)sender
+#pragma mark - Menu-bar list
+
+// The commands below the list are the status menu's own command items from the nib
+// (everything after its first separator), so titles, actions and key equivalents stay
+// in one place, including the Pause/Resume item that -setupClipboardTrackingMenuItem
+// inserts.
+-(NSArray *)listCommandItems
+{
+	NSMutableArray *items = [NSMutableArray array];
+	BOOL afterFirstSeparator = NO;
+	for ( NSMenuItem *item in [jcMenu itemArray] ) {
+		if ( !afterFirstSeparator ) {
+			afterFirstSeparator = [item isSeparatorItem];
+			continue;
+		}
+		if ( ![item isHidden] )
+			[items addObject:item];
+	}
+	return items;
+}
+
+// Places the clipping of a list row on the pasteboard. The row carries the clipping
+// itself, so its position is looked up now (a capture may have moved it). The row's own
+// store is made the current one for the paste, whichever store the bezel shows (the same
+// temporary switch as -checkFavoritesRememberNumPref:), so both lists are ordered exactly
+// as the bezel orders them:
+// - a history row through #7's store-position path, as the status menu pasted, so with
+//   pasteMovesToTop it moves to the top of the history;
+// - a favorite as the bezel pastes the selected favorite (-pasteFavoriteAtPosition:); it
+//   keeps its place, as every favorite does on a paste.
+-(bool)pasteClipping:(FlycutClipping *)clipping fromList:(FlycutList)list
+{
+	int position = [flycutOperator indexOfClipping:clipping inList:list];
+	if ( position < 0 )
+		return false;
+	BOOL favorites = ( list == FlycutListFavorites );
+	BOOL switched = ( favorites != (BOOL)[flycutOperator favoritesStoreIsSelected] );
+	if ( switched )
+		[flycutOperator toggleToFromFavoritesStore];
+	bool pasted = favorites ? [self pasteFavoriteAtPosition:position] : [self pasteStorePositionAndUpdate:position];
+	if ( switched ) {
+		// Back to the store the bezel shows, with its own selection.
+		[flycutOperator toggleToFromFavoritesStore];
+		if ( isBezelDisplayed )
+			[self updateBezel];
+	}
+	return pasted;
+}
+
+// A favorite at a position of the current store (the favorites), pasted as
+// -pasteFromStack pastes the bezel's selected favorite: text through -getPasteFromIndex:,
+// which leaves the favorites in their order (pasteMovesToTop reorders the history only);
+// an image as pasteFromStack's image branch does.
+-(bool)pasteFavoriteAtPosition:(int)position
+{
+	FlycutClipping *clipping = [flycutOperator clippingAtIndex:position];
+	if ( clipping == nil )
+		return false;
+	if ( [clipping isImageClipping] )
+		return [self addImageClipToPasteboard:clipping];
+	NSDictionary *richData = [flycutOperator getRichDataFromIndex:position];
+	NSString *content = [flycutOperator getPasteFromIndex:position];
+	if ( content == nil )
+		return false;
+	[self addClipToPasteboard:content withRichData:richData];
+	return true;
+}
+
+- (NSString *)listController:(FlycutListController *)controller titleForClipping:(FlycutClipping *)clipping
+{
+	return [self menuTitleFittingWidth:[clipping displayString]];
+}
+
+// A list row was chosen. It replaces the click handler of the old status menu's
+// clipping rows and works the same way: copy the clipping, or with "menuSelectionPastes"
+// paste it into the application that is frontmost now, through #7's paste transaction.
+- (void)listController:(FlycutListController *)controller didChooseClipping:(FlycutClipping *)clipping inList:(FlycutList)list
 {
 	BOOL shouldPasteImmediately = [[NSUserDefaults standardUserDefaults] boolForKey:@"menuSelectionPastes"];
 	FCPasteTransaction *transaction = nil;
 
-	// Any new menu selection changes the pasteboard and therefore invalidates older
-	// delayed paste callbacks, including when this selection is configured as copy-only.
+	// A new selection changes the pasteboard and invalidates older delayed paste callbacks.
 	[self cancelPendingPasteCompletion];
-
 	if ( shouldPasteImmediately ) {
-		// Capture the target before the status-menu action finishes. A delayed global Cmd-V
-		// could otherwise follow an unrelated focus change into the wrong application.
+		// The list never activates Flycut, so the frontmost application is still the one
+		// the user works in. Bind the paste to it now.
 		[self rememberFrontmostApplicationForPaste];
 		transaction = [currentPasteTransaction retain];
 	}
 
-	// Never derive the selection from the item's position in the menu. -updateMenuContaining:
-	// runs on the main queue via dispatch_async and replaces every clipping item, which can
-	// happen between the click and the delivery of this action. The previous code did
-	//     int index = [[sender menu] indexOfItem:sender];
-	// and an item that had just been removed from the menu answers nil to -menu, so the
-	// message to nil returned 0 - silently pasting the newest clipping instead of the one the
-	// user clicked. Resolving by identity makes a rebuild in that window harmless.
-	int position = -1;
-	if ( [sender isKindOfClass:[NSMenuItem class]] )
-		position = [self storePositionForMenuItem:(NSMenuItem *)sender];
-
-	bool pasted = ( position >= 0 ) ? [self pasteStorePositionAndUpdate:position] : false;
-
+	bool pasted = [self pasteClipping:clipping fromList:list];
 	if ( ! pasted ) {
-		// Log without any clipping contents, so a "nothing happened" report can be told
-		// apart from a wrong paste later on.
-		NSLog(@"processMenuClippingSelection: unresolved menu item (position=%d, item=%@) - nothing pasted",
-		      position,
-		      ( [sender isKindOfClass:[NSMenuItem class]] && nil != [(NSMenuItem *)sender menu] ) ? @"still in menu" : @"detached");
+		NSLog(@"List selection: the clipping is no longer listed - nothing pasted");
 		NSBeep(); // Pasting some other clipping would be worse than pasting nothing at all.
 	}
 
 	if ( shouldPasteImmediately ) {
 		if ( pasted && transaction != nil ) {
 			[self performSelector:@selector(hideAppForPasteTransaction:)
-					 withObject:transaction
-					 afterDelay:0.2];
+					   withObject:transaction
+					   afterDelay:0.2];
 			[self performSelector:@selector(completePasteInRememberedApplication:)
-					 withObject:transaction
-					 afterDelay:0.5];
+					   withObject:transaction
+					   afterDelay:0.5];
 		} else {
-			// Hide either way, so focus returns to the application the user was working in.
 			[self performSelector:@selector(hideApp) withObject:nil];
 			[self clearPasteTransactionIfCurrent:transaction];
 		}
@@ -3556,11 +3478,47 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	[transaction release];
 }
 
--(void) setPBBlockCount:(NSNumber *)newPBBlockCount
+- (void)listController:(FlycutListController *)controller didChooseCommand:(NSMenuItem *)item
 {
-    [newPBBlockCount retain];
-    [pbBlockCount release];
-    pbBlockCount = newPBBlockCount;
+	SEL action = [item action];
+	if ( action == NULL )
+		return;
+	id target = [item target];
+	if ( target != nil ) {
+		if ( [target respondsToSelector:action] )
+			[target performSelector:action withObject:item];
+	} else {
+		[NSApp sendAction:action to:nil from:item];
+	}
+}
+
+- (void)listControllerDidOpen:(FlycutListController *)controller
+{
+	// The status menu's freeze: no capture while the list is open (see -pollPB:).
+	[self menuWillOpen:jcMenu];
+	[[statusItem button] setHighlighted:YES];
+}
+
+- (void)listControllerDidClose:(FlycutListController *)controller
+{
+	[[statusItem button] setHighlighted:NO];
+	// Resumes capture and picks up what was copied while the list was open.
+	[self menuDidClose:jcMenu];
+}
+
+// The status item's frame on screen, up to the top edge of its screen: a press at the very
+// top of the screen above the button hits the status item too.
+- (NSRect)statusItemFrameForListController:(FlycutListController *)controller
+{
+	NSStatusBarButton *button = [statusItem button];
+	NSWindow *window = [button window];
+	if ( button == nil || window == nil )
+		return NSZeroRect;
+	NSRect frame = [window convertRectToScreen:[button convertRect:[button bounds] toView:nil]];
+	NSScreen *screen = [window screen];
+	if ( screen != nil && NSMaxY([screen frame]) > NSMaxY(frame) )
+		frame.size.height = NSMaxY([screen frame]) - NSMinY(frame);
+	return frame;
 }
 
 -(void)addClipToPasteboard:(NSString*)pbFullText
@@ -3899,34 +3857,25 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 // position has been moved to follow the user's selection across that change.
 - (void)clippingWasAdded
 {
-	[self updateMenu];
-
 	// The store redraws the bezel from inside its own insert, by way of -endUpdates, which is
 	// before the stack position has been settled.  Left at that, the bezel would show the
 	// neighbour of the clipping a paste would actually deliver.  Redraw now that it is settled.
 	if ( isBezelDisplayed )
 		[self updateBezel];
+	// A capture that was already being read when the menu-bar list opened lands while it is
+	// open (capture is frozen otherwise): show it there too.
+	[listController storesDidChange];
 }
 
 - (void)beginUpdates {
 	needBezelUpdate = NO;
-	needMenuUpdate = NO;
 }
 
 - (void)endUpdates {
 	DLog(@"ending updates");
 	if ( needBezelUpdate && isBezelDisplayed )
 		[self updateBezel];
-	if ( needMenuUpdate )
-	{
-		DLog(@"launching updateMenu");
-		// Timers attach to the run loop of the process, which isn't present on all processes, so we must dispatch to the main queue to ensure we have a run loop for the timer.
-		dispatch_async(dispatch_get_main_queue(), ^{
-			// Menu updates need to be in NSRunLoopCommonModes to reliably happen.
-			[[NSRunLoop currentRunLoop] performSelector:@selector(updateMenu) target:self argument:nil order:0 modes:[NSArray arrayWithObject:NSRunLoopCommonModes]];
-		});
-	}
-	needBezelUpdate = needMenuUpdate = NO;
+	needBezelUpdate = NO;
 }
 
 - (void)insertClippingAtIndex:(int)index {
@@ -3949,11 +3898,11 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 - (void)noteChangeAtIndex:(int)index {
 	// Always give bezel update, since the count may need updating and the possibility of concurrent user bezel navigation and store changes make need detection risky.
 	needBezelUpdate = YES;
-	if ( index < [[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] )
-		needMenuUpdate = YES;
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
+	// Closing the list ends its session: image files of rows deleted there go now.
+	[listController close];
 	[flycutOperator applicationWillTerminate];
 	//Unregister our hot keys (not required)
 	[[SGHotKeyCenter sharedCenter] unregisterHotKey: mainHotKey];
@@ -4139,8 +4088,8 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	// An in-flight capture may insert into the store after this method returns.
 	NSMutableArray *titles = [NSMutableArray array];
 	NSMutableArray *clippings = [NSMutableArray array];
-	NSArray *indexes = [flycutOperator previousIndexes:
-		[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:searchText];
+	// Every match: "Display in menu" is the menu-bar list's height, not a result limit.
+	NSArray *indexes = [flycutOperator previousIndexes:[flycutOperator jcListCount] containing:searchText];
 	for (NSNumber *index in indexes) {
 		FlycutClipping *clipping = [flycutOperator clippingAtPosition:[index intValue]];
 		if (clipping != nil) {
@@ -4308,8 +4257,7 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	[searchRecorder release];
 	[searchWindow release]; // This will release its subviews automatically
 	[searchResults release];
-	[sRetiredMenuClippingItems release];
-	sRetiredMenuClippingItems = nil;
+	[listController release];
 	[super dealloc];
 }
 

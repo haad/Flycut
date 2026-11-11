@@ -12,11 +12,11 @@ FIXTURE = r'''
 #import <objc/runtime.h>
 #import "AppController.h"
 #import "FlycutImageStore.h"
+#import "FlycutListPanel.h"
 @interface AppController (ImageTransactionTest)
 - (void)hitMainHotKey:(id)hotKey;
 - (void)metaKeysReleased;
 - (void)processBezelKeyDown:(NSEvent *)event;
-- (void)processMenuClippingSelection:(id)sender;
 @end
 static int beeps;
 void FCTestNSBeep(void) { beeps++; }
@@ -104,6 +104,12 @@ static FlycutClipping *ImageClipping(NSString *hash, NSString *type) {
 // clippings are plain text, so there is none.
 - (NSDictionary *)getRichDataFromStackPosition { return nil; }
 - (NSDictionary *)getRichDataFromIndex:(int)index { (void)index; return nil; }
+// The menu-bar list addresses its rows by clipping identity.
+- (int)indexOfClipping:(FlycutClipping *)clipping inList:(FlycutList)list {
+    NSUInteger i = list == FlycutListHistory ? [self.clippings indexOfObjectIdenticalTo:clipping] : NSNotFound;
+    return i == NSNotFound ? -1 : (int)i;
+}
+- (bool)favoritesStoreIsSelected { return NO; }
 @end
 
 @interface ImageController : AppController
@@ -193,11 +199,11 @@ int main(int argc, const char **argv) { @autoreleasepool {
 
     if ([mode isEqual:@"menu-image-deleted"]) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"menuSelectionPastes"];
-        NSMenuItem *item = [[[NSMenuItem alloc] initWithTitle:@"[Image 2x2]" action:nil keyEquivalent:@""] autorelease];
-        [item setRepresentedObject:@[@0, op.clippings[0]]];
+        // A row of the menu-bar list stands for its clipping.
+        FlycutClipping *clicked = [[op.clippings[0] retain] autorelease];
         // The clicked image is gone; a different image (equal empty contents) is now listed.
         op.clippings = [NSMutableArray arrayWithObject:ImageClipping(@"B", NSPasteboardTypePNG)];
-        [c processMenuClippingSelection:item];
+        [(id<FlycutListControllerDelegate>)c listController:nil didChooseClipping:clicked inList:FlycutListHistory];
     } else {
         [c hitMainHotKey:nil];
         [c metaKeysReleased];

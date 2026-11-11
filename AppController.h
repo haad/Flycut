@@ -22,6 +22,7 @@
 
 @class SGHotKey;
 @class FlycutClipping;
+@class FlycutListController;
 
 @interface AppController : NSResponder <NSMenuDelegate, NSApplicationDelegate, FlycutStoreDelegate, FlycutOperatorDelegate, BezelWindowDelegate> {
     BezelWindow					*bezel;
@@ -57,6 +58,8 @@
     // Status item -- the little icon in the menu bar
     NSStatusItem *statusItem;
     id statusItemMouseDownMonitor;
+    // When the mouse-down monitor last finished with a press (seconds since startup).
+    NSTimeInterval statusItemMouseDownHandledAt;
     NSMenuItem *clipboardTrackingMenuItem;
     NSButton *menuIconCustomColorsCheckbox;
     NSColorWell *menuIconActiveColorWell;
@@ -73,9 +76,11 @@
     IBOutlet NSButton *autoSaveToLocationButton;
     // The menu attatched to same
     IBOutlet NSMenu *jcMenu;
-    int jcMenuBaseItemsCount;
+    // The list the status item opens (search, favorites, history, commands).
+    FlycutListController *listController;
+    // The search field of the status menu in MainMenu.nib. The menu-bar list has its own;
+    // the outlet stays because loading the nib sets it.
     IBOutlet NSSearchField *searchBox;
-    NSResponder *menuFirstResponder;
     dispatch_queue_t clipboardReadQueue;
     NSEvent *menuOpenEvent;
     IBOutlet NSSlider * heightSlider;
@@ -96,7 +101,6 @@
 	NSDictionary *standardPreferences;
     int jcDisplayNum;
 	BOOL needBezelUpdate;
-	BOOL needMenuUpdate;
 }
 
 // Basic functionality
@@ -109,9 +113,7 @@
 -(void) fakeCommandV;
 -(IBAction)clearClippingList:(id)sender;
 -(IBAction)mergeClippingList:(id)sender;
--(void)controlTextDidChange:(NSNotification *)aNotification;
 -(BOOL)control:(NSControl *)control textView:(NSTextView *)fieldEditor doCommandBySelector:(SEL)commandSelector;
--(IBAction)searchItems:(id)sender;
 
 // Hotkey related
 -(void)hitMainHotKey:(SGHotKey *)hotKey;
@@ -137,8 +139,6 @@
 -(void) windowDidResignKey:(NSNotification *)notification;
 
 // Menu related
--(void) updateMenu;
--(IBAction) processMenuClippingSelection:(id)sender;
 -(IBAction) activateAndOrderFrontStandardAboutPanel:(id)sender;
 
 // Preference related

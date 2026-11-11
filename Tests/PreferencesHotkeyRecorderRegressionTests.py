@@ -203,7 +203,7 @@ static NSDictionary *GeneralLabels(void)
 {
     return @{
         @"rememberNum": @"Restore default number of clippings to remember",
-        @"displayNum": @"Restore default number of clippings in the menu",
+        @"displayNum": @"Restore default number of rows in the menu",
         @"favoritesRememberNum": @"Restore default number of favorites to remember",
         @"skipPboardTypesList": @"Restore default pasteboard types",
         @"skipPasswordLengthsList": @"Restore default password lengths",

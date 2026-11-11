@@ -177,6 +177,11 @@ static FCApplication *testApplication;
 #define NSApp testApplication
 #define DLog(...) do {} while (0)
 
+// -hideApp leaves Flycut shown while the menu-bar list is open; this harness has none.
+@interface FCNoList : NSObject
+- (BOOL)isOpen;
+@end
+
 @interface AppController : NSObject {
     BOOL hasShownAccessibilityExplanationThisSession;
     // -hideApp also clears the menu/search capture freeze flags.
@@ -186,6 +191,7 @@ static FCApplication *testApplication;
     BezelWindow *bezel;
     BOOL isBezelDisplayed;
     BOOL isBezelPinned;
+    FCNoList *listController;
 }
 - (void)openAccessibilitySettings;
 - (void)requestAccessibilityWithPrompt;

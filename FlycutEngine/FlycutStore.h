@@ -96,6 +96,11 @@
 // Replace the rich representations of a text clipping; returns whether they changed
 -(bool) setRichData:(NSDictionary *)richData forClippingAtPosition:(int)index;
 
+// The clipping objects in list order (newest first), as an immutable copy.
+-(NSArray *) clippingsSnapshot;
+// Puts back an earlier -clippingsSnapshot (undo). Nothing is deleted or exported.
+-(void) restoreClippingsSnapshot:(NSArray *)clippings;
+
 // Delete a clipping
 -(void) clearItem:(int)index;
 

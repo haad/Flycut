@@ -28,15 +28,18 @@ ENGINE_SOURCES = ("FlycutEngine/FlycutClipping.m", "FlycutEngine/FlycutStore.m",
 # AppController methods compiled into the fixture harness, by selector.
 APP_METHODS = ("setPBBlockCount:", "addClipToPasteboard:", "addImageClipToPasteboard:", "pasteFromStack",
                # #7 replaced -pasteIndexAndUpdate: by the store-position variant.
-               "pasteStorePositionAndUpdate:", "processMenuClippingSelection:", "searchWindowItemSelected:",
+               "pasteStorePositionAndUpdate:", "searchWindowItemSelected:",
+               # The status item's menu-bar list replaced -processMenuClippingSelection:.
+               "listController:(FlycutListController *)controller didChooseClipping:",
+               "pasteClipping:(FlycutClipping *)clipping fromList:", "pasteFavoriteAtPosition:",
                "pollPB:", "animatedGifURLFromPasteboard", "downloadAndCaptureGIFFromURL:")
 # Helpers that only exist once the image capture fix is applied; optional so the
 # regression also compiles against the pre-fix source.
 OPTIONAL_APP_METHODS = ("isImageCaptureCurrentForGeneration:",
                         # #4: text is written with its rich data through this variant.
                         "addClipToPasteboard:(NSString*)pbFullText withRichData:",
-                        # #7's paste transaction and identity-based row resolution.
-                        "storePositionForMenuItem:", "rememberFrontmostApplicationForPaste",
+                        # #7's paste transaction.
+                        "rememberFrontmostApplicationForPaste",
                         "pasteTransactionIsCurrent:", "clearPasteTransactionIfCurrent:",
                         "finishPasteTransactionKeepingSelection:", "clearRememberedPasteTarget",
                         "cancelPendingPasteCompletion", "snapshotPasteboardItems",

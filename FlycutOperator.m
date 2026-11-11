@@ -24,6 +24,9 @@
 @implementation FlycutOperator {
 	NSDateFormatter *dateFormatterForFilename;
 	NSDateFormatter *dateFormatterForDirectory;
+	// Non-nil while the menu-bar list is open: image hashes whose files are deleted
+	// only when it closes, so an undo there still finds the image.
+	NSMutableSet *deferredImageDeletions;
 }
 
 - (id)init
@@ -703,7 +706,10 @@
     FlycutClipping *clipping = [(FlycutStore *)store clippingAtPosition:index];
     if ([clipping isImageClipping]) {
         if (![self isImageHashReferencedElsewhere:[clipping imageHash] excludingStore:(FlycutStore *)store atIndex:index]) {
-            [[FlycutImageStore sharedStore] deleteImageForHash:[clipping imageHash]];
+            if (deferredImageDeletions != nil)
+                [deferredImageDeletions addObject:[clipping imageHash]];
+            else
+                [[FlycutImageStore sharedStore] deleteImageForHash:[clipping imageHash]];
         }
     }
 }
@@ -1058,6 +1064,165 @@
 	if ( self.delegate && [self.delegate respondsToSelector:@selector(alertWithMessageText:informationText:buttonsTexts:)] )
 		return [self.delegate alertWithMessageText:message informationText:information buttonsTexts:buttons];
 	return nil;
+}
+
+#pragma mark - Menu-bar list
+
+// The history store, wherever it is: while the bezel shows the favorites, clippingStore
+// IS the favorites store and the history is stashed (see -saveEngine).
+-(FlycutStore *)historyStore
+{
+	return ( NULL != stashedStore ) ? stashedStore : clippingStore;
+}
+
+-(FlycutStore *)storeForList:(FlycutList)list
+{
+	return ( list == FlycutListFavorites ) ? favoritesStore : [self historyStore];
+}
+
+-(NSArray *)clippingsInList:(FlycutList)list matching:(NSString *)search
+{
+	FlycutStore *store = [self storeForList:list];
+	if ( nil == search || 0 == [search length] )
+		return [store clippingsSnapshot];
+	// The search box's matching: text contents, or an image's source app and label.
+	NSMutableArray *matches = [NSMutableArray array];
+	for ( NSNumber *index in [store previousIndexes:[store jcListCount] containing:search] )
+	{
+		FlycutClipping *clipping = [store clippingAtPosition:[index intValue]];
+		if ( nil != clipping )
+			[matches addObject:clipping];
+	}
+	return matches;
+}
+
+-(int)indexOfClipping:(FlycutClipping *)clipping inList:(FlycutList)list
+{
+	if ( nil == clipping )
+		return -1;
+	NSUInteger index = [[[self storeForList:list] clippingsSnapshot] indexOfObjectIdenticalTo:clipping];
+	return ( NSNotFound == index ) ? -1 : (int)index;
+}
+
+-(bool)deleteClipping:(FlycutClipping *)clipping fromList:(FlycutList)list
+{
+	int index = [self indexOfClipping:clipping inList:list];
+	if ( index < 0 )
+		return NO;
+	inhibitAutosaveClippings = YES; // Never export what the user explicitly deletes.
+	[[self storeForList:list] clearItem:index];
+	inhibitAutosaveClippings = NO;
+	[self actionAfterListModification];
+	return YES;
+}
+
+-(bool)moveClippingToFavorites:(FlycutClipping *)clipping
+{
+	FlycutStore *history = [self historyStore];
+	int index = [self indexOfClipping:clipping inList:FlycutListHistory];
+	if ( index < 0 || history == favoritesStore )
+		return NO;
+	[clipping retain];
+	// As the bezel's Shift-F (-saveFromStackToFavorites): to the top of the favorites,
+	// where full favorites drop their oldest entry, or with "Remove duplicates" to the
+	// place of an equal favorite (-addClippingToFavorites:); then out of the history.
+	// Adding first keeps an image's file referenced while it leaves the history.
+	[self addClippingToFavorites:clipping];
+	inhibitAutosaveClippings = YES;
+	[history clearItem:index];
+	inhibitAutosaveClippings = NO;
+	[clipping release];
+	[self actionAfterListModification];
+	return YES;
+}
+
+// A returning favorite goes directly below the last history entry captured at the same
+// time or later, so everything copied after it stays above it, even in a history that
+// pasteMovesToTop has reordered. Without a capture time (0) it goes to the top. A full
+// history drops its last entry when one more arrives; the returning clipping must never
+// be that one, so it takes the last slot at the latest. With "Remove duplicates" the
+// insert first removes every history entry equal to the clipping
+// (-[FlycutStore insertClipping:atIndex:]), so positions are counted without them.
+-(int)historyIndexForReturningClipping:(FlycutClipping *)clipping
+{
+	FlycutStore *history = [self historyStore];
+	BOOL equalEntriesGo = [history removeDuplicates];
+	int count = 0;   // entries that stay in the history
+	int index = 0;
+	NSInteger timestamp = [clipping timestamp];
+	for ( int i = 0 ; i < [history jcListCount] ; i++ )
+	{
+		FlycutClipping *entry = [history clippingAtPosition:i];
+		if ( equalEntriesGo && [entry isEqual:clipping] )
+			continue;
+		count++;
+		if ( timestamp > 0 && [entry timestamp] >= timestamp )
+			index = count;
+	}
+	int remember = [history rememberNum];
+	if ( count >= remember && index > remember - 1 )
+		index = remember - 1;
+	return index < 0 ? 0 : index;
+}
+
+-(bool)moveClippingToHistory:(FlycutClipping *)clipping
+{
+	FlycutStore *history = [self historyStore];
+	int index = [self indexOfClipping:clipping inList:FlycutListFavorites];
+	if ( index < 0 || history == favoritesStore )
+		return NO;
+	[clipping retain];
+	// Insert first (keeps an image's file referenced), then leave the favorites.
+	[history insertClipping:clipping atIndex:[self historyIndexForReturningClipping:clipping]];
+	inhibitAutosaveClippings = YES;
+	[favoritesStore clearItem:index];
+	inhibitAutosaveClippings = NO;
+	[clipping release];
+	[self actionAfterListModification];
+	return YES;
+}
+
+-(bool)moveFavorite:(FlycutClipping *)clipping toIndex:(int)index
+{
+	NSMutableArray *favorites = [[[favoritesStore clippingsSnapshot] mutableCopy] autorelease];
+	NSUInteger from = [favorites indexOfObjectIdenticalTo:clipping];
+	if ( NSNotFound == from || index < 0 || index >= (int)[favorites count] || index == (int)from )
+		return NO;
+	[favorites removeObjectAtIndex:from];
+	[favorites insertObject:clipping atIndex:index];
+	[favoritesStore restoreClippingsSnapshot:favorites];
+	[self actionAfterListModification];
+	return YES;
+}
+
+-(NSArray *)listsSnapshot
+{
+	return [NSArray arrayWithObjects:[[self historyStore] clippingsSnapshot], [favoritesStore clippingsSnapshot], nil];
+}
+
+-(void)restoreListsSnapshot:(NSArray *)snapshot
+{
+	if ( [snapshot count] != 2 )
+		return;
+	[[self historyStore] restoreClippingsSnapshot:[snapshot objectAtIndex:FlycutListHistory]];
+	[favoritesStore restoreClippingsSnapshot:[snapshot objectAtIndex:FlycutListFavorites]];
+	[self actionAfterListModification];
+}
+
+-(void)beginDeferringImageDeletion
+{
+	if ( nil == deferredImageDeletions )
+		deferredImageDeletions = [[NSMutableSet alloc] init];
+}
+
+-(void)endDeferringImageDeletion
+{
+	NSSet *hashes = deferredImageDeletions;
+	deferredImageDeletions = nil;
+	for ( NSString *hash in hashes )
+		if ( ![self isImageHashReferencedElsewhere:hash excludingStore:nil atIndex:-1] )
+			[[FlycutImageStore sharedStore] deleteImageForHash:hash];
+	[hashes release];
 }
 
 @end

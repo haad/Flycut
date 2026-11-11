@@ -6,7 +6,7 @@ Copy the same way as always.
 
 Paste the same way as always.
 
-Press the Main Hotkey (Shift-Command-V, by default) to access your clipboard history. Or just use the Flycut menu in the menu bar.
+Press the Main Hotkey (Shift-Command-V, by default) to access your clipboard history. Or just click the Flycut icon in the menu bar.
 
 **The Bezel**
 
@@ -76,16 +76,42 @@ To disable this and store plain text only, run:
 
     defaults write com.generalarcade.flycut preserveTextFormatting -bool NO
 
-**Menu Features**
+**Menu Bar List**
 
-The Flycut menu allows you to select from the most recent items in the main clipboard history store, clear all of them, merge them all into one entry, or access the preferences panel. You can also Option-Click the Flycut menu icon to disable or reenable clipboard tracking, in case you are copying sensitive information such as passwords.
+Click the Flycut icon in the menu bar to open the clipping list. It has a search field at the top, then one list that scrolls: your favorites first, then your clipboard history. The commands are at the bottom: Clear All, Merge All, Pause Clipboard Tracking, Preferences…, About Flycut and Quit. Clear All asks first and clears the clipboard history only, never your favorites; Merge All merges the history into one entry.
+
+Click an item to paste it into the app you were using; Flycut stays in the background. If "Menu selection pastes" is turned off in Preferences, clicking copies the item instead. As in a menu, you can also press the icon, drag to an item and release. Pasting from the history moves the item to the top of the history if "Move pasted item to top of stack" is on in Preferences, as Enter does in the Bezel; your favorites keep their order.
+
+A favorite shows a filled star at the left, where a menu shows a checkmark. The highlighted item also shows a trash icon at the right edge and, if it is not a favorite, the outline of a star at the left. Click the star to move the item to the favorites or to remove it from them; the list stays open, and a removed favorite goes back to its place in the history. Click the trash to delete the item; there is no confirmation.
+
+Drag an item out of the list into another app or the Finder to drop its content there; a picture becomes an image file in the Finder, and text becomes a text clipping. The item stays in the list. Drag a favorite up or down to reorder your favorites, or drag a history item into the favorites to make it a favorite at that place; the history itself stays in time order. If you have no favorites yet, dropping an item at the very top makes it the first one.
+
+Type to filter both lists. Click the icon again, click outside the list or switch to another app to close it.
+
+"Display in menu" in Preferences sets how many rows the list shows before it scrolls: 20 by default, at most as many as fit on the screen. The list always holds all your clippings.
+
+You can also Option-Click the Flycut menu icon to disable or reenable clipboard tracking, in case you are copying sensitive information such as passwords.
+
+**Menu Bar List Keystrokes**
+
+**Up Arrow** and **Down Arrow**: Move the highlight through the items and on into the commands at the bottom.
+
+**Page Up** and **Page Down**: Move the highlight one page.
+
+**Return**: Paste the highlighted item, or run the highlighted command.
+
+**Command-Delete** or **Command-Forward-Delete**: Delete the highlighted item, without a confirmation.
+
+**Command-Z**: Undo deletes, star changes and moved favorites, as long as the list is open.
+
+**Esc**: Clear the search. If the search field is empty, close the list.
 
 **Preferences Panel**
 
 The preferences panel allows you to customize settings including:
 
 - Main and Search hotkeys
-- Number of clippings to remember and display
+- Number of clippings to remember, and how many rows the menu bar list shows
 - Bezel appearance (size, position, transparency)
 - Sticky bezel mode
 - Removing duplicate clippings

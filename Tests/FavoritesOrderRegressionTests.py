@@ -3,7 +3,7 @@
 
 "Move pasted item to top of stack" (pasteMovesToTop) reorders the history only. A favorite
 pasted from the bezel's Favorites view (Return, or Enter, which only copies), text or image,
-or chosen through the store-position path the status menu uses, stays where it is, and the
+or chosen in the menu-bar list while the bezel shows them, stays where it is, and the
 favorites' selection stays on it. A history clipping still moves to the top as before.
 With the setting off, its factory default, Return and Enter change no order at all.
 
@@ -15,9 +15,10 @@ copy goes on top, as in master. The saved store and the next launch keep the ord
 
 The fixture compiles the real AppController, FlycutOperator, FlycutStore and the rest of
 the app sources (git ls-files '*.m' minus main.m, FlycutHelper and Tests) and drives the
-production -hitMainHotKey:, -processBezelKeyDown:, -processMenuClippingSelection: and
--pollPB: on a real operator: favorites are made with Shift-F in the bezel, copies arrive
-through the clipboard poll.
+production -hitMainHotKey:, -processBezelKeyDown:, the menu-bar list's
+-listController:didChooseClipping:inList: and -pollPB: on a real operator:
+favorites are made with Shift-F in the bezel, copies arrive through the
+clipboard poll.
 
 Only OS boundaries are replaced. FixtureIsolation.h keeps user defaults in memory; the
 pasteboard is an in-process object; NSWorkspace answers with no applications;
@@ -52,6 +53,7 @@ FIXTURE = r'''
 #import "FlycutClipping.h"
 #import "FlycutStore.h"
 #import "FlycutImageStore.h"
+#import "FlycutListPanel.h"
 
 @interface FCFakeWorkspace : NSObject
 @end
@@ -208,7 +210,6 @@ static BOOL FCForbiddenSave(id self, SEL _cmd, id store, int index, id prefix) {
 - (void)hitMainHotKey:(id)hotKey;
 - (void)savePreferencesOnDict:(NSMutableDictionary *)dict;
 - (void)windowDidResignKey:(NSNotification *)notification;
-- (IBAction)processMenuClippingSelection:(id)sender;
 @end
 
 static FCOrderController *controller;
@@ -462,18 +463,15 @@ int main(int argc, const char *argv[]) {
             ExpectFavoritesKept(@"after Enter");
             Expect(@"history untouched", Contents(historyStore), History0());
             ExpectSelectionOnFavorite(@"after Enter", 1);
-        } else if ([mode isEqualToString:@"menu-item-copies-favorite-in-place"]) {
-            // The status menu's store-position path while the favorites are the current
-            // store: the item carries the clipping and its position, as -updateMenuContaining:
-            // builds it.
+        } else if ([mode isEqualToString:@"list-row-copies-favorite-in-place"]) {
+            // A row of the menu-bar list, chosen while the bezel shows the favorites.
             SelectFavorite(0);
             FlycutClipping *favorite = [favoritesStore clippingAtPosition:2];
-            NSMenuItem *item = [[[NSMenuItem alloc] initWithTitle:@"fav-1" action:NULL keyEquivalent:@""] autorelease];
-            [item setRepresentedObject:@[@2, favorite]];
-            [controller processMenuClippingSelection:item];
-            Observe(@"1-after-menu");
+            [(id<FlycutListControllerDelegate>)controller listController:nil didChooseClipping:favorite
+                                                                  inList:FlycutListFavorites];
+            Observe(@"1-after-list-row");
             Expect(@"pasteboard", PasteboardText(), @"fav-1");
-            ExpectFavoritesKept(@"after the menu item");
+            ExpectFavoritesKept(@"after the list row");
             Expect(@"the bezel's selection stays", Selected(), @"fav-3");
             Escape();
         } else if ([mode isEqualToString:@"pref-off-history-return-keeps-order"] ||
@@ -590,7 +588,7 @@ MODES = {
     "return-pastes-image-favorite-in-place": "Return on an image favorite moved it or lost the selection",
     "enter-copies-text-favorite-in-place": "Enter on a text favorite moved it to the top of the favorites",
     "enter-copies-image-favorite-in-place": "Enter on an image favorite moved it to the top of the favorites",
-    "menu-item-copies-favorite-in-place": "the status menu's path moved a favorite to the top",
+    "list-row-copies-favorite-in-place": "a favorite chosen in the menu-bar list moved to the top",
     "history-return-moves-to-top": "a history paste no longer moves the clipping to the top",
     "history-enter-moves-image-to-top": "Enter on a history image no longer moves it to the top",
     "history-return-leaves-image-in-place": "Return on a history image changed master's order",
@@ -661,8 +659,8 @@ class FavoritesOrderRegressionTests(unittest.TestCase):
     def test_enter_copies_an_image_favorite_in_place(self) -> None:
         self.run_mode("enter-copies-image-favorite-in-place")
 
-    def test_status_menu_path_copies_a_favorite_in_place(self) -> None:
-        self.run_mode("menu-item-copies-favorite-in-place")
+    def test_menu_bar_list_copies_a_favorite_in_place(self) -> None:
+        self.run_mode("list-row-copies-favorite-in-place")
 
     def test_history_paste_still_moves_to_the_top(self) -> None:
         self.run_mode("history-return-moves-to-top")

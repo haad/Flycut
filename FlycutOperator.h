@@ -17,6 +17,13 @@
 
 #import "FlycutStore.h"
 
+// The two lists the menu-bar list shows. They are addressed explicitly, never through
+// the bezel's current store, which the bezel's favorites toggle swaps.
+typedef NS_ENUM(NSInteger, FlycutList) {
+	FlycutListHistory = 0,
+	FlycutListFavorites = 1,
+};
+
 @protocol FlycutOperatorDelegate <NSObject>
 @optional
 - (NSString*)alertWithMessageText:(NSString*)message informationText:(NSString*)information buttonsTexts:(NSArray*)buttons;
@@ -111,6 +118,32 @@
 -(bool)storeDisabled;
 -(void)setClippingsStoreDelegate:(id<FlycutStoreDelegate>) delegate;
 -(void)setFavoritesStoreDelegate:(id<FlycutStoreDelegate>) delegate;
+
+// Menu-bar list: both stores, addressed explicitly (see FlycutList).
+// The clippings of a list, newest first; with a search string only those that match
+// (same matching as the search box). A snapshot, not a live view.
+-(NSArray *)clippingsInList:(FlycutList)list matching:(NSString *)search;
+// Position of exactly this clipping object in the list, or -1.
+-(int)indexOfClipping:(FlycutClipping *)clipping inList:(FlycutList)list;
+// Removes the clipping from the list on the user's request; it is never exported.
+-(bool)deleteClipping:(FlycutClipping *)clipping fromList:(FlycutList)list;
+// History -> top of the favorites, like the bezel's Shift-F (with "Remove duplicates" a
+// clipping equal to a favorite takes that favorite's place instead).
+-(bool)moveClippingToFavorites:(FlycutClipping *)clipping;
+// Favorites -> back into the history at its time position.
+-(bool)moveClippingToHistory:(FlycutClipping *)clipping;
+// A favorite moves to index, counted in the favorites without it (dragged in the list).
+// Nothing is added, dropped or exported. NO when it is not a favorite or already there.
+-(bool)moveFavorite:(FlycutClipping *)clipping toIndex:(int)index;
+// Where -moveClippingToHistory: puts the clipping (see there).
+-(int)historyIndexForReturningClipping:(FlycutClipping *)clipping;
+// Undo support: the clipping objects of both lists, and putting such a state back.
+-(NSArray *)listsSnapshot;
+-(void)restoreListsSnapshot:(NSArray *)snapshot;
+// While deferring, image files of removed clippings are kept; ending deletes those that
+// no list references any more.
+-(void)beginDeferringImageDeletion;
+-(void)endDeferringImageDeletion;
 
 /** optional delegate (not retained) */
 @property (nonatomic, nullable, assign) id<FlycutOperatorDelegate> delegate;

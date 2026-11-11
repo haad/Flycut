@@ -4,8 +4,7 @@
 VoiceOver announces a control by its accessibility label, title or title element; the
 tooltip (AXHelp) is only read later as a hint, and a placeholder is not a name. Master's
 NIB gives the General pane's steppers, Save popup and list fields none, and the
-code-built sliders, search window field and table, and the status menu's search field
-have none either.
+code-built sliders and the search window's field and table have none either.
 
 The fixture loads the production NIB (master's compiled MainMenu.nib for trees that carry
 only MainMenu.xib, see Tests/Fixtures/PreferencesNibFixture.py), sends the builders that
@@ -13,8 +12,8 @@ only MainMenu.xib, see Tests/Fixtures/PreferencesNibFixture.py), sends the build
 interactive control (the view, or the cell of a cell-based control, which is what
 VoiceOver reads; new and legacy attribute API). A name must be the
 label shown next to the control (the nearest static text or checkbox to its left on the
-same line, the search window's title, the table's column header, the menu item's
-title). The search window is built without a NIB.
+same line, the search window's title, the table's column header). The search window
+is built without a NIB.
 The two password list fields are the exception: the checkbox in front of each is a
 sub-option of "Don't save passwords" in MainMenu.xib ("by data type:", "by length &
 complexity:"), which does not say what the field holds, so the fields have fixed names,
@@ -196,7 +195,7 @@ static void SetXibTitles(void)
     }
 }
 
-// expected: control -> the name it must have (search window, menu); nil = its visible label.
+// expected: control -> the name it must have (search window); nil = its visible label.
 static int Check(NSString *mode, NSView *root, NSMapTable *expected)
 {
     NSMutableArray *views = [NSMutableArray array];
@@ -292,15 +291,6 @@ int main(int argc, const char **argv)
             ChangePane(hotkeysPane);
             return Check(mode, [[controller valueForKey:@"mainRecorder"] superview], expected);
         }
-        if ([mode isEqualToString:@"status-menu-search"]) {
-            NSSearchField *box = [controller valueForKey:@"searchBox"];
-            NSMenuItem *item = nil;
-            for (NSMenuItem *candidate in [[controller valueForKey:@"jcMenu"] itemArray])
-                if ([candidate view] != nil && (box == [candidate view] || [box isDescendantOf:[candidate view]])) item = candidate;
-            if (box == nil || item == nil) return 40;
-            [expected setObject:Trim([item title]) forKey:box];
-            return Check(mode, [item view], expected);
-        }
         return 4;
     }
 }
@@ -335,9 +325,6 @@ class PreferencesAccessibleNamesRegressionTests(PreferencesNibCase):
 
     def test_search_window_controls_have_names(self) -> None:
         self.check("search-window", "search window")
-
-    def test_status_menu_search_field_has_a_name(self) -> None:
-        self.check("status-menu-search", "status menu search field")
 
 
 if __name__ == "__main__":

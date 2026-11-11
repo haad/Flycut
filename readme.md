@@ -63,7 +63,22 @@ Every time you copy a code piece, Flycut stores it in history. Later, you can pa
 
 | Shortcut | Action |
 |----------|--------|
+| Click menu icon | Open the clipping list |
 | Option+Click menu icon | Toggle clipboard tracking on/off |
+
+### Menu Bar List
+
+The list has a search field at the top, then your favorites (each with a filled star at the left) and your clipboard history in one list, and the menu commands at the bottom. The highlighted item shows a trash icon at the right edge and, if it is not a favorite, a star outline at the left: click the star to add the item to or remove it from the favorites, or the trash to delete it. Drag an item into another app or the Finder to drop its content there, drag favorites to reorder them, or drag a history item into the favorites to make it a favorite.
+
+| Shortcut | Action |
+|----------|--------|
+| Type | Filter favorites and history |
+| Up/Down Arrow | Move the highlight (items, then commands) |
+| Page Up / Page Down | Move the highlight one page |
+| Return or Click | Paste item or run command |
+| Command+Delete | Delete highlighted item |
+| Command+Z | Undo delete, star change or moved favorite |
+| Escape | Clear search, then close the list |
 
 ## Why Flycut?
 

@@ -280,7 +280,7 @@
                                                             <binding destination="808" name="value" keyPath="values.displayNum" id="832"/>
                                                         </connections>
                                                     </textField>
-                                                    <stepper toolTip="Controls how many clippings Flycut shows in the menu" horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="473">
+                                                    <stepper toolTip="Controls how many rows the menu shows before it scrolls; the menu lists all clippings" horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="473">
                                                         <rect key="frame" x="296" y="396" width="20" height="24"/>
                                                         <stepperCell key="cell" continuous="YES" alignment="left" minValue="5" maxValue="99" doubleValue="5" valueWraps="YES" id="761"/>
                                                         <connections>
@@ -739,7 +739,6 @@
                         <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
                     </searchFieldCell>
                     <connections>
-                        <action selector="searchItems:" target="213" id="9IB-LV-utg"/>
                         <outlet property="delegate" destination="213" id="PRe-HH-Het"/>
                     </connections>
                 </searchField>

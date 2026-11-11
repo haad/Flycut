@@ -10,12 +10,12 @@ FIXTURE = r'''
 #include "PasteTestEnvironmentImplementation.h"
 #import <Cocoa/Cocoa.h>
 #import "AppController.h"
+#import "FlycutListPanel.h"
 
 @interface AppController (PendingPasteTransactionTesting)
 - (void)hitMainHotKey:(id)hotKey;
 - (void)metaKeysReleased;
 - (void)processBezelKeyDown:(NSEvent *)event;
-- (void)processMenuClippingSelection:(id)sender;
 - (void)rememberFrontmostApplicationForPaste;
 - (void)showSearchWindow;
 - (void)searchWindowItemSelected:(id)sender;
@@ -96,6 +96,11 @@ FIXTURE = r'''
 // clippings are plain text, so there is none.
 - (NSDictionary *)getRichDataFromStackPosition { return nil; }
 - (NSDictionary *)getRichDataFromIndex:(int)index { (void)index; return nil; }
+// The menu-bar list addresses its rows by clipping (FlycutOperator's list API).
+- (int)indexOfClipping:(FlycutClipping *)clipping inList:(FlycutList)list {
+    return (list == FlycutListHistory && clipping == [self clippingAtPosition:0]) ? 0 : -1;
+}
+- (bool)favoritesStoreIsSelected { return NO; }
 @end
 
 @interface FCSearchWindowStub : NSObject
@@ -188,7 +193,6 @@ FIXTURE = r'''
     [searchResultClippings release];
     searchResultClippings = [[NSArray arrayWithObject:[flycutOperator clippingAtPosition:0]] retain];
 }
-- (int)storePositionForMenuItem:(NSMenuItem *)menuItem { (void)menuItem; return 0; }
 - (bool)pasteStorePositionAndUpdate:(int)position {
     (void)position;
     self.pasteboardCount += 1;
@@ -231,12 +235,15 @@ FIXTURE = r'''
     self.frontmostOverride = self.focusThief;
 }
 - (void)terminateTarget { self.target.terminated = YES; }
+// The status item's menu is the menu-bar list; a row stands for its clipping.
+- (void)chooseListRow {
+    [(id<FlycutListControllerDelegate>)self listController:nil
+                                         didChooseClipping:[flycutOperator clippingAtPosition:0]
+                                                    inList:FlycutListHistory];
+}
 - (void)selectMenuItemWithoutImmediatePaste {
     [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"menuSelectionPastes"];
-    NSMenuItem *item = [[[NSMenuItem alloc] initWithTitle:@"fixture"
-                                                   action:nil
-                                            keyEquivalent:@""] autorelease];
-    [self processMenuClippingSelection:item];
+    [self chooseListRow];
 }
 - (void)beginSecondSession:(FCPasteTarget *)newTarget {
     self.target = newTarget;
@@ -312,10 +319,7 @@ int main(int argc, const char *argv[]) {
             ;
         if ([mode isEqualToString:@"menu-selection"]) {
             [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"menuSelectionPastes"];
-            NSMenuItem *item = [[[NSMenuItem alloc] initWithTitle:@"fixture"
-                                                           action:nil
-                                                    keyEquivalent:@""] autorelease];
-            [controller processMenuClippingSelection:item];
+            [controller chooseListRow];
         } else if ([mode isEqualToString:@"search-window-selection"]) {
             [controller showSearchWindow];
             [controller searchWindowItemSelected:nil];
