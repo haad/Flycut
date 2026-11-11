@@ -558,7 +558,12 @@
 
 -(bool)addClipping:(NSString*)contents ofType:(NSString*)type withRichData:(NSDictionary *)richData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector
 {
-	if ( [clippingStore jcListCount] == 0 || ! [contents isEqualToString:[clippingStore clippingContentsAtPosition:0]]) {
+	// A copy always goes into the history, also while the bezel shows the favorites.
+	// Then the history is stashed and clippingStore IS the favorites store (see
+	// -saveEngine), and its selection is the stashed one that comes back with it.
+	FlycutStore *history = ( NULL != stashedStore ) ? stashedStore : clippingStore;
+	int *selection = ( history == clippingStore ) ? &stackPosition : &stashedStackPosition;
+	if ( [history jcListCount] == 0 || ! [contents isEqualToString:[history clippingContentsAtPosition:0]]) {
 		// Remember which clipping the stack position points at, so the selection can follow it
 		// across the insert.  Retained because the store may drop clippings while inserting.
 		//
@@ -567,15 +572,15 @@
 		// old top clipping there would move the selection away from what the user is looking
 		// at.  Staying at 0 keeps the display and the paste in agreement.
 		FlycutClipping *anchor = nil;
-		if ( stackPosition > 0 && stackPosition < [clippingStore jcListCount] )
-			anchor = [[clippingStore clippingAtPosition:stackPosition] retain];
+		if ( *selection > 0 && *selection < [history jcListCount] )
+			anchor = [[history clippingAtPosition:*selection] retain];
 
-		bool success = [clippingStore addClipping:contents
-										   ofType:type
-							 fromAppLocalizedName:appName
-								 fromAppBundleURL:bundleURL
-									  atTimestamp:[[NSDate date] timeIntervalSince1970]
-									 withRichData:richData];
+		bool success = [history addClipping:contents
+									 ofType:type
+					   fromAppLocalizedName:appName
+						   fromAppBundleURL:bundleURL
+								atTimestamp:[[NSDate date] timeIntervalSince1970]
+							   withRichData:richData];
 
 		// Follow the clipping rather than the position.  This used to be stackPosition = 0,
 		// which moved a selection the user was making in the bezel onto the clipping that had
@@ -585,8 +590,8 @@
 		// the existing copy is moved to the top instead of a new one being inserted.
 		// A new selection starts at the newest clipping because opening the bezel says so,
 		// not because an unrelated store change reset the position.
-		int followed = ( nil != anchor ) ? [clippingStore indexOfClipping:anchor] : -1;
-		stackPosition = ( followed >= 0 ) ? followed : 0;
+		int followed = ( nil != anchor ) ? [history indexOfClipping:anchor] : -1;
+		*selection = ( followed >= 0 ) ? followed : 0;
 		[anchor release];
 
         [selectorTarget performSelector:clippingAddedSelector];
@@ -597,7 +602,7 @@
 	// The newest clipping already holds this text, so it is not added again. Keep
 	// the formatting of this latest copy instead (none for a plain-text copy), so
 	// pasting the clipping matches what was copied last.
-	if ( [clippingStore setRichData:richData forClippingAtPosition:0] )
+	if ( [history setRichData:richData forClippingAtPosition:0] )
 		[self actionAfterListModification];
 	return  NO;
 }
@@ -615,8 +620,11 @@
     if (!hash)
         return NO;
 
-    if ([clippingStore jcListCount] > 0) {
-        FlycutClipping *topClipping = [clippingStore clippingAtPosition:0];
+    // Into the history, also while the bezel shows the favorites (see -addClipping:).
+    FlycutStore *history = ( NULL != stashedStore ) ? stashedStore : clippingStore;
+    int *selection = ( history == clippingStore ) ? &stackPosition : &stashedStackPosition;
+    if ([history jcListCount] > 0) {
+        FlycutClipping *topClipping = [history clippingAtPosition:0];
         if ([topClipping isImageClipping] && [[topClipping imageHash] isEqualToString:hash])
             return NO;
     }
@@ -646,17 +654,17 @@
     // Follow the selected clipping across the insert, exactly as -addClipping: does for
     // text, so an image arriving while the bezel is open does not move the selection.
     FlycutClipping *anchor = nil;
-    if ( stackPosition > 0 && stackPosition < [clippingStore jcListCount] )
-        anchor = [[clippingStore clippingAtPosition:stackPosition] retain];
+    if ( *selection > 0 && *selection < [history jcListCount] )
+        anchor = [[history clippingAtPosition:*selection] retain];
 
-    bool success = [clippingStore addImageClippingWithHash:hash
-                                                imageSize:pixelSize
-                                                imageType:imageType
-                                     fromAppLocalizedName:appName
-                                         fromAppBundleURL:bundleURL
-                                              atTimestamp:[[NSDate date] timeIntervalSince1970]];
-    int followed = ( nil != anchor ) ? [clippingStore indexOfClipping:anchor] : -1;
-    stackPosition = ( followed >= 0 ) ? followed : 0;
+    bool success = [history addImageClippingWithHash:hash
+                                          imageSize:pixelSize
+                                          imageType:imageType
+                               fromAppLocalizedName:appName
+                                   fromAppBundleURL:bundleURL
+                                        atTimestamp:[[NSDate date] timeIntervalSince1970]];
+    int followed = ( nil != anchor ) ? [history indexOfClipping:anchor] : -1;
+    *selection = ( followed >= 0 ) ? followed : 0;
     [anchor release];
     [selectorTarget performSelector:clippingAddedSelector];
     [self actionAfterListModification];

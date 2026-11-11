@@ -289,10 +289,12 @@ int main(int argc, const char *argv[]) {
             return Report(mode, controller, @[@"newest"], 1);
         }
         if (strcmp(mode, "favorites-toggle-then-duplicate") == 0) {
-            [op toggleToFromFavoritesStore];
+            // Make the favorite as Shift-F in the bezel does. A copy goes into the history
+            // even while the favorites are shown, so it is moved there from the history.
             [op addClipping:@"favorite" ofType:NSPasteboardTypeString fromApp:nil withAppBundleURL:nil
                      target:controller clippingAddedSelector:@selector(fixtureClippingAdded)];
-            [op toggleToFromFavoritesStore];
+            [op setStackPositionToFirstItem];
+            if (![op saveFromStackToFavorites]) return 27;
             [controller hitMainHotKey:nil];
             // 'f' hides and shows the bezel again; it is still the same selection.
             [controller processBezelKeyDown:FavoritesKey()];
