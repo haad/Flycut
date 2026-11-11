@@ -304,6 +304,12 @@ a click.
 		[tabView selectTabViewItemAtIndex: [sender tag]];
 		[self resizeToFit:box];
 	}
+	// The tab view links the new pane into the key-view loop for Tab, but
+	// its own previous key view stays in the pane that was shown when the
+	// loop was made, outside the window now. Shift-Tab from the pane's first
+	// control then found nothing to focus. Make the loop again from the
+	// views now in the window.
+	[[tabView window] recalculateKeyViewLoop];
 }
 
 -(void) resizeToFit:(NSBox *)box
