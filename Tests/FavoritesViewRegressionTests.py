@@ -558,9 +558,9 @@ int main(int argc, const char *argv[]) {
             return Emit(CheckClosed(140));
         }
         if ([mode isEqualToString:@"f-toggle-keeps-the-favorites-view"]) {
-            // "f" orders the key bezel out and in again; that must not end the view.
+            // "f" switches lists in the open bezel; that must not end the view.
             Observe(@"1-favorites-shown");
-            if (fakeBezel->orderOuts < 1 || !fakeBezel->visible || !fakeBezel->color ||
+            if (!fakeBezel->visible || !fakeBezel->color ||
                 ![fakeBezel->text isEqualToString:@"fav-2"]) return Emit(150);
             Down();
             if (![op favoritesStoreIsSelected] || ![Selected() isEqualToString:@"fav-1"]) return Emit(151);

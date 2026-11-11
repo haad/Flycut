@@ -2834,18 +2834,15 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
                 }
                 break;
             case 'f':
-                {
-                    // Ordering the key bezel out can end its Favorites view on the way
-                    // (-windowDidResignKey: -> -hideApp), so pick the list first and
-                    // switch to it once the bezel is hidden.
-                    BOOL showFavorites = ![flycutOperator favoritesStoreIsSelected];
-                    [self hideBezel];
-                    if ( [flycutOperator favoritesStoreIsSelected] != showFavorites )
-                        [flycutOperator toggleToFromFavoritesStore];
-                    [bezel setColor:[flycutOperator favoritesStoreIsSelected]];
-                    [self updateBezel];
-                    [self showBezel];
-                }
+                // Switch lists in the open bezel. It used to be ordered out and in
+                // again for this; as the key window it then resigned key, and
+                // -windowDidResignKey: took that for the bezel closing (-hideApp):
+                // a pinned bezel lost its pin, so releasing the keys pasted, and
+                // Flycut was hidden. The bezel's -update, which AppKit sends after
+                // each event, repaints its background in the list's color.
+                [flycutOperator toggleToFromFavoritesStore];
+                [bezel setColor:[flycutOperator favoritesStoreIsSelected]];
+                [self updateBezel];
                 break;
             case 'F':
                 if ( [flycutOperator saveFromStackToFavorites] )
@@ -3006,9 +3003,9 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		// The stack position is bezel state, so a new selection starts at the newest clipping.
 		// This used to happen as a side effect of -addClipping: resetting it, which meant a
 		// clipping arriving mid-selection moved the selection instead of the list moving under
-		// a selection that stays put.  Note this is deliberately not in -showBezel:, which the
-		// favourites toggle also calls after -toggleToFromFavoritesStore has swapped in that
-		// store's own remembered position.
+		// a selection that stays put.  Note this is deliberately not in -showBezel or -updateBezel:
+		// the favourites toggle ("f") refills the bezel after -toggleToFromFavoritesStore has
+		// swapped in that store's own remembered position, which must stay.
 		[flycutOperator setStackPositionToFirstItem];
 		[self showBezel];
 	} else {
