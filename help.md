@@ -56,11 +56,11 @@ Here's a complete list of keys you can use in the Bezel.
 
 **Shift-S**: Save the item to a file and delete it from the clipboard history.
 
-**F**: Switch between the main clipboard history store and the favorites store. The favorites store appears in the Bezel with a yellow tint and works in the same way as the main clipboard history store.
+**F**: Switch between the main clipboard history store and the favorites store. The favorites store appears in the Bezel with a yellow tint and a star after the counter at the bottom ("1 of 2 ★"), and works in the same way as the main clipboard history store.
 
 **Shift-F**: Save the clipboard history item currently displayed to the favorites store, deleting it from the main clipboard history store and closing the Bezel.
 
-**Space**: Pin the bezel open so it stays visible after releasing modifier keys. You can then browse freely and press Return to paste or Escape to cancel.
+**Space**: Pin the bezel open so it stays visible after releasing modifier keys. You can then browse freely and press Return to paste or Escape to cancel. While the bezel is pinned, its counter says "(pinned)".
 
 **Right-Click**: Same as Space — pins the bezel open.
 

@@ -232,6 +232,7 @@ static void FlycutSetAccessibilityLabel(NSControl *control, NSString *label)
 -(IBAction)setPausedMenuIconColor:(id)sender;
 -(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY;
 -(void)buildGeneralPermissionsPreferenceRow;
+-(NSString *)bezelCounterString;
 @end
 
 // Clipping items that -updateMenuContaining: has removed from the status menu. jcMenu is
@@ -2857,8 +2858,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
                 break;
             case ' ':
                 isBezelPinned = YES;
-                [bezel setCharString:[NSString stringWithFormat:@"%d of %d (pinned)",
-                    [flycutOperator stackPosition] + 1, [flycutOperator jcListCount]]];
+                [bezel setCharString:[self bezelCounterString]];
                 break;
             default: // It's not a navigation/application-defined thing, so let's figure out what to do with it.
 				DLog(@"PRESSED %d", pressed);
@@ -2879,8 +2879,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
         [self pasteFromStack];
     } else if (theEvent.type == NSEventTypeRightMouseUp) {
         isBezelPinned = YES;
-        [bezel setCharString:[NSString stringWithFormat:@"%d of %d (pinned)",
-            [flycutOperator stackPosition] + 1, [flycutOperator jcListCount]]];
+        [bezel setCharString:[self bezelCounterString]];
     }
 }
 
@@ -2919,7 +2918,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	[flycutOperator adjustStackPositionIfOutOfBounds];
 	if ([flycutOperator jcListCount] == 0) { // empty
 		[bezel setText:@""];
-		[bezel setCharString:@"Empty"];
+		[bezel setCharString:[self bezelCounterString]];
         [bezel setSource:@""];
         [bezel setDate:@""];
         [bezel setSourceIcon:nil];
@@ -3631,9 +3630,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
         [bezel setText:[NSString stringWithFormat:@"%@", [clipping contents]]];
     }
 
-    int currentPos = [flycutOperator stackPosition] + 1;
-    int totalCount = [flycutOperator jcListCount];
-    [bezel setCharString:[NSString stringWithFormat:@"%d of %d", currentPos, totalCount]];
+    [bezel setCharString:[self bezelCounterString]];
 
     NSString *localizedName = [clipping appLocalizedName];
     if ( nil == localizedName )
@@ -3647,6 +3644,22 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     [bezel setSource:localizedName];
     [bezel setDate:dateString];
     [bezel setSourceIcon:icon];
+}
+
+// The counter below the bezel's text: "2 of 12", or "Empty". The Favorites view adds a
+// star (U+2605, a text glyph in the counter's grey, not the colour emoji U+2B50), so "f"
+// visibly switches lists; the history gets no mark. A pinned bezel adds "(pinned)" after
+// every key, not only after the Space or right click that pinned it.
+-(NSString *)bezelCounterString
+{
+	int count = [flycutOperator jcListCount];
+	NSString *counter = count == 0 ? @"Empty" :
+		[NSString stringWithFormat:@"%d of %d", [flycutOperator stackPosition] + 1, count];
+	if ( [flycutOperator favoritesStoreIsSelected] )
+		counter = [counter stringByAppendingString:@" \u2605"];
+	if ( isBezelPinned )
+		counter = [counter stringByAppendingString:@" (pinned)"];
+	return counter;
 }
 
 -(void) stackUp
