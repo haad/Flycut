@@ -175,8 +175,31 @@ static NSEvent *DoubleClick(void) {
                               pressure:0];
 }
 
-static void RunLoopFor(NSTimeInterval seconds) {
-    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+// Runs the run loop until every delayed step the code under test scheduled has run or
+// was cancelled: the bezel hide, the paste's activation and Cmd-V, and their focus
+// rechecks. A loaded machine runs these steps late, never early, so the fixture waits
+// for them instead of a fixed time. A step scheduled by a duplicate confirmation is
+// waited for too, so the "pastes exactly once" checks below see any second paste.
+// Returns NO if work is still pending at the deadline.
+static const NSTimeInterval kIdleDeadline = 20.0;
+static BOOL RunLoopUntilIdle(void) {
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:kIdleDeadline];
+    for (;;) {
+        if (CFRunLoopGetNextTimerFireDate(CFRunLoopGetCurrent(), kCFRunLoopDefaultMode) == 0) {
+            // Drain blocks already queued for the main thread; they may schedule more.
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantPast]];
+            if (CFRunLoopGetNextTimerFireDate(CFRunLoopGetCurrent(), kCFRunLoopDefaultMode) == 0)
+                return YES;
+        }
+        if ([deadline timeIntervalSinceNow] <= 0) return NO;
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    }
+}
+
+static int Pending(const char *mode) {
+    printf("%s: delayed work was still pending after %.0f s\n", mode, kIdleDeadline);
+    return 30;
 }
 
 static int Report(const char *mode, FCDoublePasteController *controller, NSArray *expected, int expectedPastes) {
@@ -210,14 +233,14 @@ int main(int argc, const char *argv[]) {
             [controller hitMainHotKey:nil];
             [controller metaKeysReleased];
             [controller processBezelKeyDown:ReturnKey()];
-            RunLoopFor(0.8);
+            if (!RunLoopUntilIdle()) return Pending(mode);
             return Report(mode, controller, @[@"newest"], 1);
         }
         if (strcmp(mode, "return-then-release") == 0) {
             [controller hitMainHotKey:nil];
             [controller processBezelKeyDown:ReturnKey()];
             [controller metaKeysReleased];
-            RunLoopFor(0.8);
+            if (!RunLoopUntilIdle()) return Pending(mode);
             return Report(mode, controller, @[@"newest"], 1);
         }
         if (strcmp(mode, "late-duplicate-same-selection") == 0) {
@@ -228,7 +251,7 @@ int main(int argc, const char *argv[]) {
             [NSThread sleepForTimeInterval:0.7];
             if (![controller bezelDisplayed]) return 20;
             [controller processBezelKeyDown:ReturnKey()];
-            RunLoopFor(0.8);
+            if (!RunLoopUntilIdle()) return Pending(mode);
             return Report(mode, controller, @[@"newest"], 1);
         }
         if (strcmp(mode, "new-selection-after-hide") == 0) {
@@ -237,25 +260,30 @@ int main(int argc, const char *argv[]) {
             // The first selection's bezel hides at 0.2 s and its paste completes at 0.55 s.
             // With #7 a hotkey press before that paste cancels it (the new selection owns the
             // next paste; PendingPasteTransactionRegressionTests), so open the new selection
-            // right after the previous paste.
-            RunLoopFor(0.7);
+            // right after the previous paste, once its last delayed step has run.
+            if (!RunLoopUntilIdle()) return Pending(mode);
             if ([controller bezelDisplayed]) return 21;
+            int first = Report(mode, controller, @[@"newest"], 1);   // the previous paste, once
+            if (first != 0) return first;
             [controller hitMainHotKey:nil];   // a new, intentional selection
             if (![controller bezelDisplayed]) return 22;
             [controller stackDown];
             [controller processBezelKeyDown:ReturnKey()];
-            RunLoopFor(0.8);
+            if (!RunLoopUntilIdle()) return Pending(mode);
             return Report(mode, controller, @[@"newest", @"older"], 2);
         }
         if (strcmp(mode, "new-selection-by-release-after-hide") == 0) {
             [controller hitMainHotKey:nil];
             [controller processBezelKeyDown:ReturnKey()];
-            RunLoopFor(0.7);                  // right after the previous paste (see above)
+            // Right after the previous paste (see above).
+            if (!RunLoopUntilIdle()) return Pending(mode);
             if ([controller bezelDisplayed]) return 21;
+            int first = Report(mode, controller, @[@"newest"], 1);   // the previous paste, once
+            if (first != 0) return first;
             [controller hitMainHotKey:nil];
             [controller stackDown];
             [controller metaKeysReleased];
-            RunLoopFor(0.8);
+            if (!RunLoopUntilIdle()) return Pending(mode);
             return Report(mode, controller, @[@"newest", @"older"], 2);
         }
         if (strcmp(mode, "escape-then-stale-confirm") == 0) {
@@ -269,7 +297,7 @@ int main(int argc, const char *argv[]) {
             [controller hitMainHotKey:nil];
             [controller stackDown];
             [controller processBezelKeyDown:ReturnKey()];
-            RunLoopFor(0.8);
+            if (!RunLoopUntilIdle()) return Pending(mode);
             return Report(mode, controller, @[@"older"], 1);
         }
         if (strcmp(mode, "sticky-second-return") == 0) {
@@ -277,7 +305,7 @@ int main(int argc, const char *argv[]) {
             [controller metaKeysReleased];    // pinned bezels do not paste on release
             [controller processBezelKeyDown:ReturnKey()];
             [controller processBezelKeyDown:ReturnKey()];
-            RunLoopFor(0.8);
+            if (!RunLoopUntilIdle()) return Pending(mode);
             return Report(mode, controller, @[@"newest"], 1);
         }
         if (strcmp(mode, "double-click-then-return") == 0) {
@@ -285,7 +313,7 @@ int main(int argc, const char *argv[]) {
             [controller processBezelMouseEvents:DoubleClick()];   // confirms the selection
             [controller processBezelKeyDown:ReturnKey()];          // duplicate confirmations
             [controller metaKeysReleased];
-            RunLoopFor(0.8);
+            if (!RunLoopUntilIdle()) return Pending(mode);
             return Report(mode, controller, @[@"newest"], 1);
         }
         if (strcmp(mode, "favorites-toggle-then-duplicate") == 0) {
@@ -302,7 +330,7 @@ int main(int argc, const char *argv[]) {
             if (![op favoritesStoreIsSelected]) return 25;
             [controller processBezelKeyDown:ReturnKey()];
             [controller metaKeysReleased];
-            RunLoopFor(0.8);
+            if (!RunLoopUntilIdle()) return Pending(mode);
             int result = Report(mode, controller, @[@"favorite"], 1);
             if (result != 0) return result;
             if ([op favoritesStoreIsSelected]) return 26;   // the main store is back after the paste
@@ -378,7 +406,7 @@ class BezelDoublePasteRegressionTests(unittest.TestCase):
         self.assertEqual(self.build.returncode, 0, self.build.stderr)
         run = subprocess.run(
             [str(self.binary), mode], cwd=ROOT, text=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
         )
         boundary = [line for line in run.stderr.splitlines() if "forbidden OS boundary" in line]
         self.assertEqual(
