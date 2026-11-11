@@ -44,6 +44,15 @@ static const CGFloat FlycutRestoreArrowGap = 4.0;
 // accessibility support of its own).
 static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then type the new shortcut. Escape cancels.";
 
+// VoiceOver reads a cell-based control (slider, stepper, pop-up button, text
+// field) through its cell, and the cell does not take the label set on the
+// control, so both get it.
+static void FlycutSetAccessibilityLabel(NSControl *control, NSString *label)
+{
+	[control setAccessibilityLabel:label];
+	[[control cell] setAccessibilityLabel:label];
+}
+
 // Keeps the arrows in step with the values: typing in a General field, a
 // bound stepper or field committing through the defaults controller, and the
 // Preferences window coming up. Lives as long as the app; holds the
@@ -453,6 +462,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	[self buildMainHotkeyRestoreDefaultButton];
 	[self buildGeneralRestoreDefaultButtons];
 	[self buildGeneralPermissionsPreferenceRow];
+	[self buildGeneralAccessibilityLabels];
 	[self loadHotkeyRecorderCombos];
 
 	// Initialize the FlycutOperator
@@ -1109,6 +1119,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	newControl.numberOfTickMarks=ticks;
 	[newControl setMinValue:min];
 	[newControl setMaxValue:max];
+	FlycutSetAccessibilityLabel(newControl, title);
 
 	[self setBinding:@"value" forKey:keyPath andOrAction:action on:newControl];
 
@@ -1416,6 +1427,36 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		[view setFrame:frame];
 	}
 	[pane addSubview:button];
+}
+
+// The NIB gives these controls no accessibility label, so VoiceOver said only
+// "stepper", "pop up button" or the field's text. Each gets the label shown
+// next to it, in code, so that it also works with an already compiled NIB.
+// The number beside a stepper is display-only text that VoiceOver does not
+// reach; the stepper's value is that number, so the label makes VoiceOver say
+// "Remember, 40, stepper".
+-(void)buildGeneralAccessibilityLabels
+{
+	NSView *pane = [savingSectionLabel superview];
+	NSDictionary *steppers = @{@"rememberNum": @"Remember",
+	                           @"displayNum": @"Display in menu",
+	                           @"favoritesRememberNum": @"Favorites"};
+	for (NSString *key in steppers)
+		FlycutSetAccessibilityLabel(FlycutBoundControl(pane, key, [NSStepper class]), steppers[key]);
+	// The two list fields get names of their own. The checkbox in front of each
+	// is a sub-option of "Don't save passwords" in MainMenu.xib ("by data type:",
+	// "by length & complexity:"), which alone does not say what the field holds.
+	NSDictionary *fields = @{@"skipPboardTypesList": @"Password data types",
+	                         @"skipPasswordLengthsList": @"Password lengths"};
+	for (NSString *key in fields)
+		FlycutSetAccessibilityLabel(FlycutBoundControl(pane, key, [NSTextField class]), fields[key]);
+	for (NSView *view in [pane subviews]) {
+		NSString *keyPath = [[view infoForBinding:NSSelectedIndexBinding] objectForKey:NSObservedKeyPathKey];
+		if ([view isKindOfClass:[NSPopUpButton class]] && [keyPath isEqualToString:@"values.savePreference"])
+			FlycutSetAccessibilityLabel((NSPopUpButton *)view, @"Save");
+	}
+	// The status menu's search field; its menu item is titled "Search...".
+	FlycutSetAccessibilityLabel(searchBox, @"Search");
 }
 
 // The General pane comes from the NIB and is laid out with constraints. Each
@@ -3816,6 +3857,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	[searchWindowSearchField setAction:@selector(searchWindowSearchFieldChanged:)];
 	[searchWindowSearchField setFont:[NSFont systemFontOfSize:13]];
 	[searchWindowSearchField setDelegate:self];  // Set delegate for keyboard handling
+	FlycutSetAccessibilityLabel(searchWindowSearchField, [searchWindow title]);
 	[[searchWindow contentView] addSubview:searchWindowSearchField];
 
 	// Create the table view
@@ -3838,6 +3880,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	[column setTitle:@"Clipboard Content"];
 	[column setWidth:windowWidth - 60];
 	[searchWindowTableView addTableColumn:column];
+	[searchWindowTableView setAccessibilityLabel:[column title]];
 	[column release];
 
 	[scrollView setDocumentView:searchWindowTableView];
