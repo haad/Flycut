@@ -28,6 +28,19 @@
 
 enum { kA = 7001, kB = 7002, kUnopted = 7003 };
 
+// The login accounts +[FlycutAccountShareService localLoginAccounts] answers here
+// (dummy names and GeneratedUIDs; the real directory is never read).
+static NSString *const kGuidA = @"0F0F0F0F-0000-4000-8000-000000007001";
+static NSString *const kGuidB = @"0F0F0F0F-0000-4000-8000-000000007002";
+static NSString *const kGuidU = @"0F0F0F0F-0000-4000-8000-000000007003";
+static NSString *const kGuidNewB = @"0F0F0F0F-0000-4000-8000-00000000700B";
+static NSArray *gAccounts = nil;
+static NSArray *FCFixtureLoginAccounts(id self, SEL _cmd) { return gAccounts; }
+static NSArray *DefaultAccounts(void) {
+    return @[@{@"uid": @(kA), @"name": @"Account A", @"guid": kGuidA}, @{@"uid": @(kB), @"name": @"Account B", @"guid": kGuidB},
+             @{@"uid": @(kUnopted), @"name": @"Account U", @"guid": kGuidU}];
+}
+
 @interface FCFakeApp : NSObject
 @end
 @implementation FCFakeApp
@@ -162,6 +175,7 @@ enum { kA = 7001, kB = 7002, kUnopted = 7003 };
 - (void)accountSessionDidBecomeActive:(NSNotification *)notification;
 - (void)accountSessionDidResignActive:(NSNotification *)notification;
 - (void)noteAccountSharePasteboardAtLaunch;
+- (NSString *)accountSharingStatusText;
 - (IBAction)toggleShareClippingsAcrossAccounts:(id)sender;
 - (void)rememberFrontmostApplicationForPaste;
 - (void)clearRememberedPasteTarget;
@@ -195,6 +209,9 @@ static void InstallBoundaries(void) {
     method_setImplementation(class_getClassMethod(imageStore, NSSelectorFromString(@"sharedStore")), (IMP)FCForbidden);
     method_setImplementation(class_getInstanceMethod([FlycutOperator class], @selector(saveFromStore:atIndex:withPrefix:)),
                              (IMP)FCForbiddenSave);
+    gAccounts = [DefaultAccounts() retain];
+    method_setImplementation(class_getClassMethod([FlycutAccountShareService class], @selector(localLoginAccounts)),
+                             (IMP)FCFixtureLoginAccounts);
 }
 
 static int Check(BOOL ok, const char *what) {
@@ -376,6 +393,7 @@ static int RunSetUpOnWaiting(void) {
     Participant a = Make(kA), b = Make(kB);
     [b.service setWatchesSenderFolders:NO];
     [defaults setBool:YES forKey:@"shareClippingsAcrossAccounts"];
+    [defaults setObject:@[kGuidA, kGuidB] forKey:@"shareClippingsAccountIDs"];
     [a.controller setUpAccountSharing];
     [b.controller setUpAccountSharing];
     [a.service waitForQueue];
@@ -393,6 +411,7 @@ static int RunSetUpOnWaiting(void) {
     f += Check(WaitFor(^BOOL { return [Top(c) isEqualToString:@"example-62 alpha"]; }, 3.0),
                "launched again with sharing on, B takes in the copy that waited instead of deleting the inbox");
     [defaults setBool:NO forKey:@"shareClippingsAcrossAccounts"];
+    [defaults setObject:@[] forKey:@"shareClippingsAccountIDs"];
     [a.service stop];
     [c.service stop];
     return f;
@@ -554,6 +573,7 @@ static int RunDiagnosticsPausesPickup(void) {
     Participant a = Make(kA), b = Make(kB);
     [b.service setWatchesSenderFolders:NO];
     [defaults setBool:YES forKey:@"shareClippingsAcrossAccounts"];
+    [defaults setObject:@[kGuidA, kGuidB] forKey:@"shareClippingsAccountIDs"];
     [a.controller setUpAccountSharing];
     [b.controller setUpAccountSharing];
     [a.service waitForQueue];
@@ -580,6 +600,7 @@ static int RunDiagnosticsPausesPickup(void) {
     f += Check(paused && [c.service running], "Flycut started with diagnostics on runs sharing with pickup paused");
     [defaults setBool:NO forKey:@"revealPasteboardTypes"];
     [defaults setBool:NO forKey:@"shareClippingsAcrossAccounts"];
+    [defaults setObject:@[] forKey:@"shareClippingsAccountIDs"];
     [a.service stop];
     [b.service stop];
     [c.service stop];
@@ -849,6 +870,210 @@ static int RunKeptPasteboard(void) {
     return f;
 }
 
+// While the inbox cannot be set up the sharing section says why; the
+// note goes once it works again or sharing is turned off.
+static int RunSetupFailureNote(void) {
+    int f = 0;
+    if (![FCShareController instancesRespondToSelector:@selector(accountSharingStatusText)])
+        return Check(NO, "the controller has a note for a failed inbox setup");
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *top = TopPath(kB);
+    mkdir([top fileSystemRepresentation], 0700);
+    FCRegisterOwnerAt(AT_FDCWD, [top fileSystemRepresentation], 4242);   // another account holds B's name
+    Participant b = Make(kB);
+    [b.service setLogHandler:^(NSString *line) { (void)line; }];
+    [b.service setWatchesSenderFolders:NO];
+    f += Check([b.controller accountSharingStatusText] == nil, "no note while sharing is off");
+    [b.service start];
+    NSString *taken = @"Sharing is unavailable: its folder in /Users/Shared is taken.";
+    f += Check(WaitFor(^BOOL { return [[b.controller accountSharingStatusText] isEqualToString:taken]; }, 3.0),
+               "a taken inbox name shows: Sharing is unavailable: its folder in /Users/Shared is taken.");
+    rmdir([top fileSystemRepresentation]);
+    [b.controller accountSessionDidBecomeActive:nil];   // retried at once
+    f += Check(WaitFor(^BOOL { return [b.controller accountSharingStatusText] == nil; }, 3.0) && Exists(FromPath(kB, kA)),
+               "the note goes once the inbox is set up");
+    [defaults setBool:NO forKey:@"shareClippingsAcrossAccounts"];
+    [b.controller toggleShareClippingsAcrossAccounts:nil];
+    [b.service waitForQueue];
+    f += Check([b.controller accountSharingStatusText] == nil && ![b.service running], "and while sharing is off there is none");
+    return f;
+}
+
+// Stands in for an account's checkbox (an NSButton would ask the swizzled
+// NSWorkspace for accessibility display options): its tag and state.
+@interface FCAccountCheckbox : NSObject {
+@public
+    NSInteger tag, state;
+}
+@end
+@implementation FCAccountCheckbox
+- (NSInteger)tag { return tag; }
+- (NSInteger)state { return state; }
+- (void)setState:(NSInteger)value { state = value; }
+@end
+
+static FCAccountCheckbox *AccountCheckbox(uid_t uid, BOOL on) {
+    FCAccountCheckbox *box = [[[FCAccountCheckbox alloc] init] autorelease];
+    box->tag = uid;
+    box->state = on ? NSControlStateValueOn : NSControlStateValueOff;
+    return box;
+}
+
+// The stored choice reaches the service at launch, and a click on an account
+// stores it and passes it on. Both controllers share one in-memory defaults
+// here, as if both accounts had stored the same list; each leaves itself out.
+static int RunChooseAccounts(void) {
+    int f = 0;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    Participant a = Make(kA), b = Make(kB);   // AppController's -init registers the defaults
+    id registered = [defaults objectForKey:@"shareClippingsAccountIDs"];
+    f += Check([registered isKindOfClass:[NSArray class]] && [registered count] == 0, "no account is chosen by default");
+    [a.service setWatchesSenderFolders:NO];
+    [b.service setWatchesSenderFolders:NO];
+    [defaults setBool:YES forKey:@"shareClippingsAcrossAccounts"];
+    [defaults setObject:@[kGuidB] forKey:@"shareClippingsAccountIDs"];
+    [a.controller setUpAccountSharing];
+    [b.controller setUpAccountSharing];
+    [a.service waitForQueue];
+    [b.service waitForQueue];
+    BOOL passed = [a.service respondsToSelector:@selector(chosenAccountUIDs)] && [[a.service chosenAccountUIDs] isEqualToArray:@[@(kB)]];
+    f += Check(passed, "at launch the stored choice goes to the service");
+    f += Check(Exists(FromPath(kA, kB)) && !Exists(FromPath(kA, kUnopted)) && !Exists(TopPath(kB)),
+               "A chose B and keeps a folder for B only; B (only itself in the list) keeps no inbox");
+    Copy(a, @"example-40 alpha");
+    [a.service waitForQueue];
+    f += Check(!Exists(TopPath(kB)) && [b.op jcListCount] == 0, "B did not choose A: A's copy does not reach B");
+    if (![b.controller respondsToSelector:@selector(toggleShareAccount:)])
+        return f + Check(NO, "the account checkboxes have an action");
+    [b.controller performSelector:@selector(toggleShareAccount:) withObject:AccountCheckbox(kA, YES)];
+    [b.service waitForQueue];
+    f += Check([[defaults objectForKey:@"shareClippingsAccountIDs"] isEqualToArray:@[kGuidA, kGuidB]],
+               "checking Account A stores its GeneratedUID with the earlier choice");
+    f += Check(Exists(FromPath(kB, kA)) && !Exists(FromPath(kB, kUnopted)), "B now keeps a folder for A");
+    Copy(a, @"example-41 beta");
+    [a.service waitForQueue];
+    [b.service pickUp];
+    f += Check(WaitFor(^BOOL { return [Top(b) isEqualToString:@"example-41 beta"]; }, 3.0), "A's next copy reaches B");
+    Copy(a, @"example-42 gamma");
+    [a.service waitForQueue];
+    f += Check(Waiting(kB, kA) == 1, "another copy waits for B");
+    [a.controller performSelector:@selector(toggleShareAccount:) withObject:AccountCheckbox(kB, NO)];
+    [a.service waitForQueue];
+    f += Check([[defaults objectForKey:@"shareClippingsAccountIDs"] isEqualToArray:@[kGuidA]], "unchecking Account B stores that");
+    f += Check(!Exists(TopPath(kA)) && Waiting(kB, kA) == 0,
+               "A, now sharing with nobody, drops its inbox and withdraws its copy waiting for B");
+    Copy(a, @"example-43 delta");
+    [a.service waitForQueue];
+    f += Check(Waiting(kB, kA) == 0, "A sends nothing to B any more");
+    [defaults setObject:@[] forKey:@"shareClippingsAccountIDs"];
+    [defaults setBool:NO forKey:@"shareClippingsAcrossAccounts"];
+    [a.service stop];
+    [b.service stop];
+    return f;
+}
+
+// The choice is stored by the account's GeneratedUID, so an account that
+// later gets a deleted account's UID does not inherit it.
+static int RunChoiceFollowsTheAccount(void) {
+    int f = 0;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    Participant a = Make(kA);
+    [a.service setWatchesSenderFolders:NO];
+    [defaults setBool:YES forKey:@"shareClippingsAcrossAccounts"];
+    [defaults setObject:@[kGuidB] forKey:@"shareClippingsAccountIDs"];
+    [a.controller setUpAccountSharing];
+    [a.service waitForQueue];
+    f += Check([[a.service chosenAccountUIDs] isEqualToArray:@[@(kB)]] && Exists(FromPath(kA, kB)),
+               "A shares with B");
+    // B's account is deleted and a new account gets UID 7002.
+    [gAccounts release];
+    gAccounts = [@[@{@"uid": @(kA), @"name": @"Account A", @"guid": kGuidA},
+                   @{@"uid": @(kB), @"name": @"Account New", @"guid": kGuidNewB},
+                   @{@"uid": @(kUnopted), @"name": @"Account U", @"guid": kGuidU}] retain];
+    [a.controller accountSessionDidBecomeActive:nil];
+    [a.service waitForQueue];
+    f += Check([[a.service chosenAccountUIDs] isEqualToArray:@[]] && !Exists(TopPath(kA)),
+               "the new account with B's old UID is not chosen: back at the console A drops its inbox for it");
+    f += Check([[defaults objectForKey:@"shareClippingsAccountIDs"] isEqualToArray:@[kGuidB]],
+               "the stored choice still names the old account only");
+    [a.controller performSelector:@selector(toggleShareAccount:) withObject:AccountCheckbox(kB, YES)];
+    [a.service waitForQueue];
+    NSArray *both = [@[kGuidB, kGuidNewB] sortedArrayUsingSelector:@selector(compare:)];
+    f += Check([[defaults objectForKey:@"shareClippingsAccountIDs"] isEqualToArray:both]
+               && [[a.service chosenAccountUIDs] isEqualToArray:@[@(kB)]] && Exists(FromPath(kA, kB)),
+               "checking the new account stores its own GeneratedUID and shares with it");
+    [a.controller performSelector:@selector(toggleShareAccount:) withObject:AccountCheckbox(4999, YES)];
+    f += Check([[defaults objectForKey:@"shareClippingsAccountIDs"] isEqualToArray:both],
+               "a checkbox for a UID that is no login account stores nothing");
+    [gAccounts release];
+    gAccounts = [DefaultAccounts() retain];
+    [defaults setObject:@[] forKey:@"shareClippingsAccountIDs"];
+    [defaults setBool:NO forKey:@"shareClippingsAcrossAccounts"];
+    [a.service stop];
+    return f;
+}
+
+// While the account lookup fails (nil) nothing changes: the service keeps
+// its accounts (nothing wiped or withdrawn) and a click changes nothing; at
+// launch sharing waits for a working lookup instead of running with no
+// account or with every account.
+static int RunLookupFailure(void) {
+    int f = 0;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setBool:YES forKey:@"shareClippingsAcrossAccounts"];
+    [defaults setObject:@[kGuidB] forKey:@"shareClippingsAccountIDs"];
+    // (a) Flycut starts while the lookup fails.
+    [gAccounts release];
+    gAccounts = nil;
+    Participant a = Make(kA);
+    [a.service setWatchesSenderFolders:NO];
+    [a.controller setUpAccountSharing];
+    [a.service waitForQueue];
+    f += Check([[defaults objectForKey:@"shareClippingsAccountIDs"] isEqualToArray:@[kGuidB]],
+               "with the account lookup failing the stored choice stays as it is");
+    f += Check(![a.service running] && [a.service chosenAccountUIDs] == nil && !Exists(TopPath(kA)),
+               "and sharing waits: it runs neither with no account nor with every account");
+    [a.controller toggleShareClippingsAcrossAccounts:nil];
+    [a.service waitForQueue];
+    f += Check(![a.service running] && [a.service chosenAccountUIDs] == nil && !Exists(TopPath(kA)),
+               "the sharing checkbox does not start it meanwhile either");
+    // (b) The lookup works at the next return to the console.
+    gAccounts = [DefaultAccounts() retain];
+    [a.controller accountSessionDidBecomeActive:nil];
+    [a.service waitForQueue];
+    f += Check([a.service running] && [[a.service chosenAccountUIDs] isEqualToArray:@[@(kB)]] && Exists(FromPath(kA, kB)),
+               "once the lookup works sharing starts with the stored choice");
+    // (c) Running, with copies waiting both ways; the lookup fails at a return.
+    Participant b = Make(kB);
+    [b.service setWatchesSenderFolders:NO];
+    [b.service start];
+    [b.service waitForQueue];
+    Copy(a, @"example-92 alpha");
+    [a.service waitForQueue];
+    Copy(b, @"example-93 beta");
+    [b.service waitForQueue];
+    f += Check(Waiting(kB, kA) == 1 && Waiting(kA, kB) == 1, "a copy waits in each direction");
+    [gAccounts release];
+    gAccounts = nil;
+    [a.controller accountSessionDidBecomeActive:nil];
+    [a.service waitForQueue];
+    f += Check([[a.service chosenAccountUIDs] isEqualToArray:@[@(kB)]] && Exists(FromPath(kA, kB)) && Waiting(kB, kA) == 1,
+               "a failed lookup at a return keeps the choice: A's inbox stays, its copy for B is not withdrawn");
+    f += Check(WaitFor(^BOOL { return [Top(a) isEqualToString:@"example-93 beta"]; }, 3.0), "and A still takes in B's copy");
+    FCAccountCheckbox *box = AccountCheckbox(kB, NO);
+    [a.controller performSelector:@selector(toggleShareAccount:) withObject:box];
+    [a.service waitForQueue];
+    f += Check([[defaults objectForKey:@"shareClippingsAccountIDs"] isEqualToArray:@[kGuidB]]
+               && [[a.service chosenAccountUIDs] isEqualToArray:@[@(kB)]] && Exists(FromPath(kA, kB)) && Waiting(kB, kA) == 1,
+               "and a click on an account changes nothing meanwhile");
+    f += Check(box->state == NSControlStateValueOn, "and the click is undone on its checkbox");
+    [a.service stop];
+    [b.service stop];
+    [defaults setObject:@[] forKey:@"shareClippingsAccountIDs"];
+    [defaults setBool:NO forKey:@"shareClippingsAcrossAccounts"];
+    return f;
+}
+
 @interface AppController (AccountShareCatchUp)
 - (void)captureClipboardChangeNow;
 - (void)addClipToPasteboard:(NSString *)pbFullText withRichData:(NSDictionary *)richData;
@@ -1065,10 +1290,14 @@ int main(int argc, const char **argv) {
                                 @"toggle": [NSValue valueWithPointer:RunToggle],
                                 @"diagnostics-pause": [NSValue valueWithPointer:RunDiagnosticsPausesPickup],
                                 @"toggle-withdraws": [NSValue valueWithPointer:RunToggleWithdraws],
+                                @"choose-accounts": [NSValue valueWithPointer:RunChooseAccounts],
                                 @"pasteboard-guard": [NSValue valueWithPointer:RunPasteboardGuard],
                                 @"launch-pasteboard-guard": [NSValue valueWithPointer:RunLaunchPasteboardGuard],
                                 @"tracking-pause": [NSValue valueWithPointer:RunTrackingPausePausesPickup],
-                                @"kept-pasteboard": [NSValue valueWithPointer:RunKeptPasteboard]};
+                                @"choice-follows-account": [NSValue valueWithPointer:RunChoiceFollowsTheAccount],
+                                @"setup-failure-note": [NSValue valueWithPointer:RunSetupFailureNote],
+                                @"kept-pasteboard": [NSValue valueWithPointer:RunKeptPasteboard],
+                                @"lookup-failure": [NSValue valueWithPointer:RunLookupFailure]};
         NSValue *run = [modes objectForKey:[NSString stringWithUTF8String:argv[1]]];
         if (run == nil) return 3;
         int failures = ((int (*)(void))[run pointerValue])();

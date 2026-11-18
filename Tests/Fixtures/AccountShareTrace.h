@@ -198,8 +198,12 @@ static int FCT_futimens(int fd, const struct timespec times[2]) {
 @interface FCTracedEngine : FlycutAccountShare
 @end
 
+// How often an inbox was prepared (any engine), for retry counts.
+static volatile int gFCPrepareCalls = 0;
+
 @implementation FCTracedEngine
 - (BOOL)prepareInboxForSenders:(NSArray<NSNumber *> *)uids error:(NSError **)error {
+    __sync_fetch_and_add(&gFCPrepareCalls, 1);
     uid_t saved = tFCActor;
     tFCActor = [self ownUID];
     BOOL ok = [super prepareInboxForSenders:uids error:error];

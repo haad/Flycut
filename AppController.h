@@ -72,11 +72,25 @@
     FlycutAccountShareService *accountShareService;
     NSInteger accountShareOfferedGeneration;   // the clipboard generation offered last (-pollPB:)
     NSButton *accountSharingCheckbox;
+    // One checkbox per other login account of this Mac (Preferences, General).
+    NSMutableArray *accountSharingRows;
+    // The height of the note's line below the list; the pane has it only while
+    // the note shows.
+    CGFloat accountSharingNoteLine;
+    // The section's label and how much the section made the pane taller
+    // (without the note's line), to build it again once the accounts can be
+    // read (-rebuildAccountSharingSectionIfUnread).
+    NSTextField *accountSharingLabel;
+    CGFloat accountSharingSectionHeight;
+    // "Sharing is unavailable: ..." under the list while the inbox cannot be set up.
+    NSTextField *accountSharingStatus;
     // The pasteboard generation when the session left the console (or at
     // launch), and the last one whose content Flycut keeps (-1: none): a copy
     // it took into the history or a clipping it put there from its lists.
     NSInteger accountSharePasteboardMark;
     NSInteger accountShareKeptGeneration;
+    // YES while the accounts chosen at launch could not be looked up yet.
+    BOOL accountShareChoicePending;
 
     IBOutlet NSTextField *savingSectionLabel;
     IBOutlet NSTextField *saveFromBezelToLabel;

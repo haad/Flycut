@@ -35,7 +35,9 @@ CLANG = ["/usr/bin/xcrun", "clang", "-fno-objc-arc", "-fobjc-weak", "-fblocks", 
          "-mmacosx-version-min=13.5", "-arch", "arm64", "-Wall"]
 MODES = ["start", "folder-watch", "safety-timer", "away-then-active", "launch-pickup",
          "sender-conditions", "wipe", "off-wipe-retried", "leftover-wipe",
-         "account-rule", "launch-age", "pause-pickup", "withdraw-on-off"]
+         "account-rule", "launch-age", "pause-pickup", "withdraw-on-off",
+         "chosen-accounts", "account-names", "setup-failure", "lookup-failure", "restart-logs-again",
+         "stale-failure-ignored"]
 
 
 def remove_tree(path: pathlib.Path) -> None:
@@ -129,6 +131,30 @@ class AccountShareServiceTests(unittest.TestCase):
 
     def test_turning_off_withdraws_this_accounts_waiting_copies(self) -> None:
         self.run_case("withdraw-on-off")
+
+    def test_only_accounts_that_chose_each_other_share(self) -> None:
+        self.run_case("chosen-accounts")
+
+    def test_a_failed_setup_is_reported_logged_once_and_retried_with_backoff(self) -> None:
+        self.run_case("setup-failure")
+
+    def test_a_setup_failure_is_logged_again_after_sharing_is_turned_on_again(self) -> None:
+        self.run_case("restart-logs-again")
+
+    def test_a_stale_setup_failure_is_not_published(self) -> None:
+        self.run_case("stale-failure-ignored")
+
+    def test_a_failed_account_lookup_wipes_and_withdraws_nothing(self) -> None:
+        self.run_case("lookup-failure")
+
+    def test_a_passwd_record_larger_than_the_first_buffer_is_read(self) -> None:
+        self.run_case("passwd-buffer")
+
+    def test_a_failed_account_lookup_is_logged_once(self) -> None:
+        self.run_case("lookup-logged-once")
+
+    def test_account_list_with_names(self) -> None:
+        self.run_case("account-names")
 
     def test_trace_refuses_writes_outside_the_injected_root(self) -> None:
         self.run_case("containment", violations=True)

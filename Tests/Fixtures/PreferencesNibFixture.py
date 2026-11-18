@@ -126,8 +126,18 @@ static void SendBuilders(const char *list)
 // set up what a NIB compiled from a newer MainMenu.xib would have.
 static void (*BeforeBuilders)(void);
 
+// The account-sharing section lists this Mac's login accounts. In these fixtures
+// it lists FixtureLoginAccounts (dummy names, none by default), never the real
+// ones: +[FlycutAccountShareService localLoginAccounts] is replaced before any
+// builder runs.
+static NSArray *FixtureLoginAccounts = nil;
+static NSArray *FixtureLocalLoginAccounts(id self, SEL cmd) { (void)self; (void)cmd; return FixtureLoginAccounts ?: @[]; }
+
 static void InstallBoundaries(void)
 {
+    Class share = NSClassFromString(@"FlycutAccountShareService");
+    Method accounts = share ? class_getClassMethod(share, NSSelectorFromString(@"localLoginAccounts")) : NULL;
+    if (accounts) method_setImplementation(accounts, (IMP)FixtureLocalLoginAccounts);
     method_setImplementation(class_getInstanceMethod([AppController class], @selector(awakeFromNib)), (IMP)Noop);
     method_setImplementation(class_getInstanceMethod([UKPrefsPanel class], @selector(awakeFromNib)), (IMP)Noop);
     method_setImplementation(class_getInstanceMethod([SGHotKeyCenter class], @selector(registerHotKey:)), (IMP)FakeRegister);

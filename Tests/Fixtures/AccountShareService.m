@@ -81,6 +81,54 @@ static NSArray *FCFakeSearchPath(NSSearchPathDirectory directory, NSSearchPathDo
 #undef NSSearchPathForDirectoriesInDomains
 
 #include "AccountShareTrace.h"
+
+// The directory lookup of the login accounts can be made to fail.
+#import <CoreServices/CoreServices.h>
+#include <membership.h>
+static BOOL gFailQueryCreate = NO, gFailQueryExecute = NO, gFailGeneratedUID = NO;
+static CSIdentityQueryRef FCT_CSIdentityQueryCreate(CFAllocatorRef allocator, CSIdentityClass identityClass,
+                                                    CSIdentityAuthorityRef authority) {
+    return gFailQueryCreate ? NULL : CSIdentityQueryCreate(allocator, identityClass, authority);
+}
+static Boolean FCT_CSIdentityQueryExecute(CSIdentityQueryRef query, CSIdentityQueryFlags flags, CFErrorRef *error) {
+    return gFailQueryExecute ? false : CSIdentityQueryExecute(query, flags, error);
+}
+static int FCT_mbr_uid_to_uuid(uid_t uid, unsigned char *uu) {
+    return gFailGeneratedUID ? EIO : mbr_uid_to_uuid(uid, uu);
+}
+// The next gPasswdErrors passwd lookups fail with an error (the directory
+// cannot be asked), once the next gPasswdSkip ones went through; the next
+// gPasswdMissing ones find no entry. A buffer smaller than gPasswdNeed bytes
+// gets ERANGE (a record that large); gPasswdLargest is the largest one seen.
+static int gPasswdErrors = 0, gPasswdMissing = 0, gPasswdSkip = 0;
+static size_t gPasswdNeed = 0, gPasswdLargest = 0;
+static int FCT_getpwuid_r(uid_t uid, struct passwd *entry, char *buffer, size_t size, struct passwd **found) {
+    if (size > gPasswdLargest)
+        gPasswdLargest = size;
+    if (size < gPasswdNeed) {
+        *found = NULL;
+        return ERANGE;
+    }
+    if (gPasswdSkip > 0) {
+        gPasswdSkip--;
+        return getpwuid_r(uid, entry, buffer, size, found);
+    }
+    if (gPasswdErrors > 0) {
+        gPasswdErrors--;
+        *found = NULL;
+        return EIO;
+    }
+    if (gPasswdMissing > 0) {
+        gPasswdMissing--;
+        *found = NULL;
+        return 0;
+    }
+    return getpwuid_r(uid, entry, buffer, size, found);
+}
+#define CSIdentityQueryCreate(...) FCT_CSIdentityQueryCreate(__VA_ARGS__)
+#define CSIdentityQueryExecute(...) FCT_CSIdentityQueryExecute(__VA_ARGS__)
+#define mbr_uid_to_uuid(...) FCT_mbr_uid_to_uuid(__VA_ARGS__)
+#define getpwuid_r(...) FCT_getpwuid_r(__VA_ARGS__)
 // What the service logs with NSLog is kept here, never printed.
 static NSMutableArray *gLogged = nil;
 static void FCT_NSLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
@@ -108,6 +156,10 @@ static NSUInteger LoggedWith(NSString *prefix) {
 #define NSLog(...) FCT_NSLog(__VA_ARGS__)
 #include "FlycutEngine/FlycutAccountShareService.m"
 #undef NSLog
+#undef CSIdentityQueryCreate
+#undef CSIdentityQueryExecute
+#undef mbr_uid_to_uuid
+#undef getpwuid_r
 
 // ---------------------------------------------------------------------------
 
@@ -122,6 +174,7 @@ static BOOL gActive[3] = { YES, YES, YES };   // A, B, 7003: session on the cons
     NSMutableArray *received;
     NSMutableArray *pasteboard;
     BOOL offMain;
+    int stateChanges;
 }
 @end
 
@@ -140,6 +193,10 @@ static BOOL gActive[3] = { YES, YES, YES };   // A, B, 7003: session on the cons
 - (void)accountShareService:(FlycutAccountShareService *)service shouldPutOnPasteboard:(FlycutSharedClipping *)clipping {
     if (![NSThread isMainThread]) offMain = YES;
     [pasteboard addObject:clipping];
+}
+- (void)accountShareServiceDidChangeState:(FlycutAccountShareService *)service {
+    if (![NSThread isMainThread]) offMain = YES;
+    stateChanges++;
 }
 @end
 
@@ -174,6 +231,18 @@ static FlycutAccountShareService *Service(uid_t uid, FCRecorder *recorder) {
     FlycutAccountShareService *service = [[FlycutAccountShareService alloc]
         initWithEngine:FCTracedEngineFor(gShared, uid, (id<FlycutAccountShareFilter>)gOperator)
               accounts:^NSArray *{ return @[@(kA), @(kB), @(kUnopted)]; }
+       sessionIsActive:^BOOL { return gActive[slot]; }];
+    [service setDelegate:recorder];
+    [service setSafetyInterval:3600];
+    return [service autorelease];
+}
+
+// A service with its own account list (nil: the lookup failed).
+static FlycutAccountShareService *ServiceWithAccounts(uid_t uid, FCRecorder *recorder, FlycutAccountShareAccountList accounts) {
+    int slot = SlotOf(uid);
+    FlycutAccountShareService *service = [[FlycutAccountShareService alloc]
+        initWithEngine:FCTracedEngineFor(gShared, uid, (id<FlycutAccountShareFilter>)gOperator)
+              accounts:accounts
        sessionIsActive:^BOOL { return gActive[slot]; }];
     [service setDelegate:recorder];
     [service setSafetyInterval:3600];
@@ -709,6 +778,354 @@ static int RunWithdrawOnOff(void) {
     return f;
 }
 
+// Choosing accounts: B keeps a folder only for the accounts it chose, A writes only
+// to the accounts it chose, so a copy goes from A to B only if both chose each
+// other. Unchoosing removes the folder with what waits in it and withdraws this
+// account's own waiting copies.
+static int RunChosenAccounts(void) {
+    int f = 0;
+    FCRecorder *ra = [[[FCRecorder alloc] init] autorelease], *rb = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *a = Service(kA, ra), *b = Service(kB, rb);
+    [a setWatchesSenderFolders:NO];
+    [b setWatchesSenderFolders:NO];
+    [a setChosenAccountUIDs:@[@(kB)]];
+    [b setChosenAccountUIDs:@[]];
+    f += Check([[a chosenAccountUIDs] isEqualToArray:@[@(kB)]], "the service keeps the chosen accounts");
+    [a start];
+    [b start];
+    Settle(a);
+    Settle(b);
+    f += Check(Exists(FromPath(kA, kB)) && !Exists(FromPath(kA, kUnopted)) && [Entries(TopPath(kA)) count] == 1,
+               "A keeps a folder only for the account it chose");
+    f += Check(!Exists(TopPath(kB)), "B, which chose nobody, keeps no inbox at all");
+    Offer(a, @"example-50 alpha");
+    Settle(a);
+    f += Check(!Exists(TopPath(kB)), "A's copy goes nowhere: B did not choose A");
+    [b setChosenAccountUIDs:@[@(kA), @(kUnopted), @4242]];
+    Settle(b);
+    f += Check(Exists(FromPath(kB, kA)) && Exists(FromPath(kB, kUnopted)) && [Entries(TopPath(kB)) count] == 2,
+               "B chooses A and 7003: their folders appear; 4242, not an account here, is ignored");
+    Offer(a, @"example-51 beta");
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 1, "now A's copy reaches B");
+    Offer(b, @"example-52 gamma");
+    Settle(b);
+    f += Check([Entries(FromPath(kA, kB)) count] == 1 && !Exists(TopPath(kUnopted)),
+               "B's copy reaches A, which chose B; 7003 chose nobody and gets nothing");
+    [a setChosenAccountUIDs:@[]];
+    Settle(a);
+    f += Check(!Exists(TopPath(kA)), "A unchooses B: A's inbox goes, with B's copy waiting in it");
+    f += Check([Entries(FromPath(kB, kA)) count] == 0 && Exists(FromPath(kB, kA)),
+               "and A's own copy waiting for B is withdrawn; B's folder for A stays");
+    Offer(a, @"example-53 delta");
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 0, "A sends nothing to B any more");
+    [a pickUp];
+    [b pickUp];
+    Settle(a);
+    Settle(b);
+    f += Check([ra->received count] == 0 && [rb->received count] == 0, "neither takes anything in");
+    [b setChosenAccountUIDs:@[@(kA)]];
+    Settle(b);
+    f += Check(Exists(FromPath(kB, kA)) && !Exists(FromPath(kB, kUnopted)), "B unchooses 7003: only 7003's folder goes");
+    [a setChosenAccountUIDs:@[@(kB)]];
+    Settle(a);
+    Offer(a, @"example-54 epsilon");
+    Settle(a);
+    [b pickUp];
+    f += Check(WaitFor(^BOOL { return [rb->received count] == 1; }, 3.0) && [TextOf([rb->received lastObject]) isEqualToString:@"example-54 epsilon"],
+               "choosing each other again shares again");
+    [a stop];
+    [b stop];
+    return f;
+}
+
+// The account list for Preferences: the login-account rule plus the full name,
+// sorted by name.
+// A failed inbox setup is reported (state on the main thread, one log line
+// without names or paths) and retried with growing pauses, not on every tick.
+static int RunSetupFailure(void) {
+    int f = 0;
+    FCRecorder *rb = [[[FCRecorder alloc] init] autorelease];
+    NSString *top = TopPath(kB);
+    // Another account (4242) holds B's inbox name.
+    mkdir([top fileSystemRepresentation], 0700);
+    FCRegisterOwnerAt(AT_FDCWD, [top fileSystemRepresentation], 4242);
+    FlycutAccountShareService *b = Service(kB, rb);
+    if (![b respondsToSelector:@selector(setLogHandler:)] || ![b respondsToSelector:@selector(inboxErrorCode)])
+        return Check(NO, "the service reports a failed inbox setup");
+    NSMutableArray *logged = [NSMutableArray array];
+    [b setLogHandler:^(NSString *line) { @synchronized (logged) { [logged addObject:line]; } }];
+    [b setSafetyInterval:0.05];
+    int before = gFCPrepareCalls;
+    [b start];
+    Settle(b);
+    f += Check([b inboxErrorCode] == FlycutAccountShareErrorUntrustedInbox && rb->stateChanges == 1 && !rb->offMain,
+               "a taken inbox name is reported to the delegate on the main thread");
+    Spin(1.6);
+    int attempts = gFCPrepareCalls - before;
+    printf("setup attempts in 1.6 s at a 0.05 s tick: %d\n", attempts);
+    f += Check(attempts >= 3 && attempts <= 10, "it is retried, with growing pauses instead of on every tick");
+    NSString *line = [logged count] == 1 ? [logged objectAtIndex:0] : nil;
+    f += Check(line != nil && rb->stateChanges == 1, "the failure is logged once and reported once");
+    f += Check(line != nil && [line rangeOfString:@"/"].location == NSNotFound && [line rangeOfString:@"Account"].location == NSNotFound
+               && [line rangeOfString:@"unavailable"].location != NSNotFound, "the log line names no path and no account");
+    rmdir([top fileSystemRepresentation]);
+    f += Check(WaitFor(^BOOL { return [b inboxErrorCode] == 0 && Exists(FromPath(kB, kA)); }, 5.0) && rb->stateChanges == 2,
+               "once the name is free a retry sets the inbox up and the report clears");
+    // Sharing turned off: no report even while the setup would fail.
+    [b stopAndWipeInbox];
+    Settle(b);
+    mkdir([top fileSystemRepresentation], 0700);
+    FCRegisterOwnerAt(AT_FDCWD, [top fileSystemRepresentation], 4242);
+    [b start];
+    Settle(b);
+    f += Check([b inboxErrorCode] == FlycutAccountShareErrorUntrustedInbox, "turning it on again reports at once");
+    [b stopAndWipeInbox];
+    Settle(b);
+    f += Check([b inboxErrorCode] == 0 && rb->stateChanges == 4, "turning it off clears the report");
+    f += Check([logged count] == 2, "a new failure after the inbox worked again is logged again, once");
+    rmdir([top fileSystemRepresentation]);
+    return f;
+}
+
+// An account lookup that fails gives nil, not an empty list, and the
+// service then changes nothing: no inbox is wiped, no copy withdrawn, no
+// folder removed; once the lookup works again it goes on as before.
+static int RunLookupFailure(void) {
+    int f = 0;
+    gFailQueryCreate = YES;
+    f += Check([FlycutAccountShareService localLoginAccounts] == nil && [FlycutAccountShareService localLoginAccountUIDs] == nil,
+               "a directory query that cannot be made gives no account list (nil), not an empty one");
+    gFailQueryCreate = NO;
+    gFailQueryExecute = YES;
+    f += Check([FlycutAccountShareService localLoginAccounts] == nil && [FlycutAccountShareService localLoginAccountUIDs] == nil,
+               "a directory query that fails gives none either");
+    gFailQueryExecute = NO;
+    gFailGeneratedUID = YES;
+    f += Check([FlycutAccountShareService localLoginAccounts] == nil,
+               "an account whose GeneratedUID cannot be read gives none either");
+    gFailGeneratedUID = NO;
+    gPasswdErrors = 1;
+    BOOL accountsFail = [FlycutAccountShareService localLoginAccounts] == nil;
+    gPasswdErrors = 1;
+    BOOL uidsFail = [FlycutAccountShareService localLoginAccountUIDs] == nil;
+    gPasswdErrors = 0;
+    f += Check(accountsFail && uidsFail, "a passwd lookup error for one account gives none either, not a list without it");
+    for (int skip = 1; skip <= 3; skip += 2) {
+        gPasswdSkip = skip;
+        gPasswdErrors = 1;
+        BOOL none = [FlycutAccountShareService localLoginAccounts] == nil;
+        BOOL reached = gPasswdErrors == 0;
+        gPasswdSkip = 0;
+        gPasswdErrors = 0;
+        f += Check(reached && none, skip == 1 ? "a passwd error after one record was read fails the whole lookup too"
+                                              : "and after three records were read");
+    }
+    gPasswdMissing = 1;
+    f += Check([FlycutAccountShareService localLoginAccounts] != nil, "a UID without a passwd entry only leaves that account out");
+    gPasswdMissing = 0;
+    f += Check([FlycutAccountShareService localLoginAccounts] != nil && [FlycutAccountShareService localLoginAccountUIDs] != nil,
+               "with the lookup working the list is there (none is printed)");
+    __block BOOL works = YES;
+    FCRecorder *ra = [[[FCRecorder alloc] init] autorelease], *rb = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *a = Service(kA, ra);
+    FlycutAccountShareService *b = ServiceWithAccounts(kB, rb, ^NSArray *{ return works ? @[@(kA), @(kB), @(kUnopted)] : nil; });
+    [a setWatchesSenderFolders:NO];
+    [b setWatchesSenderFolders:NO];
+    [a start];
+    [b start];
+    Settle(a);
+    Settle(b);
+    Offer(a, @"example-90 alpha");
+    Settle(a);
+    Offer(b, @"example-91 beta");
+    Settle(b);
+    f += Check([Entries(FromPath(kB, kA)) count] == 1 && [Entries(FromPath(kA, kB)) count] == 1 && Exists(FromPath(kB, kUnopted)),
+               "a copy waits in each direction; B keeps a folder for 7003 too");
+    works = NO;
+    [b setChosenAccountUIDs:@[@(kA)]];
+    Settle(b);
+    f += Check([Entries(FromPath(kB, kA)) count] == 1 && Exists(FromPath(kB, kUnopted)),
+               "while B's lookup fails, a new choice wipes nothing in B's inbox");
+    f += Check([Entries(FromPath(kA, kB)) count] == 1, "and withdraws nothing B sent");
+    [b sessionDidBecomeActive];
+    Settle(b);
+    f += Check(Exists(FromPath(kB, kA)) && Exists(FromPath(kB, kUnopted)) && [Entries(FromPath(kA, kB)) count] == 1,
+               "a return to the console wipes and withdraws nothing either");
+    f += Check([rb->received count] == 1 && [TextOf([rb->received lastObject]) isEqualToString:@"example-90 alpha"],
+               "and still takes in what waited");
+    f += Check([b inboxErrorCode] == 0 && rb->stateChanges == 0, "no inbox failure is reported");
+    works = YES;
+    [b sessionDidBecomeActive];
+    Settle(b);
+    f += Check(Exists(FromPath(kB, kA)) && !Exists(FromPath(kB, kUnopted)) && [Entries(FromPath(kA, kB)) count] == 1,
+               "once it works again the new choice applies: 7003's folder goes, the rest stays");
+    [a stop];
+    [b stop];
+    return f;
+}
+
+// A passwd record larger than the first 4 KB buffer (getpwuid_r answers
+// ERANGE) is read with a larger buffer, grown up to 1 MB; one that needs more
+// fails the lookup. Nothing is logged while it works.
+static int RunPasswdBuffer(void) {
+    int f = 0;
+    gPasswdNeed = 100 * 1024;
+    gPasswdLargest = 0;
+    BOOL read = [FlycutAccountShareService localLoginAccounts] != nil;
+    f += Check(read && gPasswdLargest >= gPasswdNeed && gPasswdLargest <= 1024 * 1024 && [Logged() count] == 0,
+               "a record that needs 100 KB is read with a grown buffer, and nothing is logged");
+    gPasswdNeed = 2 * 1024 * 1024;
+    gPasswdLargest = 0;
+    BOOL none = [FlycutAccountShareService localLoginAccounts] == nil;
+    f += Check(none && gPasswdLargest == 1024 * 1024,
+               "one that needs more than 1 MB fails the lookup: the buffer grows to 1 MB and no further");
+    gPasswdNeed = 0;
+    NSArray *lines = Logged();
+    f += Check([lines count] == 1 && [[lines objectAtIndex:0] isEqualToString:
+                   @"Flycut: the accounts on this Mac cannot be read for sharing (passwd lookup error 34)"],
+               "that failure is logged, with the error code");
+    return f;
+}
+
+// A lookup that keeps failing is logged once per launch, with a fixed text and
+// the error code and no account name, not at every lookup.
+static int RunLookupLoggedOnce(void) {
+    int f = 0;
+    gPasswdErrors = 1000;
+    BOOL none = YES;
+    for (int i = 0; i < 3; i++)
+        none = none && [FlycutAccountShareService localLoginAccounts] == nil;
+    gPasswdErrors = 0;
+    gFailQueryExecute = YES;
+    none = none && [FlycutAccountShareService localLoginAccountUIDs] == nil;
+    gFailQueryExecute = NO;
+    NSArray *lines = Logged();
+    f += Check(none, "a passwd error that persists fails every lookup");
+    f += Check([lines count] == 1, "it is logged once, not at every lookup, nor again for another kind of failure");
+    f += Check([lines count] == 1 && [[lines objectAtIndex:0] isEqualToString:
+                   @"Flycut: the accounts on this Mac cannot be read for sharing (passwd lookup error 5)"],
+               "with a fixed text and the error code, no account name");
+    f += Check([FlycutAccountShareService localLoginAccounts] != nil && [Logged() count] == 1,
+               "once it works the list is there again");
+    return f;
+}
+
+// Turning sharing off and on again while the inbox still cannot be set
+// up logs the failure again (once), as the note under the account list comes
+// back too; retries within one start stay quiet.
+static int RunRestartLogsAgain(void) {
+    int f = 0;
+    FCRecorder *rb = [[[FCRecorder alloc] init] autorelease];
+    NSString *top = TopPath(kB);
+    mkdir([top fileSystemRepresentation], 0700);
+    FCRegisterOwnerAt(AT_FDCWD, [top fileSystemRepresentation], 4242);   // another account holds B's name
+    FlycutAccountShareService *b = Service(kB, rb);
+    [b setWatchesSenderFolders:NO];
+    NSMutableArray *logged = [NSMutableArray array];
+    [b setLogHandler:^(NSString *line) { @synchronized (logged) { [logged addObject:line]; } }];
+    [b start];
+    Settle(b);
+    f += Check([logged count] == 1 && [b inboxErrorCode] == FlycutAccountShareErrorUntrustedInbox, "a taken inbox name is logged once");
+    [b stopAndWipeInbox];
+    Settle(b);
+    [b start];
+    Settle(b);
+    f += Check([logged count] == 2 && [b inboxErrorCode] == FlycutAccountShareErrorUntrustedInbox,
+               "sharing turned off and on with the same failure logs it again");
+    [b sessionDidBecomeActive];
+    Settle(b);
+    f += Check([logged count] == 2, "a retry within the same start logs nothing new");
+    [b stop];
+    Settle(b);
+    [b start];
+    Settle(b);
+    f += Check([logged count] == 3, "a stop and a new start log it again too");
+    [b stopAndWipeInbox];
+    Settle(b);
+    struct stat st;
+    f += Check(lstat([top fileSystemRepresentation], &st) == 0 && FCLookupOwner(&st) == 4242, "the other account's folder is left alone");
+    rmdir([top fileSystemRepresentation]);
+    return f;
+}
+
+// A setup failure the queue reports for an earlier start,
+// or once sharing is off, is not published: main-thread blocks run only when
+// this fixture spins, so the stale report is still queued when it stops.
+static int RunStaleFailureIgnored(void) {
+    int f = 0;
+    FCRecorder *rb = [[[FCRecorder alloc] init] autorelease];
+    NSString *top = TopPath(kB);
+    mkdir([top fileSystemRepresentation], 0700);
+    FCRegisterOwnerAt(AT_FDCWD, [top fileSystemRepresentation], 4242);   // another account holds B's name
+    FlycutAccountShareService *b = Service(kB, rb);
+    [b setWatchesSenderFolders:NO];
+    [b setLogHandler:^(NSString *line) { (void)line; }];
+    // (a) The failure arrives after sharing was turned off.
+    [b start];
+    [b waitForQueue];
+    [b stop];
+    [b waitForQueue];
+    Spin(0.2);
+    f += Check([b inboxErrorCode] == 0 && rb->stateChanges == 0, "a failure reported after sharing went off is not published");
+    // (b) The failure of an earlier start arrives while a later start works.
+    [b start];
+    [b waitForQueue];
+    [b stop];
+    rmdir([top fileSystemRepresentation]);
+    [b start];
+    [b waitForQueue];
+    Spin(0.2);
+    f += Check([b running] && [b inboxErrorCode] == 0 && rb->stateChanges == 0 && Exists(FromPath(kB, kA)),
+               "a failure of an earlier start is not published while the current one works");
+    // The current start's own failure is.
+    [b stopAndWipeInbox];
+    Settle(b);
+    mkdir([top fileSystemRepresentation], 0700);
+    FCRegisterOwnerAt(AT_FDCWD, [top fileSystemRepresentation], 4242);
+    [b start];
+    Settle(b);
+    f += Check([b inboxErrorCode] == FlycutAccountShareErrorUntrustedInbox && rb->stateChanges == 1,
+               "the current start's failure is published");
+    [b stopAndWipeInbox];
+    Settle(b);
+    rmdir([top fileSystemRepresentation]);
+    return f;
+}
+
+static int RunAccountNames(void) {
+    int f = 0;
+    NSArray *records = @[@{@"uid": @7002, @"hidden": @NO, @"enabled": @YES, @"shell": @"/bin/zsh", @"home": @"/Users/example-b", @"name": @"Account B"},
+                         @{@"uid": @7001, @"hidden": @NO, @"enabled": @YES, @"shell": @"/bin/zsh", @"home": @"/Users/example-a", @"name": @"Account A"},
+                         @{@"uid": @7004, @"hidden": @YES, @"enabled": @YES, @"shell": @"/bin/zsh", @"home": @"/Users/example-h", @"name": @"Hidden"},
+                         @{@"uid": @7005, @"hidden": @NO, @"enabled": @YES, @"shell": @"/bin/zsh", @"home": @"/Users/example-n"},
+                         @{@"uid": @7001, @"hidden": @NO, @"enabled": @YES, @"shell": @"/bin/zsh", @"home": @"/Users/example-a", @"name": @"Account A again"}];
+    NSArray *accounts = [FlycutAccountShareService loginAccountsFromRecords:records];
+    NSArray *expected = @[@{@"uid": @7005, @"name": @""}, @{@"uid": @7001, @"name": @"Account A"}, @{@"uid": @7002, @"name": @"Account B"}];
+    f += Check([accounts isEqualToArray:expected], "login accounts with their names, once each, sorted by name (no name first)");
+    NSString *guid = @"0F0F0F0F-0000-4000-8000-000000007001";
+    NSArray *withGuid = [FlycutAccountShareService loginAccountsFromRecords:@[
+        @{@"uid": @7001, @"hidden": @NO, @"enabled": @YES, @"shell": @"/bin/zsh", @"home": @"/Users/example-a", @"name": @"Account A", @"guid": guid},
+        @{@"uid": @7002, @"hidden": @NO, @"enabled": @YES, @"shell": @"/bin/zsh", @"home": @"/Users/example-b", @"name": @"Account B", @"guid": @7}]];
+    f += Check([withGuid isEqualToArray:@[@{@"uid": @7001, @"name": @"Account A", @"guid": guid}, @{@"uid": @7002, @"name": @"Account B"}]],
+               "an account's GeneratedUID is passed on, a malformed one is not");
+    f += Check([[FlycutAccountShareService loginAccountUIDsFromRecords:records] isEqualToArray:@[@7001, @7002, @7005]],
+               "the UID list follows the same rule");
+    BOOL sane = YES;
+    NSArray *local = [FlycutAccountShareService localLoginAccounts];
+    for (NSDictionary *account in local)
+        if (![[account objectForKey:@"uid"] isKindOfClass:[NSNumber class]] || ![[account objectForKey:@"name"] isKindOfClass:[NSString class]]
+            || ![[account objectForKey:@"guid"] isKindOfClass:[NSString class]] || [(NSString *)[account objectForKey:@"guid"] length] != 36
+            || [[[NSUUID alloc] initWithUUIDString:[account objectForKey:@"guid"]] autorelease] == nil)
+            sane = NO;
+    NSMutableArray *localUIDs = [NSMutableArray array];
+    for (NSDictionary *account in local) [localUIDs addObject:[account objectForKey:@"uid"]];
+    f += Check(sane && [[localUIDs sortedArrayUsingSelector:@selector(compare:)] isEqualToArray:[FlycutAccountShareService localLoginAccountUIDs]],
+               "the local directory gives a UID, a name and a GeneratedUID per account (none is printed)");
+    return f;
+}
+
 // The trace must refuse, not only count, what would leave the injected root: an
 // engine pointed at a directory outside it (standing in for a real shared folder)
 // creates nothing there.
@@ -767,7 +1184,15 @@ int main(int argc, const char **argv) {
                                 @"containment": [NSValue valueWithPointer:RunContainment],
                                 @"launch-age": [NSValue valueWithPointer:RunLaunchAge],
                                 @"pause-pickup": [NSValue valueWithPointer:RunPausePickup],
-                                @"withdraw-on-off": [NSValue valueWithPointer:RunWithdrawOnOff]};
+                                @"withdraw-on-off": [NSValue valueWithPointer:RunWithdrawOnOff],
+                                @"chosen-accounts": [NSValue valueWithPointer:RunChosenAccounts],
+                                @"account-names": [NSValue valueWithPointer:RunAccountNames],
+                                @"setup-failure": [NSValue valueWithPointer:RunSetupFailure],
+                                @"lookup-failure": [NSValue valueWithPointer:RunLookupFailure],
+                                @"passwd-buffer": [NSValue valueWithPointer:RunPasswdBuffer],
+                                @"lookup-logged-once": [NSValue valueWithPointer:RunLookupLoggedOnce],
+                                @"restart-logs-again": [NSValue valueWithPointer:RunRestartLogsAgain],
+                                @"stale-failure-ignored": [NSValue valueWithPointer:RunStaleFailureIgnored]};
         NSValue *run = [modes objectForKey:[NSString stringWithUTF8String:argv[1]]];
         if (run == nil) return 3;
         int failures = ((int (*)(void))[run pointerValue])();

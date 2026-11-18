@@ -13,12 +13,20 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreServices/CoreServices.h>
 #include <fcntl.h>
+#include <membership.h>
 #include <pwd.h>
 #include <unistd.h>
 
 static const NSTimeInterval kDefaultSafetyInterval = 60.0;
+// After a failed inbox setup the safety timer retries after 1, 2, 4 ... ticks,
+// at most this many (30 minutes at the default interval).
+static const NSUInteger kMaxRetryTicks = 30;
 // At launch a waiting copy replaces the pasteboard only if it is younger.
 static const NSTimeInterval kLaunchPasteboardAge = 10 * 60;
+// getpwuid_r's buffer: the usual size first (_SC_GETPW_R_SIZE_MAX), doubled
+// for a larger record (ERANGE) up to this bound.
+static const size_t kPasswdBufferSize = 4096;
+static const size_t kMaxPasswdBufferSize = 1024 * 1024;
 
 // How a pickup came about; decides what may go to the pasteboard.
 typedef NS_ENUM(NSInteger, FCShareArrival) {
@@ -37,12 +45,15 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 	FlycutAccountShareSessionState sessionState;
 	BOOL running;
 	BOOL pickupPaused;
+	NSArray *chosenAccountUIDs;
 	NSUInteger generation;
 	FlycutSharedClipping *pendingPasteboardClipping;
+	NSInteger inboxErrorCode;
 	// The queue's own state, touched only on the queue.
 	dispatch_queue_t queue;
 	BOOL queueRunning;
 	BOOL queuePickupPaused;
+	NSArray *queueChosen;
 	NSUInteger queueGeneration;
 	NSArray *recipients;
 	NSMutableArray *folderWatches;
@@ -53,9 +64,13 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 	BOOL wipeRetryScheduled;
 	NSTimeInterval wipeRetryInterval;
 	BOOL loggedWipeFailure;
+	NSUInteger refreshFailures;
+	NSUInteger ticksUntilRetry;
+	NSInteger loggedErrorCode;
 }
 
-@synthesize engine, delegate, running, pickupPaused, safetyInterval, watchesSenderFolders;
+@synthesize engine, delegate, running, pickupPaused, chosenAccountUIDs, safetyInterval, watchesSenderFolders, inboxErrorCode,
+	logHandler;
 
 +(NSString *)sharedRootPath
 {
@@ -64,9 +79,18 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 
 +(NSArray<NSNumber *> *)loginAccountUIDsFromRecords:(NSArray<NSDictionary *> *)records
 {
+	NSMutableArray *uids = [NSMutableArray array];
+	for ( NSDictionary *account in [self loginAccountsFromRecords:records] )
+		[uids addObject:[account objectForKey:@"uid"]];
+	return [uids sortedArrayUsingSelector:@selector(compare:)];
+}
+
++(NSArray<NSDictionary *> *)loginAccountsFromRecords:(NSArray<NSDictionary *> *)records
+{
 	NSSet *noLogin = [NSSet setWithObjects:@"", @"/usr/bin/false", @"/bin/false", @"/sbin/nologin",
 					  @"/usr/sbin/nologin", nil];
 	NSMutableSet *uids = [NSMutableSet set];
+	NSMutableArray *accounts = [NSMutableArray array];
 	for ( NSDictionary *record in records ) {
 		id uid = [record objectForKey:@"uid"], shell = [record objectForKey:@"shell"], home = [record objectForKey:@"home"];
 		if ( ![uid isKindOfClass:[NSNumber class]] || ![shell isKindOfClass:[NSString class]]
@@ -82,38 +106,132 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 			continue;
 		if ( ![[home stringByDeletingLastPathComponent] isEqualToString:@"/Users"] || [home isEqualToString:@"/Users/Shared"] )
 			continue;
-		[uids addObject:[NSNumber numberWithLongLong:value]];
+		NSNumber *number = [NSNumber numberWithLongLong:value];
+		if ( [uids containsObject:number] )
+			continue;
+		[uids addObject:number];
+		id name = [record objectForKey:@"name"], guid = [record objectForKey:@"guid"];
+		NSMutableDictionary *account = [NSMutableDictionary dictionaryWithObjectsAndKeys:number, @"uid",
+			[name isKindOfClass:[NSString class]] ? name : @"", @"name", nil];
+		if ( [guid isKindOfClass:[NSString class]] && [guid length] > 0 )
+			[account setObject:guid forKey:@"guid"];
+		[accounts addObject:account];
 	}
-	return [[uids allObjects] sortedArrayUsingSelector:@selector(compare:)];
+	[accounts sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+		NSComparisonResult byName = [[a objectForKey:@"name"] localizedStandardCompare:[b objectForKey:@"name"]];
+		return byName != NSOrderedSame ? byName : [[a objectForKey:@"uid"] compare:[b objectForKey:@"uid"]];
+	}];
+	return accounts;
 }
 
 +(NSArray<NSNumber *> *)localLoginAccountUIDs
 {
+	NSArray *accounts = [self localLoginAccounts];
+	if ( accounts == nil )
+		return nil;
+	NSMutableArray *uids = [NSMutableArray array];
+	for ( NSDictionary *account in accounts )
+		[uids addObject:[account objectForKey:@"uid"]];
+	return [uids sortedArrayUsingSelector:@selector(compare:)];
+}
+
+// getpwuid_r with a buffer that grows on ERANGE (a record larger than the
+// usual 4 KB, say a very long full name) up to kMaxPasswdBufferSize: 0, or
+// the error that fails the lookup. *buffer and *size carry the buffer from
+// one account to the next (both 0 at first).
+static int LookUpPasswd(uid_t uid, struct passwd *entry, char **buffer, size_t *size, struct passwd **found)
+{
+	*found = NULL;
+	for ( size_t want = *size > 0 ? *size : kPasswdBufferSize; ; want *= 2 ) {
+		if ( want > *size ) {
+			char *larger = realloc(*buffer, want);
+			if ( larger == NULL )
+				return ENOMEM;
+			*buffer = larger;
+			*size = want;
+		}
+		int error = getpwuid_r(uid, entry, *buffer, *size, found);
+		if ( error != ERANGE || *size >= kMaxPasswdBufferSize )
+			return error;
+	}
+}
+
+// A failed account lookup is logged once per launch, with a fixed reason and
+// no account name; later failures, of any kind, are not.
+static void LogLookupFailure(NSString *reason)
+{
+	static dispatch_once_t once;
+	dispatch_once(&once, ^{
+		NSLog(@"Flycut: the accounts on this Mac cannot be read for sharing (%@)", reason);
+	});
+}
+
+// nil (not an empty list) when the local directory cannot be asked or a login
+// account's GeneratedUID cannot be read: a failed lookup must change nothing.
++(NSArray<NSDictionary *> *)localLoginAccounts
+{
 	NSMutableArray *records = [NSMutableArray array];
 	CSIdentityQueryRef query = CSIdentityQueryCreate(kCFAllocatorDefault, kCSIdentityClassUser, CSGetLocalIdentityAuthority());
-	if ( query == NULL )
-		return @[];
-	if ( CSIdentityQueryExecute(query, kCSIdentityQueryIncludeHiddenIdentities, NULL) ) {
+	if ( query == NULL ) {
+		LogLookupFailure(@"the directory cannot be asked");
+		return nil;
+	}
+	BOOL executed = CSIdentityQueryExecute(query, kCSIdentityQueryIncludeHiddenIdentities, NULL);
+	BOOL failed = NO;
+	NSString *failure = nil;
+	char *buffer = NULL;
+	size_t bufferSize = 0;
+	if ( executed ) {
 		CFArrayRef identities = CSIdentityQueryCopyResults(query);
 		for ( CFIndex i = 0; identities != NULL && i < CFArrayGetCount(identities); i++ ) {
 			CSIdentityRef identity = (CSIdentityRef)CFArrayGetValueAtIndex(identities, i);
 			uid_t uid = (uid_t)CSIdentityGetPosixID(identity);
 			struct passwd entry, *found = NULL;
-			char buffer[4096];
-			if ( getpwuid_r(uid, &entry, buffer, sizeof buffer, &found) != 0 || found == NULL )
+			// An error (the directory cannot be asked, a record over 1 MB) fails the
+			// whole lookup; a UID without an entry only leaves that account out.
+			int error = LookUpPasswd(uid, &entry, &buffer, &bufferSize, &found);
+			if ( error != 0 ) {
+				failure = [NSString stringWithFormat:@"passwd lookup error %d", error];
+				failed = YES;
+				break;
+			}
+			if ( found == NULL )
 				continue;
 			NSString *shell = found->pw_shell != NULL ? [NSString stringWithUTF8String:found->pw_shell] : nil;
 			NSString *home = found->pw_dir != NULL ? [NSString stringWithUTF8String:found->pw_dir] : nil;
+			NSString *name = (NSString *)CSIdentityGetFullName(identity);
+			if ( [name length] == 0 )
+				name = (NSString *)CSIdentityGetPosixName(identity);
+			// The account's GeneratedUID (the ACL entries name it too); asked only
+			// for an account that exists, as mbr_uid_to_uuid makes one up otherwise.
+			uuid_t generated;
+			uuid_string_t text;
+			NSString *guid = @"";
+			if ( mbr_uid_to_uuid(uid, generated) == 0 ) {
+				uuid_unparse_upper(generated, text);
+				guid = [NSString stringWithUTF8String:text];
+			}
 			[records addObject:@{@"uid": [NSNumber numberWithUnsignedInt:uid],
 								 @"hidden": [NSNumber numberWithBool:CSIdentityIsHidden(identity)],
 								 @"enabled": [NSNumber numberWithBool:CSIdentityIsEnabled(identity)],
-								 @"shell": shell ?: @"", @"home": home ?: @""}];
+								 @"shell": shell ?: @"", @"home": home ?: @"", @"name": name ?: @"", @"guid": guid}];
 		}
 		if ( identities != NULL )
 			CFRelease(identities);
 	}
 	CFRelease(query);
-	return [self loginAccountUIDsFromRecords:records];
+	free(buffer);
+	if ( !executed || failed ) {
+		LogLookupFailure(failure ?: @"the directory query fails");
+		return nil;
+	}
+	NSArray *accounts = [self loginAccountsFromRecords:records];
+	for ( NSDictionary *account in accounts )
+		if ( [[account objectForKey:@"guid"] length] == 0 ) {
+			LogLookupFailure(@"an account's GeneratedUID cannot be read");
+			return nil;
+		}
+	return accounts;
 }
 
 +(BOOL)currentSessionIsOnConsole
@@ -152,8 +270,11 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 	[folderWatches release];
 	[recipients release];
 	[pendingPasteboardClipping release];
+	[chosenAccountUIDs release];
+	[queueChosen release];
 	[accountList release];
 	[sessionState release];
+	[logHandler release];
 	[engine release];
 	[super dealloc];
 }
@@ -165,13 +286,17 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 
 #pragma mark - Queue work
 
-// The other accounts of this Mac, from the injected list.
+// The other accounts of this Mac this one shares with: the injected list, cut
+// down to the chosen ones.
 -(NSArray *)otherAccountsOnQueue
 {
+	NSArray *accounts = accountList != nil ? accountList() : @[];
+	if ( ![accounts isKindOfClass:[NSArray class]] )
+		return nil;   // the lookup failed
 	NSMutableArray *others = [NSMutableArray array];
-	for ( id uid in ( accountList != nil ? accountList() : @[] ) )
+	for ( id uid in accounts )
 		if ( [uid isKindOfClass:[NSNumber class]] && [uid unsignedIntValue] != [engine ownUID]
-			&& ![others containsObject:uid] )
+			&& ![others containsObject:uid] && ( queueChosen == nil || [queueChosen containsObject:uid] ) )
 			[others addObject:uid];
 	return others;
 }
@@ -214,21 +339,91 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 	dispatch_resume(source);
 }
 
+// Short, fixed reasons for the log: no account name, no path.
+static NSString *FailureReason(NSInteger code)
+{
+	switch ( code ) {
+		case FlycutAccountShareErrorRootUnavailable:
+			return @"the shared folder cannot be opened";
+		case FlycutAccountShareErrorUntrustedInbox:
+			return @"the inbox folder name is taken or cannot be created";
+		default:
+			return @"the inbox could not be set up";
+	}
+}
+
+// The inbox setup failed (code) or worked (0): logged once per failure,
+// published on the main thread, retried by the safety timer with growing pauses.
+-(void)noteRefreshResultOnQueue:(NSInteger)code
+{
+	if ( code == 0 ) {
+		refreshFailures = 0;
+		ticksUntilRetry = 0;
+		loggedErrorCode = 0;
+	} else {
+		refreshFailures++;
+		NSUInteger pause = refreshFailures >= 6 ? kMaxRetryTicks : MIN((NSUInteger)1 << ( refreshFailures - 1 ), kMaxRetryTicks);
+		ticksUntilRetry = pause - 1;
+		if ( code != loggedErrorCode ) {
+			loggedErrorCode = code;
+			NSString *line = [NSString stringWithFormat:@"Flycut: sharing with other accounts is unavailable: %@ (error %ld)",
+							  FailureReason(code), (long)code];
+			if ( logHandler != nil )
+				logHandler(line);
+			else
+				NSLog(@"%@", line);
+		}
+	}
+	NSUInteger forGeneration = queueGeneration;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[self publishInboxErrorCode:code generation:forGeneration];
+	});
+}
+
+-(void)publishInboxErrorCode:(NSInteger)code generation:(NSUInteger)forGeneration
+{
+	if ( ( code != 0 && ( !running || forGeneration != generation ) ) || code == inboxErrorCode )
+		return;
+	inboxErrorCode = code;
+	if ( [delegate respondsToSelector:@selector(accountShareServiceDidChangeState:)] )
+		[delegate accountShareServiceDidChangeState:self];
+}
+
 // Prepares (or repairs) the inbox for the other accounts, keeps it out of Time
 // Machine backups and watches every sender's folder.
 -(void)refreshInboxOnQueue
 {
 	needsRefresh = NO;
 	NSArray *others = [self otherAccountsOnQueue];
+	// The account list could not be read: everything stays as it is (nothing
+	// withdrawn, nothing wiped) and the safety timer tries again.
+	if ( others == nil ) {
+		needsRefresh = YES;
+		return;
+	}
+	// An account no longer shared with loses this account's copies waiting for it.
+	for ( NSNumber *previous in recipients )
+		if ( ![others containsObject:previous] )
+			[engine withdrawFromRecipient:[previous unsignedIntValue] error:NULL];
 	[recipients release];
 	recipients = [others copy];
 	for ( dispatch_source_t source in folderWatches )
 		dispatch_source_cancel(source);
 	[folderWatches removeAllObjects];
-	if ( ![engine prepareInboxForSenders:others error:NULL] ) {
-		needsRefresh = YES;
+	// Sharing with nobody: no inbox, it would only tell the others that this
+	// account turned sharing on.
+	if ( [others count] == 0 ) {
+		[engine wipeInbox:NULL];
+		[self noteRefreshResultOnQueue:0];
 		return;
 	}
+	NSError *error = nil;
+	if ( ![engine prepareInboxForSenders:others error:&error] ) {
+		needsRefresh = YES;
+		[self noteRefreshResultOnQueue:[error code] != 0 ? [error code] : FlycutAccountShareErrorIO];
+		return;
+	}
+	[self noteRefreshResultOnQueue:0];
 	[[NSURL fileURLWithPath:[engine inboxPath] isDirectory:YES] setResourceValue:[NSNumber numberWithBool:YES]
 																		  forKey:NSURLIsExcludedFromBackupKey error:NULL];
 	if ( watchesSenderFolders )
@@ -242,7 +437,9 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 	uint64_t nanoseconds = (uint64_t)( interval * NSEC_PER_SEC );
 	dispatch_source_set_timer(safetyTimer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)nanoseconds), nanoseconds, nanoseconds / 10);
 	dispatch_source_set_event_handler(safetyTimer, ^{
-		if ( needsRefresh )
+		if ( needsRefresh && ticksUntilRetry > 0 )
+			ticksUntilRetry--;
+		else if ( needsRefresh )
 			[self refreshInboxOnQueue];
 		[self collectOnQueue:FCShareArrivalLive];
 	});
@@ -304,6 +501,10 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 		queueGeneration = forGeneration;
 		// Sharing runs again: its own setup keeps the inbox; a pending delete is dropped.
 		wipePending = NO;
+		refreshFailures = 0;
+		ticksUntilRetry = 0;
+		// A new start logs a failure that persists once more, as the note shows it again.
+		loggedErrorCode = 0;
 		[self stopWatchingOnQueue];
 		[self refreshInboxOnQueue];
 		[self startSafetyTimerOnQueue:interval];
@@ -317,6 +518,7 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 	generation++;
 	[pendingPasteboardClipping release];
 	pendingPasteboardClipping = nil;
+	[self publishInboxErrorCode:0 generation:generation];
 }
 
 -(void)stop
@@ -388,6 +590,21 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 		for ( NSNumber *recipient in withdraw )
 			[engine withdrawFromRecipient:[recipient unsignedIntValue] error:NULL];
 		[self wipeInboxOnQueueRetryingEvery:interval];
+	});
+}
+
+-(void)setChosenAccountUIDs:(NSArray<NSNumber *> *)uids
+{
+	NSArray *chosen = [[uids copy] autorelease];
+	if ( chosen == chosenAccountUIDs || [chosen isEqual:chosenAccountUIDs] )
+		return;
+	[chosenAccountUIDs release];
+	chosenAccountUIDs = [chosen retain];
+	dispatch_async(queue, ^{
+		[queueChosen release];
+		queueChosen = [chosen retain];
+		if ( queueRunning )
+			[self refreshInboxOnQueue];
 	});
 }
 

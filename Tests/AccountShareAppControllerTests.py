@@ -167,6 +167,9 @@ class AccountShareAppControllerTests(unittest.TestCase):
     def test_turning_off_withdraws_the_copies_waiting_elsewhere(self) -> None:
         self.run_case("toggle-withdraws")
 
+    def test_chosen_accounts_reach_the_service(self) -> None:
+        self.run_case("choose-accounts")
+
     def test_a_shared_copy_never_replaces_a_newer_or_unseen_pasteboard(self) -> None:
         self.run_case("pasteboard-guard")
 
@@ -178,6 +181,15 @@ class AccountShareAppControllerTests(unittest.TestCase):
 
     def test_paused_tracking_pauses_receiving(self) -> None:
         self.run_case("tracking-pause")
+
+    def test_the_choice_follows_the_account_not_its_uid(self) -> None:
+        self.run_case("choice-follows-account")
+
+    def test_a_failed_account_lookup_changes_nothing(self) -> None:
+        self.run_case("lookup-failure")
+
+    def test_a_failed_inbox_setup_shows_a_note(self) -> None:
+        self.run_case("setup-failure-note")
 
     def test_launch_quit_and_capture_hooks(self) -> None:
         source = APP_CONTROLLER.read_text()
@@ -191,11 +203,15 @@ class AccountShareAppControllerTests(unittest.TestCase):
         setup = method_body(source, "-(void)setUpAccountSharing")
         self.assertIn("NSWorkspaceSessionDidBecomeActiveNotification", setup)
         self.assertIn("NSWorkspaceSessionDidResignActiveNotification", setup)
-        self.assertLess(setup.index("[self noteAccountSharePasteboardAtLaunch];"), setup.index("[accountShareService start];"),
+        # Sharing starts in -passAccountShareChoice once the chosen accounts are known.
+        self.assertLess(setup.index("[self noteAccountSharePasteboardAtLaunch];"), setup.index("[self passAccountShareChoice];"),
                         "the launch pasteboard is noted before sharing starts")
-        self.assertLess(setup.index("[self updateAccountSharePickupPause];"), setup.index("[accountShareService start];"),
+        self.assertLess(setup.index("[self updateAccountSharePickupPause];"), setup.index("[self passAccountShareChoice];"),
                         "pickup is paused before sharing starts if tracking is paused")
-        self.assertIn('boolForKey:@"shareClippingsAcrossAccounts"', setup)
+        self.assertLess(setup.index("accountShareChoicePending = YES;"), setup.index("[self passAccountShareChoice];"))
+        passing = method_body(source, "-(void)passAccountShareChoice")
+        self.assertIn("[accountShareService start];", passing)
+        self.assertIn('boolForKey:@"shareClippingsAcrossAccounts"', passing)
         terminate = method_body(source, "- (void)applicationWillTerminate:(NSNotification *)notification")
         self.assertIn("[accountShareService stop];", terminate)
         poll = method_body(source, "-(void)pollPB:(NSTimer *)timer")
@@ -208,13 +224,15 @@ class AccountShareAppControllerTests(unittest.TestCase):
         self.assertLess(text_branch.index("if (revealPasteboardTypes) {"), text_branch.index(offer))
         registered = method_body(source, "- (id)init")
         self.assertRegex(registered, r"numberWithBool:NO\],\s*@\"shareClippingsAcrossAccounts\"")
+        self.assertRegex(registered, r"\[NSArray array\],\s*@\"shareClippingsAccountIDs\"")
 
     def test_nothing_reaches_the_real_shared_folder(self) -> None:
         prefs = REAL_HOME / "Library/Preferences"
         before_prefs = set(os.listdir(prefs))
         before = snapshot_names(SHARED)
         for mode in ("capture", "recopy", "away-no-echo", "toggle", "diagnostics-pause", "toggle-withdraws",
-                     "pasteboard-guard", "launch-pasteboard-guard", "tracking-pause", "kept-pasteboard"):
+                     "choose-accounts", "pasteboard-guard", "launch-pasteboard-guard", "tracking-pause",
+                     "choice-follows-account", "setup-failure-note", "kept-pasteboard", "lookup-failure"):
             self.run_case(mode)
         self.assertEqual(before, snapshot_names(SHARED))
         self.assertEqual(set(os.listdir(prefs)), before_prefs)
