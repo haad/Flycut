@@ -52,8 +52,6 @@
 	NSArray *searchResultClippings;
 	BOOL						isSearchWindowDisplayed;
 
-    NSArray *settingsSyncList;
-
     FlycutOperator				*flycutOperator;
 
     // Status item -- the little icon in the menu bar
@@ -159,9 +157,6 @@
 -(IBAction) toggleLoadOnStartup:(id)sender;
 -(IBAction) toggleMainHotKey:(id)sender;
 -(IBAction) recheckAccessibility:(id)sender;
--(IBAction) toggleICloudSyncSettings:(id)sender;
--(IBAction) toggleICloudSyncClippings:(id)sender;
--(IBAction) setSavePreference:(id)sender;
 -(void) setHotKeyPreferenceForRecorder:(SRRecorderControl *)aRecorder;
 
 @end

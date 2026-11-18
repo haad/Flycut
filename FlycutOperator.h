@@ -36,11 +36,7 @@
 	int displayNum;
 	int displayLength;
 
-	NSArray *settingsSyncList;
-
     BOOL disableStore;
-	BOOL inhibitSaveEngineAfterListModification;
-	BOOL firstClippingsSyncAfterEnabling;
 	BOOL inhibitAutosaveClippings;
 
 	//Preferences
@@ -86,7 +82,6 @@
 // Save and load
 -(void) saveEngine;
 -(bool) loadEngineFromPList;
-//-(void) registerOrDeregisterICloudSync;
 
 // Preference related
 -(void) willShowPreferences;
