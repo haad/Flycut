@@ -17,6 +17,18 @@
 #include <unistd.h>
 
 static const NSTimeInterval kDefaultSafetyInterval = 60.0;
+// At launch a waiting copy replaces the pasteboard only if it is younger.
+static const NSTimeInterval kLaunchPasteboardAge = 10 * 60;
+
+// How a pickup came about; decides what may go to the pasteboard.
+typedef NS_ENUM(NSInteger, FCShareArrival) {
+	// Folder watch, safety timer, -pickUp: only while not on the console.
+	FCShareArrivalLive,
+	// The session came back to the console: everything that arrived meanwhile.
+	FCShareArrivalAway,
+	// -start (launch): what waited, if copied less than kLaunchPasteboardAge ago.
+	FCShareArrivalLaunch,
+};
 
 @implementation FlycutAccountShareService {
 	// Main thread.
@@ -24,11 +36,13 @@ static const NSTimeInterval kDefaultSafetyInterval = 60.0;
 	FlycutAccountShareAccountList accountList;
 	FlycutAccountShareSessionState sessionState;
 	BOOL running;
+	BOOL pickupPaused;
 	NSUInteger generation;
 	FlycutSharedClipping *pendingPasteboardClipping;
 	// The queue's own state, touched only on the queue.
 	dispatch_queue_t queue;
 	BOOL queueRunning;
+	BOOL queuePickupPaused;
 	NSUInteger queueGeneration;
 	NSArray *recipients;
 	NSMutableArray *folderWatches;
@@ -41,7 +55,7 @@ static const NSTimeInterval kDefaultSafetyInterval = 60.0;
 	BOOL loggedWipeFailure;
 }
 
-@synthesize engine, delegate, running, safetyInterval, watchesSenderFolders;
+@synthesize engine, delegate, running, pickupPaused, safetyInterval, watchesSenderFolders;
 
 +(NSString *)sharedRootPath
 {
@@ -192,7 +206,7 @@ static const NSTimeInterval kDefaultSafetyInterval = 60.0;
 	dispatch_source_set_event_handler(source, ^{
 		if ( dispatch_source_get_data(source) & ( DISPATCH_VNODE_DELETE | DISPATCH_VNODE_RENAME | DISPATCH_VNODE_REVOKE ) )
 			needsRefresh = YES;
-		[self collectOnQueueAway:NO];
+		[self collectOnQueue:FCShareArrivalLive];
 	});
 	dispatch_source_set_cancel_handler(source, ^{ close(fd); });
 	[folderWatches addObject:source];
@@ -230,37 +244,45 @@ static const NSTimeInterval kDefaultSafetyInterval = 60.0;
 	dispatch_source_set_event_handler(safetyTimer, ^{
 		if ( needsRefresh )
 			[self refreshInboxOnQueue];
-		[self collectOnQueueAway:NO];
+		[self collectOnQueue:FCShareArrivalLive];
 	});
 	dispatch_resume(safetyTimer);
 }
 
-// Takes in what waits and hands it to the main thread. away: the clippings
-// arrived while this session was not on the console (launch, coming back).
--(void)collectOnQueueAway:(BOOL)away
+// Takes in what waits and hands it to the main thread. While pickup is paused
+// only the inbox limits are applied and the files stay.
+-(void)collectOnQueue:(FCShareArrival)arrival
 {
 	if ( !queueRunning )
 		return;
+	if ( queuePickupPaused ) {
+		[engine pruneInbox];
+		return;
+	}
 	NSArray *clippings = [[engine collectClippings] retain];
 	NSUInteger forGeneration = queueGeneration;
 	dispatch_async(dispatch_get_main_queue(), ^{
-		[self deliver:clippings away:away generation:forGeneration];
+		[self deliver:clippings arrival:arrival generation:forGeneration];
 		[clippings release];
 	});
 }
 
 #pragma mark - Main thread
 
--(void)deliver:(NSArray *)clippings away:(BOOL)away generation:(NSUInteger)forGeneration
+-(void)deliver:(NSArray *)clippings arrival:(FCShareArrival)arrival generation:(NSUInteger)forGeneration
 {
-	if ( !running || forGeneration != generation )
+	// Paused after the queue took them in: nothing may be added with content now.
+	if ( !running || forGeneration != generation || pickupPaused )
 		return;
 	for ( FlycutSharedClipping *clipping in clippings )
 		[delegate accountShareService:self didReceiveClipping:clipping];
 	BOOL active = [self sessionIsActive];
-	if ( [clippings count] > 0 && ( away || !active ) ) {
+	FlycutSharedClipping *newest = [clippings lastObject];
+	if ( arrival == FCShareArrivalLaunch && newest != nil && [engine currentTime] - [newest created] >= kLaunchPasteboardAge )
+		newest = nil;
+	if ( newest != nil && ( arrival != FCShareArrivalLive || !active ) ) {
 		[pendingPasteboardClipping release];
-		pendingPasteboardClipping = [[clippings lastObject] retain];
+		pendingPasteboardClipping = [newest retain];
 	}
 	if ( active && pendingPasteboardClipping != nil ) {
 		FlycutSharedClipping *newest = [pendingPasteboardClipping autorelease];
@@ -285,7 +307,7 @@ static const NSTimeInterval kDefaultSafetyInterval = 60.0;
 		[self stopWatchingOnQueue];
 		[self refreshInboxOnQueue];
 		[self startSafetyTimerOnQueue:interval];
-		[self collectOnQueueAway:YES];
+		[self collectOnQueue:FCShareArrivalLaunch];
 	});
 }
 
@@ -358,7 +380,26 @@ static const NSTimeInterval kDefaultSafetyInterval = 60.0;
 	dispatch_async(queue, ^{
 		queueRunning = NO;
 		[self stopWatchingOnQueue];
+		// Own copies the others have not taken in yet go too.
+		NSMutableArray *withdraw = [NSMutableArray arrayWithArray:[self otherAccountsOnQueue]];
+		for ( NSNumber *recipient in recipients )
+			if ( ![withdraw containsObject:recipient] )
+				[withdraw addObject:recipient];
+		for ( NSNumber *recipient in withdraw )
+			[engine withdrawFromRecipient:[recipient unsignedIntValue] error:NULL];
 		[self wipeInboxOnQueueRetryingEvery:interval];
+	});
+}
+
+-(void)setPickupPaused:(BOOL)paused
+{
+	if ( paused == pickupPaused )
+		return;
+	pickupPaused = paused;
+	dispatch_async(queue, ^{
+		queuePickupPaused = paused;
+		if ( !paused )
+			[self collectOnQueue:FCShareArrivalLive];
 	});
 }
 
@@ -389,7 +430,7 @@ static const NSTimeInterval kDefaultSafetyInterval = 60.0;
 		return;
 	dispatch_async(queue, ^{
 		[self refreshInboxOnQueue];
-		[self collectOnQueueAway:YES];
+		[self collectOnQueue:FCShareArrivalAway];
 	});
 }
 
@@ -398,7 +439,7 @@ static const NSTimeInterval kDefaultSafetyInterval = 60.0;
 	if ( !running )
 		return;
 	dispatch_async(queue, ^{
-		[self collectOnQueueAway:NO];
+		[self collectOnQueue:FCShareArrivalLive];
 	});
 }
 

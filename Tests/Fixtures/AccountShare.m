@@ -1174,6 +1174,81 @@ static int RunWipe(void) {
     return f;
 }
 
+// Pickup paused (diagnostics mode): -pruneInbox applies the pickup limits and
+// the 24-hour drop, reads nothing and leaves the newest files for later.
+static int RunPruneWithoutReading(void) {
+    int f = 0;
+    FlycutAccountShare *b = Participant(kB);
+    f += Check(Prepare(b, @[@(kA)]), "B creates its inbox for A");
+    NSString *from = FromPath(kB, kA);
+    NSMutableArray *names = [NSMutableArray array];
+    for (int i = 0; i < 12; i++) {
+        NSString *name = NewClipName();
+        NSMutableDictionary *payload = ValidPayload(name, [NSString stringWithFormat:@"example-wait-%02d", i]);
+        [payload setObject:[NSNumber numberWithDouble:gNow - 12 + i] forKey:@"created"];
+        Plant(from, name, Plist(payload, NSPropertyListBinaryFormat_v1_0), kA, gNow - 12 + i);
+        [names addObject:name];
+    }
+    NSString *stale = NewClipName();
+    Plant(from, stale, Plist(ValidPayload(stale, @"example-stale"), NSPropertyListBinaryFormat_v1_0), kA, gNow - 25 * 3600);
+    NSString *foreign = NewClipName();
+    PlantValid(from, foreign, @"example-foreign", kC);
+    Plant(from, @"not-a-clipping.txt", [@"x" dataUsingEncoding:NSUTF8StringEncoding], kA, gNow);
+    int readsBefore = gReads;
+    gActor = kB;
+    [b pruneInbox];
+    f += Check(gReads == readsBefore, "pruning reads no file");
+    NSSet *left = [NSSet setWithArray:Entries(from)];
+    NSSet *newest = [NSSet setWithArray:[names subarrayWithRange:NSMakeRange(2, 10)]];
+    f += Check([left isEqualToSet:newest], "the 10 newest of A's files stay; older, stale, foreign and misnamed ones go");
+    [b pruneInbox];
+    f += Check([[NSSet setWithArray:Entries(from)] isEqualToSet:newest], "pruning again keeps them");
+    NSArray *got = Collect(b);
+    f += Check([got count] == 10 && [[[got objectAtIndex:0] text] isEqualToString:@"example-wait-02"]
+               && [[[got lastObject] text] isEqualToString:@"example-wait-11"], "a later pickup takes them in, oldest first");
+    f += Check([Entries(from) count] == 0, "and deletes them");
+    return f;
+}
+
+// Sharing turned off: the sender deletes its own files that still wait for a
+// recipient, and nothing else.
+static int RunWithdraw(void) {
+    int f = 0;
+    FlycutAccountShare *a = Participant(kA), *b = Participant(kB), *u = Participant(kUnchosen);
+    f += Check(Prepare(b, @[@(kA), @(kUnchosen)]), "B creates its inbox for A and 7003");
+    f += Check(Send(a, @"example-w1", kPlainTypes(), nil, kB, NULL) && Send(a, @"example-w2", kPlainTypes(), nil, kB, NULL),
+               "A has two copies waiting for B");
+    f += Check(Send(u, @"example-w3", kPlainTypes(), nil, kB, NULL), "7003 has one waiting too");
+    NSString *from = FromPath(kB, kA);
+    NSString *recipients = NewClipName();
+    PlantValid(from, recipients, @"example-w4", kB);
+    NSString *temporary = [[[NSUUID UUID] UUIDString] stringByAppendingString:@".tmp"];
+    Plant(from, temporary, [@"x" dataUsingEncoding:NSUTF8StringEncoding], kA, gNow);
+    int readsBefore = gReads;
+    gActor = kA;
+    NSError *error = nil;
+    f += Check([a withdrawFromRecipient:kB error:&error], "A withdraws from B");
+    f += Check(gReads == readsBefore, "without reading anything");
+    f += Check([Entries(from) isEqualToArray:@[recipients]], "A's copies and A's temporary file are gone, another owner's file stays");
+    f += Check([ClipNames(FromPath(kB, kUnchosen)) count] == 1, "7003's copy for B stays");
+    f += Check(IsRealDirectory(from) && [AclOf(from) isEqualToArray:ExpectedFromAcl(kB, kA)],
+               "B's folder for A stays as B made it");
+    f += Check([a withdrawFromRecipient:kB error:NULL], "withdrawing again succeeds");
+    gActor = kA;
+    f += Check([a withdrawFromRecipient:kC error:NULL] && !Exists(TopPath(kC)),
+               "a recipient without an inbox: nothing to do, nothing created");
+    // A folder whose ACL B did not set: the sender refuses to work in it.
+    gActor = kUnchosen;
+    f += Check(Send(u, @"example-w5", kPlainTypes(), nil, kB, NULL), "7003 has another copy waiting for B");
+    NSString *other = FromPath(kB, kUnchosen);
+    AddAclEntry(other, YES, kA, ACL_DELETE_CHILD, 0);
+    gActor = kUnchosen;
+    f += Check(![u withdrawFromRecipient:kB error:NULL] && [ClipNames(other) count] == 2,
+               "in a folder with a changed ACL nothing is deleted");
+    f += Check(![a withdrawFromRecipient:kA error:NULL], "an account does not withdraw from itself");
+    return f;
+}
+
 // Any account in staff may delete_child in /Users/Shared (sticky bit or
 // not), so without its own deny entry a recipient's inbox root could be
 // renamed away and its name squatted. The node's deny entry wins and binds the
@@ -1545,6 +1620,8 @@ int main(int argc, const char *argv[]) {
         else if (strcmp(mode, "wipe") == 0) failures = RunWipe();
         else if (strcmp(mode, "replica-under-inheriting-root") == 0) failures = RunReplicaUnderInheritingRoot();
         else if (strcmp(mode, "trace-refuses-outside") == 0) failures = RunTraceRefusesOutside();
+        else if (strcmp(mode, "prune-without-reading") == 0) failures = RunPruneWithoutReading();
+        else if (strcmp(mode, "withdraw") == 0) failures = RunWithdraw();
         else if (strcmp(mode, "root-cannot-be-moved") == 0) failures = RunRootCannotBeMoved();
         else if (strcmp(mode, "grows-after-check") == 0) failures = RunGrowsAfterCheck();
         else if (strcmp(mode, "folder-moved-after-open") == 0) failures = RunFolderMovedAfterOpen();

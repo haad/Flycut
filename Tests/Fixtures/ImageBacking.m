@@ -421,6 +421,7 @@ static void FixtureBeep(void) { fixtureBeeps++; }
     id listController;   // -clippingWasAdded tells the menu-bar list; this harness has none
     FlycutAccountShareService *accountShareService;   // -pollPB: offers text copies to other accounts; none here
     NSInteger accountShareOfferedGeneration;          // the copy offered last
+    NSInteger accountShareKeptGeneration;   // -pollPB: and -addClipToPasteboard: note what sharing may replace
     NSUInteger clipboardCaptureEpoch;
     dispatch_queue_t clipboardReadQueue;
     FCClipboardCatchUp *clipboardCatchUp;   // nil: no catch-up poll here

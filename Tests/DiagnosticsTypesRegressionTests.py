@@ -197,6 +197,13 @@ class DiagnosticsTypesRegressionTests(unittest.TestCase):
     def test_flycuts_own_write_gives_no_row(self) -> None:
         self.run_case("diagnostics-own-write")
 
+    def test_the_tooltip_says_nothing_is_shared_while_it_is_on(self) -> None:
+        import xml.etree.ElementTree as ElementTree
+        xib = ElementTree.parse(ROOT / "English.lproj" / "MainMenu.xib")
+        tip = next(e.get("toolTip") for e in xib.iter() if e.get("id") == "mka-NZ-Esg")
+        self.assertTrue(tip.endswith(" While it is on, no filter does anything, so the filters are greyed out, "
+                                     "and nothing is shared with other accounts."), tip)
+
     def test_fixture_uses_no_real_pasteboard_defaults_or_application_support(self) -> None:
         symbols = subprocess.check_output(["/usr/bin/nm", "-u", str(self.binary)], text=True)
         for name in ("_OBJC_CLASS_$_NSPasteboard", "_OBJC_CLASS_$_NSWorkspace", "_OBJC_CLASS_$_NSUserDefaults",

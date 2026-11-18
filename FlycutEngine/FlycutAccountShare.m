@@ -713,6 +713,7 @@ static void UnlinkIfSame(int dirFD, NSString *name, ino_t inode)
 		unlinkat(dirFD, [name UTF8String], 0);
 }
 
+// results nil: pickup is paused; the newest files stay unread, the rest goes.
 -(void)collectFrom:(int)fromFD sender:(uid_t)sender into:(NSMutableArray *)results
 {
 	NSTimeInterval now = clock();
@@ -751,6 +752,8 @@ static void UnlinkIfSame(int dirFD, NSString *name, ino_t inode)
 		NSString *name = [[candidates objectAtIndex:i] objectAtIndex:1];
 		ino_t inode = (ino_t)[[[candidates objectAtIndex:i] objectAtIndex:2] unsignedLongLongValue];
 		if ( i < kFilesPerSender ) {
+			if ( results == nil )
+				continue;
 			struct stat st;
 			int fd = [self openCandidate:name in:fromFD sender:sender now:now stat:&st];
 			if ( fd >= 0 ) {
@@ -768,15 +771,16 @@ static void UnlinkIfSame(int dirFD, NSString *name, ino_t inode)
 	[results addObjectsFromArray:accepted];
 }
 
--(NSArray<FlycutSharedClipping *> *)collectClippings
+// Goes through the trusted folders of the senders of the last prepare; results
+// nil applies the limits only (-pruneInbox).
+-(void)collectInto:(NSMutableArray *)results
 {
-	NSMutableArray *results = [NSMutableArray array];
 	if ( [senderUIDs count] == 0 )
-		return results;
+		return;
 	size_t topCount = [senderUIDs count] + 1;
 	FCShareACE *topEntries = calloc(topCount, sizeof(FCShareACE));
 	if ( topEntries == NULL )
-		return results;
+		return;
 	topCount = TopEntries(senderUIDs, topEntries, topCount);
 	int rootFD = [self openSharedRoot];
 	int topFD = rootFD >= 0 ? OpenDirectoryAt(rootFD, InboxName(ownUID)) : -1;
@@ -799,13 +803,29 @@ static void UnlinkIfSame(int dirFD, NSString *name, ino_t inode)
 	}
 	if ( topFD >= 0 )
 		close(topFD);
+}
+
+-(NSArray<FlycutSharedClipping *> *)collectClippings
+{
+	NSMutableArray *results = [NSMutableArray array];
+	[self collectInto:results];
 	return [results sortedArrayWithOptions:NSSortStable usingComparator:^NSComparisonResult(id a, id b) {
 		NSTimeInterval ta = [(FlycutSharedClipping *)a created], tb = [(FlycutSharedClipping *)b created];
 		return ta < tb ? NSOrderedAscending : ( ta > tb ? NSOrderedDescending : NSOrderedSame );
 	}];
 }
 
+-(void)pruneInbox
+{
+	[self collectInto:nil];
+}
+
 #pragma mark - Sending
+
+-(NSTimeInterval)currentTime
+{
+	return clock();
+}
 
 -(BOOL)mayShareText:(NSString *)text ofType:(NSString *)type availableTypes:(NSArray *)availableTypes
 {
@@ -843,6 +863,74 @@ static void UnlinkIfSame(int dirFD, NSString *name, ino_t inode)
 		unlinkat(fromFD, [[[kept objectAtIndex:i] objectAtIndex:1] UTF8String], 0);
 }
 
+// Opens this account's folder in the recipient's inbox if the recipient made it
+// as expected: root and folder owned by the recipient, the folder's exact ACL,
+// the folder inside that root. Returns the open folder or -1 (error set).
+-(int)openFolderAtRecipient:(uid_t)recipientUID error:(NSError **)error
+{
+	int rootFD = [self openSharedRoot];
+	if ( rootFD < 0 ) {
+		Fail(error, FlycutAccountShareErrorRootUnavailable);
+		return -1;
+	}
+	// The sender may only search the recipient's inbox root, not list it.
+	int topFD = openat(rootFD, [InboxName(recipientUID) UTF8String], O_SEARCH | O_NOFOLLOW | O_CLOEXEC);
+	int topErrno = errno;
+	close(rootFD);
+	if ( topFD < 0 ) {
+		Fail(error, topErrno == ENOENT ? FlycutAccountShareErrorNoInbox : FlycutAccountShareErrorUntrustedInbox);
+		return -1;
+	}
+	struct stat top;
+	if ( fstat(topFD, &top) != 0 || !S_ISDIR(top.st_mode) || ownerLookup(&top) != recipientUID ) {
+		close(topFD);
+		Fail(error, FlycutAccountShareErrorUntrustedInbox);
+		return -1;
+	}
+	int fromFD = OpenDirectoryAt(topFD, SenderFolderName(ownUID));
+	int fromErrno = errno;
+	close(topFD);
+	if ( fromFD < 0 ) {
+		Fail(error, fromErrno == ENOENT ? FlycutAccountShareErrorNoInbox : FlycutAccountShareErrorUntrustedInbox);
+		return -1;
+	}
+	FCShareACE fromEntries[2];
+	size_t fromCount = FromEntries(recipientUID, ownUID, fromEntries);
+	struct stat parent;
+	if ( ![self directory:fromFD isOwnedBy:recipientUID withEntries:fromEntries count:fromCount]
+		|| fstatat(fromFD, "..", &parent, AT_SYMLINK_NOFOLLOW) != 0
+		|| parent.st_dev != top.st_dev || parent.st_ino != top.st_ino ) {
+		close(fromFD);
+		Fail(error, FlycutAccountShareErrorUntrustedInbox);
+		return -1;
+	}
+	return fromFD;
+}
+
+-(BOOL)withdrawFromRecipient:(uid_t)recipientUID error:(NSError **)error
+{
+	if ( recipientUID == ownUID || recipientUID == 0 )
+		return Fail(error, FlycutAccountShareErrorInvalidArgument);
+	NSError *openError = nil;
+	int fromFD = [self openFolderAtRecipient:recipientUID error:&openError];
+	if ( fromFD < 0 ) {
+		if ( [openError code] == FlycutAccountShareErrorNoInbox )
+			return YES;
+		if ( error != NULL )
+			*error = openError;
+		return NO;
+	}
+	for ( NSString *name in ListNames(fromFD) ) {
+		if ( !HasUUIDName(name, @".clip") && !HasUUIDName(name, @".tmp") )
+			continue;
+		struct stat st;
+		if ( fstatat(fromFD, [name UTF8String], &st, AT_SYMLINK_NOFOLLOW) == 0 && ownerLookup(&st) == ownUID )
+			unlinkat(fromFD, [name UTF8String], 0);
+	}
+	close(fromFD);
+	return YES;
+}
+
 -(BOOL)sendText:(NSString *)text
 		 ofType:(NSString *)type
  availableTypes:(NSArray<NSString *> *)availableTypes
@@ -876,34 +964,9 @@ static void UnlinkIfSame(int dirFD, NSString *name, ino_t inode)
 	if ( [data length] > kPayloadLimit )
 		return Fail(error, FlycutAccountShareErrorTooLarge);
 
-	int rootFD = [self openSharedRoot];
-	if ( rootFD < 0 )
-		return Fail(error, FlycutAccountShareErrorRootUnavailable);
-	// The sender may only search the recipient's inbox root, not list it.
-	int topFD = openat(rootFD, [InboxName(recipientUID) UTF8String], O_SEARCH | O_NOFOLLOW | O_CLOEXEC);
-	int topErrno = errno;
-	close(rootFD);
-	if ( topFD < 0 )
-		return Fail(error, topErrno == ENOENT ? FlycutAccountShareErrorNoInbox : FlycutAccountShareErrorUntrustedInbox);
-	struct stat top;
-	if ( fstat(topFD, &top) != 0 || !S_ISDIR(top.st_mode) || ownerLookup(&top) != recipientUID ) {
-		close(topFD);
-		return Fail(error, FlycutAccountShareErrorUntrustedInbox);
-	}
-	int fromFD = OpenDirectoryAt(topFD, SenderFolderName(ownUID));
-	int fromErrno = errno;
-	close(topFD);
+	int fromFD = [self openFolderAtRecipient:recipientUID error:error];
 	if ( fromFD < 0 )
-		return Fail(error, fromErrno == ENOENT ? FlycutAccountShareErrorNoInbox : FlycutAccountShareErrorUntrustedInbox);
-	FCShareACE fromEntries[2];
-	size_t fromCount = FromEntries(recipientUID, ownUID, fromEntries);
-	struct stat parent;
-	if ( ![self directory:fromFD isOwnedBy:recipientUID withEntries:fromEntries count:fromCount]
-		|| fstatat(fromFD, "..", &parent, AT_SYMLINK_NOFOLLOW) != 0
-		|| parent.st_dev != top.st_dev || parent.st_ino != top.st_ino ) {
-		close(fromFD);
-		return Fail(error, FlycutAccountShareErrorUntrustedInbox);
-	}
+		return NO;
 	[self pruneOwnFilesIn:fromFD];
 
 	NSString *temporary = [identifier stringByAppendingString:@".tmp"];

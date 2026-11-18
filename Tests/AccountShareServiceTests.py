@@ -35,7 +35,7 @@ CLANG = ["/usr/bin/xcrun", "clang", "-fno-objc-arc", "-fobjc-weak", "-fblocks", 
          "-mmacosx-version-min=13.5", "-arch", "arm64", "-Wall"]
 MODES = ["start", "folder-watch", "safety-timer", "away-then-active", "launch-pickup",
          "sender-conditions", "wipe", "off-wipe-retried", "leftover-wipe",
-         "account-rule"]
+         "account-rule", "launch-age", "pause-pickup", "withdraw-on-off"]
 
 
 def remove_tree(path: pathlib.Path) -> None:
@@ -120,6 +120,15 @@ class AccountShareServiceTests(unittest.TestCase):
 
     def test_login_account_rule(self) -> None:
         self.run_case("account-rule")
+
+    def test_at_launch_only_a_copy_younger_than_ten_minutes_goes_to_the_pasteboard(self) -> None:
+        self.run_case("launch-age")
+
+    def test_paused_pickup_leaves_copies_waiting(self) -> None:
+        self.run_case("pause-pickup")
+
+    def test_turning_off_withdraws_this_accounts_waiting_copies(self) -> None:
+        self.run_case("withdraw-on-off")
 
     def test_trace_refuses_writes_outside_the_injected_root(self) -> None:
         self.run_case("containment", violations=True)

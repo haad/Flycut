@@ -35,7 +35,7 @@ CLANG = ["/usr/bin/xcrun", "clang", "-fno-objc-arc", "-fobjc-weak", "-fblocks", 
 MODES = ["round-trip", "acl-exact", "temp-then-exclusive-rename", "preplanted-refused", "temp-planted",
          "rebuild-wrong-inbox", "sender-refuses-untrusted-inbox", "foreign-owner", "special-files",
          "unknown-sender-folder", "never-share-filters", "flood", "malformed", "size-limit", "wipe",
-         "replica-under-inheriting-root", "root-cannot-be-moved",
+         "replica-under-inheriting-root", "prune-without-reading", "withdraw", "root-cannot-be-moved",
          "grows-after-check", "folder-moved-after-open", "replaced-before-delete", "moved-before-deny",
          "deny-only-for-everyone"]
 # Filesystem-mutating libc calls; the engine may only use the ones the fixture traces.
@@ -161,6 +161,12 @@ class AccountShareEngineTests(unittest.TestCase):
 
     def test_malformed_payloads_are_deleted(self) -> None:
         self.run_case("malformed")
+
+    def test_paused_pickup_applies_the_limits_without_reading(self) -> None:
+        self.run_case("prune-without-reading")
+
+    def test_sender_withdraws_only_its_own_waiting_files(self) -> None:
+        self.run_case("withdraw")
 
     def test_nobody_can_rename_or_delete_the_inbox_root(self) -> None:
         self.run_case("root-cannot-be-moved")

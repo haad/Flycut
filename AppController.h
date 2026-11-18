@@ -72,6 +72,11 @@
     FlycutAccountShareService *accountShareService;
     NSInteger accountShareOfferedGeneration;   // the clipboard generation offered last (-pollPB:)
     NSButton *accountSharingCheckbox;
+    // The pasteboard generation when the session left the console (or at
+    // launch), and the last one whose content Flycut keeps (-1: none): a copy
+    // it took into the history or a clipping it put there from its lists.
+    NSInteger accountSharePasteboardMark;
+    NSInteger accountShareKeptGeneration;
 
     IBOutlet NSTextField *savingSectionLabel;
     IBOutlet NSTextField *saveFromBezelToLabel;

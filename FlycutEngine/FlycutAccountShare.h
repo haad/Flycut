@@ -125,6 +125,12 @@ typedef NSTimeInterval (^FlycutAccountShareClock)(void);
 // fail a check are not read.
 -(NSArray<FlycutSharedClipping *> *)collectClippings;
 
+// Recipient, while pickup is paused: applies the pickup limits without reading
+// anything. Deletes what pickup would reject unread (wrong owner or type, links,
+// size, name, older than 24 hours) and, per sender, all but the newest
+// +filesPerSenderLimit files; the rest stays for a later -collectClippings.
+-(void)pruneInbox;
+
 // Recipient: the path of the own inbox and of the folder in it for one sender
 // (for watching and backup settings; all file work goes through descriptors).
 -(NSString *)inboxPath;
@@ -133,6 +139,15 @@ typedef NSTimeInterval (^FlycutAccountShareClock)(void);
 // Recipient: deletes the own inbox and everything in it (sharing turned off).
 // Succeeds if there is none; refuses one that belongs to another account.
 -(BOOL)wipeInbox:(NSError **)error;
+
+// Sender: deletes this account's files that still wait in the recipient's
+// folder for it (sharing turned off, or the recipient is no longer chosen).
+// Reads nothing and leaves files of other owners alone. Succeeds if the
+// recipient has no folder for this account; refuses one it would not write to.
+-(BOOL)withdrawFromRecipient:(uid_t)recipientUID error:(NSError **)error;
+
+// The injected clock (seconds since 1970).
+-(NSTimeInterval)currentTime;
 
 // Sender: writes one clipping into the recipient's folder for this account.
 // availableTypes is the pasteboard's type list of the copy; the clipping is

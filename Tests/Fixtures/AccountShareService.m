@@ -180,6 +180,20 @@ static FlycutAccountShareService *Service(uid_t uid, FCRecorder *recorder) {
     return [service autorelease];
 }
 
+// A service whose engine's clock runs `offset` seconds off the system clock, so
+// its copies look as old as that to every other account.
+static FlycutAccountShareService *ServiceAt(uid_t uid, FCRecorder *recorder, NSTimeInterval offset) {
+    int slot = SlotOf(uid);
+    FlycutAccountShareClock clock = ^NSTimeInterval { return [[NSDate date] timeIntervalSince1970] + offset; };
+    FlycutAccountShareService *service = [[FlycutAccountShareService alloc]
+        initWithEngine:FCTracedEngineWithClock(gShared, uid, (id<FlycutAccountShareFilter>)gOperator, clock)
+              accounts:^NSArray *{ return @[@(kA), @(kB), @(kUnopted)]; }
+       sessionIsActive:^BOOL { return gActive[slot]; }];
+    [service setDelegate:recorder];
+    [service setSafetyInterval:3600];
+    return [service autorelease];
+}
+
 static NSString *TopPath(uid_t recipient) {
     return [gShared stringByAppendingPathComponent:[NSString stringWithFormat:@".flycut-share-%u", recipient]];
 }
@@ -533,6 +547,168 @@ static int RunAccountRule(void) {
     return f;
 }
 
+// At launch only a copy made in the last 10 minutes replaces the pasteboard; an
+// older one only goes to the list. Coming back to the console is unchanged:
+// every copy that arrived while away counts, however old.
+static int RunLaunchAge(void) {
+    int f = 0;
+    FCRecorder *ra = [[[FCRecorder alloc] init] autorelease], *rb = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *old = ServiceAt(kA, ra, -11 * 60), *b = Service(kB, rb);
+    [old start];
+    [b start];
+    Settle(old);
+    Settle(b);
+    [b stop];
+    Settle(b);
+    Offer(old, @"example-20 old");
+    Settle(old);
+    FCRecorder *rb2 = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *b2 = Service(kB, rb2);
+    [b2 start];
+    f += Check(WaitFor(^BOOL { return [rb2->received count] == 1; }, 3.0), "at launch B takes in a copy made 11 minutes ago");
+    Settle(b2);
+    f += Check([rb2->pasteboard count] == 0, "but leaves the pasteboard alone: the copy is older than 10 minutes");
+    [b2 stop];
+    [old stop];
+    Settle(b2);
+    Settle(old);
+    FlycutAccountShareService *recent = ServiceAt(kA, ra, -9 * 60);
+    [recent start];
+    Settle(recent);
+    Offer(recent, @"example-21 recent");
+    Settle(recent);
+    FCRecorder *rb3 = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *b3 = Service(kB, rb3);
+    // No folder watch: a sender whose clock runs 11 minutes behind stamps its
+    // temporary file that old before the rename, and a pickup in between would
+    // take it for a stale leftover. Same-Mac senders share the clock.
+    [b3 setWatchesSenderFolders:NO];
+    [b3 start];
+    f += Check(WaitFor(^BOOL { return [rb3->received count] == 1 && [rb3->pasteboard count] == 1; }, 3.0)
+               && [TextOf([rb3->pasteboard lastObject]) isEqualToString:@"example-21 recent"],
+               "a copy made 9 minutes ago still goes to the pasteboard at launch");
+    [recent stop];
+    Settle(recent);
+    FlycutAccountShareService *old2 = ServiceAt(kA, ra, -11 * 60);
+    [old2 start];
+    Settle(old2);
+    gActive[1] = NO;
+    Offer(old2, @"example-22 away");
+    Settle(old2);
+    Settle(b3);
+    f += Check([rb3->received count] == 1, "B, in the background, has not taken the 11-minute-old copy in yet");
+    gActive[1] = YES;
+    [b3 sessionDidBecomeActive];
+    f += Check(WaitFor(^BOOL { return [rb3->received count] == 2 && [rb3->pasteboard count] == 2; }, 3.0)
+               && [TextOf([rb3->pasteboard lastObject]) isEqualToString:@"example-22 away"],
+               "coming back to the console takes it in and puts it on the pasteboard: it arrived while B was away");
+    [old2 stop];
+    [b3 stop];
+    gActive[1] = YES;
+    return f;
+}
+
+// Writes a valid-looking file of `owner` with the given modification time
+// straight into a folder (fixture code, not the engine).
+static void PlantOld(NSString *dir, uid_t owner, NSTimeInterval mtime) {
+    NSString *path = [dir stringByAppendingPathComponent:[[[NSUUID UUID] UUIDString] stringByAppendingString:@".clip"]];
+    int fd = open([path fileSystemRepresentation], O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
+    if (fd < 0) return;
+    (void)!write(fd, "x", 1);
+    struct timespec times[2] = { { (time_t)mtime, 0 }, { (time_t)mtime, 0 } };
+    futimens(fd, times);
+    close(fd);
+    FCRegisterOwnerAt(AT_FDCWD, [path fileSystemRepresentation], owner);
+}
+
+// While pickup is paused (diagnostics mode) copies wait in the inbox; the
+// limits and the 24-hour drop still apply; nothing reaches the delegate.
+static int RunPausePickup(void) {
+    int f = 0;
+    FCRecorder *ra = [[[FCRecorder alloc] init] autorelease], *rb = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *a = Service(kA, ra), *b = Service(kB, rb);
+    [b setPickupPaused:YES];
+    f += Check([b pickupPaused], "the service reports pickup as paused");
+    [a start];
+    [b start];
+    Settle(a);
+    Settle(b);
+    Offer(a, @"example-23 alpha");
+    Offer(a, @"example-24 beta");
+    Settle(a);
+    Spin(0.3);
+    Settle(b);
+    f += Check([rb->received count] == 0 && [Entries(FromPath(kB, kA)) count] == 2,
+               "while paused the folder watch takes nothing in; both copies wait");
+    PlantOld(FromPath(kB, kA), kA, [[NSDate date] timeIntervalSince1970] - 25 * 3600);
+    [b pickUp];
+    gActive[1] = NO;
+    Settle(b);
+    gActive[1] = YES;
+    [b sessionDidBecomeActive];
+    Settle(b);
+    f += Check([rb->received count] == 0 && [rb->pasteboard count] == 0 && [Entries(FromPath(kB, kA)) count] == 2,
+               "a pickup and coming back take nothing in either; a file older than a day is still dropped");
+    [b stop];
+    Settle(b);
+    FCRecorder *rb2 = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *b2 = Service(kB, rb2);
+    [b2 setPickupPaused:YES];
+    [b2 start];
+    Settle(b2);
+    f += Check([rb2->received count] == 0 && [rb2->pasteboard count] == 0 && [Entries(FromPath(kB, kA)) count] == 2,
+               "a launch while paused takes nothing in and leaves the pasteboard alone");
+    [b2 setPickupPaused:NO];
+    f += Check(WaitFor(^BOOL { return [rb2->received count] == 2; }, 3.0), "when pickup resumes the waiting copies come in");
+    Settle(b2);
+    f += Check([rb2->pasteboard count] == 0 && [Entries(FromPath(kB, kA)) count] == 0,
+               "B is in front: they go to the list only, and the files are deleted");
+    [b2 stop];
+    Settle(b2);
+    // Taken in by the queue, then paused before the main thread got it: dropped.
+    FCRecorder *rb3 = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *b3 = Service(kB, rb3);
+    [b3 setWatchesSenderFolders:NO];
+    [b3 start];
+    Settle(b3);
+    Offer(a, @"example-27 late");
+    Settle(a);
+    [b3 pickUp];
+    [b3 waitForQueue];
+    [b3 setPickupPaused:YES];
+    Spin(0.3);
+    f += Check([rb3->received count] == 0, "a copy the queue took in just before pickup was paused is not added");
+    [a stop];
+    [b3 stop];
+    return f;
+}
+
+// Turning sharing off also deletes this account's copies that still wait in the
+// other accounts' inboxes.
+static int RunWithdrawOnOff(void) {
+    int f = 0;
+    FCRecorder *ra = [[[FCRecorder alloc] init] autorelease], *rb = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *a = Service(kA, ra), *b = Service(kB, rb);
+    [b setWatchesSenderFolders:NO];
+    [a start];
+    [b start];
+    Settle(a);
+    Settle(b);
+    Offer(a, @"example-25 gamma");
+    Offer(a, @"example-26 delta");
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 2, "two of A's copies wait for B");
+    [a stopAndWipeInbox];
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 0, "turning sharing off in A deletes them");
+    f += Check(Exists(FromPath(kB, kA)) && !Exists(TopPath(kA)), "B's folder for A stays; A's own inbox is gone");
+    [b pickUp];
+    Settle(b);
+    f += Check([rb->received count] == 0, "B takes nothing in");
+    [b stop];
+    return f;
+}
+
 // The trace must refuse, not only count, what would leave the injected root: an
 // engine pointed at a directory outside it (standing in for a real shared folder)
 // creates nothing there.
@@ -588,7 +764,10 @@ int main(int argc, const char **argv) {
                                 @"off-wipe-retried": [NSValue valueWithPointer:RunOffWipeRetried],
                                 @"leftover-wipe": [NSValue valueWithPointer:RunLeftoverWipe],
                                 @"account-rule": [NSValue valueWithPointer:RunAccountRule],
-                                @"containment": [NSValue valueWithPointer:RunContainment]};
+                                @"containment": [NSValue valueWithPointer:RunContainment],
+                                @"launch-age": [NSValue valueWithPointer:RunLaunchAge],
+                                @"pause-pickup": [NSValue valueWithPointer:RunPausePickup],
+                                @"withdraw-on-off": [NSValue valueWithPointer:RunWithdrawOnOff]};
         NSValue *run = [modes objectForKey:[NSString stringWithUTF8String:argv[1]]];
         if (run == nil) return 3;
         int failures = ((int (*)(void))[run pointerValue])();

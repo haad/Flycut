@@ -60,6 +60,10 @@ typedef BOOL (^FlycutAccountShareSessionState)(void);
 @property (nonatomic, readonly) BOOL running;
 // Seconds between the safety pickups that also catch a missed folder event (60).
 @property (nonatomic) NSTimeInterval safetyInterval;
+// YES while "Diagnostics: save data type, not content" is on:
+// nothing is taken in, copies wait in the inbox (the pickup limits and the
+// 24-hour drop still apply). Turning it off takes in what waits. Main thread.
+@property (nonatomic) BOOL pickupPaused;
 // Whether each sender's folder is watched for changes (YES; tests turn it off to
 // see the safety pickup alone).
 @property (nonatomic) BOOL watchesSenderFolders;
@@ -67,7 +71,8 @@ typedef BOOL (^FlycutAccountShareSessionState)(void);
 // Sharing is on: prepares the inbox for every other account, excludes it from
 // Time Machine, watches it and takes in what waits there.
 -(void)start;
-// Sharing is turned off: stops and deletes the inbox with everything in it.
+// Sharing is turned off: stops, deletes the inbox with everything in it and
+// this account's copies that still wait in the other accounts' inboxes.
 -(void)stopAndWipeInbox;
 // Sharing is off at launch: deletes an inbox left over from an earlier run.
 // A delete that fails, here or in -stopAndWipeInbox, is tried again every
@@ -87,7 +92,8 @@ typedef BOOL (^FlycutAccountShareSessionState)(void);
 		 appName:(NSString *)appName;
 
 // The session came to the console: refresh the inbox, take in what waits and
-// hand the newest clipping that came while away to the pasteboard.
+// hand the newest clipping that came while away to the pasteboard. At -start
+// (Flycut's launch) only a clipping copied less than 10 minutes ago goes there.
 -(void)sessionDidBecomeActive;
 // Takes in what waits now (also done by the folder watch and the safety timer).
 -(void)pickUp;

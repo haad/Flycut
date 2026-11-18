@@ -161,6 +161,24 @@ class AccountShareAppControllerTests(unittest.TestCase):
     def test_checkbox_action_starts_and_wipes(self) -> None:
         self.run_case("toggle")
 
+    def test_diagnostics_mode_pauses_pickup(self) -> None:
+        self.run_case("diagnostics-pause")
+
+    def test_turning_off_withdraws_the_copies_waiting_elsewhere(self) -> None:
+        self.run_case("toggle-withdraws")
+
+    def test_a_shared_copy_never_replaces_a_newer_or_unseen_pasteboard(self) -> None:
+        self.run_case("pasteboard-guard")
+
+    def test_at_launch_a_shared_copy_replaces_only_an_empty_pasteboard(self) -> None:
+        self.run_case("launch-pasteboard-guard")
+
+    def test_only_what_flycut_keeps_is_replaced_on_return(self) -> None:
+        self.run_case("kept-pasteboard")
+
+    def test_paused_tracking_pauses_receiving(self) -> None:
+        self.run_case("tracking-pause")
+
     def test_launch_quit_and_capture_hooks(self) -> None:
         source = APP_CONTROLLER.read_text()
         awake = method_body(source, "- (void)awakeFromNib")
@@ -172,6 +190,11 @@ class AccountShareAppControllerTests(unittest.TestCase):
                         awake.index("[self buildGeneralAccountSharingSection];"))
         setup = method_body(source, "-(void)setUpAccountSharing")
         self.assertIn("NSWorkspaceSessionDidBecomeActiveNotification", setup)
+        self.assertIn("NSWorkspaceSessionDidResignActiveNotification", setup)
+        self.assertLess(setup.index("[self noteAccountSharePasteboardAtLaunch];"), setup.index("[accountShareService start];"),
+                        "the launch pasteboard is noted before sharing starts")
+        self.assertLess(setup.index("[self updateAccountSharePickupPause];"), setup.index("[accountShareService start];"),
+                        "pickup is paused before sharing starts if tracking is paused")
         self.assertIn('boolForKey:@"shareClippingsAcrossAccounts"', setup)
         terminate = method_body(source, "- (void)applicationWillTerminate:(NSNotification *)notification")
         self.assertIn("[accountShareService stop];", terminate)
@@ -190,7 +213,8 @@ class AccountShareAppControllerTests(unittest.TestCase):
         prefs = REAL_HOME / "Library/Preferences"
         before_prefs = set(os.listdir(prefs))
         before = snapshot_names(SHARED)
-        for mode in ("capture", "recopy", "away-no-echo", "toggle"):
+        for mode in ("capture", "recopy", "away-no-echo", "toggle", "diagnostics-pause", "toggle-withdraws",
+                     "pasteboard-guard", "launch-pasteboard-guard", "tracking-pause", "kept-pasteboard"):
             self.run_case(mode)
         self.assertEqual(before, snapshot_names(SHARED))
         self.assertEqual(set(os.listdir(prefs)), before_prefs)

@@ -220,6 +220,19 @@ static int FCT_futimens(int fd, const struct timespec times[2]) {
     tFCActor = saved;
     return ok;
 }
+- (void)pruneInbox {
+    uid_t saved = tFCActor;
+    tFCActor = [self ownUID];
+    [super pruneInbox];
+    tFCActor = saved;
+}
+- (BOOL)withdrawFromRecipient:(uid_t)recipientUID error:(NSError **)error {
+    uid_t saved = tFCActor;
+    tFCActor = [self ownUID];
+    BOOL ok = [super withdrawFromRecipient:recipientUID error:error];
+    tFCActor = saved;
+    return ok;
+}
 - (BOOL)sendText:(NSString *)text ofType:(NSString *)type availableTypes:(NSArray<NSString *> *)availableTypes
         richData:(NSDictionary *)richData appName:(NSString *)appName toRecipient:(uid_t)recipientUID
            error:(NSError **)error {
@@ -232,12 +245,18 @@ static int FCT_futimens(int fd, const struct timespec times[2]) {
 }
 @end
 
-static FCTracedEngine *FCTracedEngineFor(NSString *root, uid_t uid, id<FlycutAccountShareFilter> filter) {
+// clock nil: the system clock.
+static FCTracedEngine *FCTracedEngineWithClock(NSString *root, uid_t uid, id<FlycutAccountShareFilter> filter,
+                                               FlycutAccountShareClock clock) {
     FCTracedEngine *engine = [[FCTracedEngine alloc] initWithSharedRoot:root ownUID:uid
                                                             ownerLookup:^uid_t(const struct stat *st) { return FCLookupOwner(st); }
-                                                                  clock:nil];
+                                                                  clock:clock];
     [engine setFilter:filter];
     return [engine autorelease];
+}
+
+static FCTracedEngine *FCTracedEngineFor(NSString *root, uid_t uid, id<FlycutAccountShareFilter> filter) {
+    return FCTracedEngineWithClock(root, uid, filter, nil);
 }
 
 static void FCTraceReport(void) {

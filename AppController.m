@@ -45,6 +45,11 @@
 @interface AppController () <FlycutAccountShareServiceDelegate>
 -(void)setUpAccountSharing;
 -(void)accountSessionDidBecomeActive:(NSNotification *)notification;
+-(void)accountSessionDidResignActive:(NSNotification *)notification;
+-(void)noteAccountSharePasteboardAtLaunch;
+-(BOOL)mayPutSharedClippingOnPasteboard;
+-(void)updateAccountSharePickupPause;
+-(void)accountSharingDefaultsDidChange:(NSNotification *)notification;
 -(IBAction)toggleShareClippingsAcrossAccounts:(id)sender;
 -(void)buildGeneralAccountSharingSection;
 @end
@@ -551,7 +556,14 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 
 	[FlycutMenuIcon registerColorDefaults:[NSUserDefaults standardUserDefaults]];
 
-	return [super init];
+	self = [super init];
+	if (self != nil) {
+		// Nothing on the pasteboard may be replaced by a shared copy until launch
+		// or a session change says so (-noteAccountSharePasteboardAtLaunch).
+		accountSharePasteboardMark = -1;
+		accountShareKeptGeneration = -1;
+	}
+	return self;
 }
 
 - (void)openAccessibilitySettings {
@@ -943,6 +955,8 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
         [pbCount release];
         pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
     }
+    // Nothing comes in from other accounts while paused either.
+    [self updateAccountSharePickupPause];
 
     [self updateMenuBarIcon];
     [self updateClipboardTrackingMenuItem];
@@ -1267,12 +1281,69 @@ static CGFloat FlycutAccountSharingRightEdge(NSView *pane, NSControl *reference)
 														   selector:@selector(accountSessionDidBecomeActive:)
 															   name:NSWorkspaceSessionDidBecomeActiveNotification
 															 object:nil];
+	[[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:self
+														   selector:@selector(accountSessionDidResignActive:)
+															   name:NSWorkspaceSessionDidResignActiveNotification
+															 object:nil];
+	// Diagnostics mode lists copies by type only: nothing is taken in with content
+	// while it is on, so it holds pickup from the first one on.
+	[[NSNotificationCenter defaultCenter] addObserver:self
+											 selector:@selector(accountSharingDefaultsDidChange:)
+												 name:NSUserDefaultsDidChangeNotification
+											   object:nil];
+	[self updateAccountSharePickupPause];
+	[self noteAccountSharePasteboardAtLaunch];
 	// Sharing is off: an inbox left over from a delete that failed (or from
 	// a crash) goes now.
 	if (![[NSUserDefaults standardUserDefaults] boolForKey:@"shareClippingsAcrossAccounts"])
 		[accountShareService wipeLeftoverInbox];
 	if ([[NSUserDefaults standardUserDefaults] boolForKey:@"shareClippingsAcrossAccounts"])
 		[accountShareService start];
+}
+
+// Diagnostics mode lists copies by type only, and paused tracking takes nothing
+// in: either way pickup waits, the copies stay in the inbox.
+-(void)updateAccountSharePickupPause
+{
+	[accountShareService setPickupPaused:[[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"]
+		|| [flycutOperator storeDisabled]];
+}
+
+// What is on the pasteboard when Flycut starts was never captured (-pollPB:
+// starts after it), so a shared copy may only replace an empty pasteboard.
+-(void)noteAccountSharePasteboardAtLaunch
+{
+	NSInteger now = [jcPasteboard changeCount];
+	accountSharePasteboardMark = now;
+	accountShareKeptGeneration = [[jcPasteboard types] count] == 0 ? now : -1;
+}
+
+// A shared copy may go on the pasteboard only if tracking runs, no paste is in
+// progress and the pasteboard still holds what it held when the session left
+// the console (or at launch), and that is something Flycut keeps: the last
+// copy it took into the history or a clipping it put there itself (at launch:
+// nothing). A copy it skipped (password manager), made while paused, recorded
+// only by its type, a picture or a clipboard put back after a cancelled paste
+// stays, as does anything copied after the session left.
+-(BOOL)mayPutSharedClippingOnPasteboard
+{
+	NSInteger now = [jcPasteboard changeCount];
+	return ![flycutOperator storeDisabled] && currentPasteTransaction == nil
+		&& now == accountSharePasteboardMark && now == accountShareKeptGeneration;
+}
+
+-(void)accountSharingDefaultsDidChange:(NSNotification *)notification
+{
+	(void)notification;
+	[self updateAccountSharePickupPause];
+}
+
+// Leaving the console: what the pasteboard holds now may be replaced by a
+// shared copy on return if Flycut keeps it (-mayPutSharedClippingOnPasteboard).
+-(void)accountSessionDidResignActive:(NSNotification *)notification
+{
+	(void)notification;
+	accountSharePasteboardMark = [jcPasteboard changeCount];
 }
 
 -(void)accountSessionDidBecomeActive:(NSNotification *)notification
@@ -1310,11 +1381,12 @@ static CGFloat FlycutAccountSharingRightEdge(NSView *pane, NSControl *reference)
 
 // Back at the console: the newest copy that came while away goes on the
 // pasteboard, as Flycut's own write, so -pollPB: neither adds it again nor
-// sends it back. A paste in progress keeps the pasteboard.
+// sends it back; only if nothing newer is there (-mayPutSharedClippingOnPasteboard),
+// else it stays in the list only.
 -(void)accountShareService:(FlycutAccountShareService *)service shouldPutOnPasteboard:(FlycutSharedClipping *)clipping
 {
 	(void)service;
-	if (currentPasteTransaction != nil)
+	if (![self mayPutSharedClippingOnPasteboard])
 		return;
 	[self addClipToPasteboard:[clipping text] withRichData:[clipping richData]];
 }
@@ -3942,7 +4014,9 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                 // again (-addClipping: answers NO and keeps only its formatting), but
                 // the history holds it all the same.
                 FlycutClipping *newest = [[flycutOperator clippingsInList:FlycutListHistory matching:nil] firstObject];
-                if ( added || [[newest contents] isEqualToString:contents] )
+                if ( added || [[newest contents] isEqualToString:contents] ) {
+                    // In the history now: a shared copy may replace it on return.
+                    accountShareKeptGeneration = pasteboardGeneration;
                     // A text copy made here, not paused, not diagnostics: offer it to the other
                     // accounts. The service skips it while this session is not on the console;
                     // FlycutOperator decides whether it may leave the account at all.
@@ -3954,6 +4028,7 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                         [accountShareService offerText:contents ofType:type availableTypes:availableTypes
                                               richData:richData appName:[currRunningApp localizedName]];
                     }
+                }
             };
             if ( !catchingUpText ) {
                 dispatch_async(dispatch_get_main_queue(), ^{ commitText(richDataRead, generationAfterRead); });
@@ -4769,6 +4844,10 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
             [self clearPasteTransactionIfCurrent:transaction];
         }
     }
+    else
+        // A clipping from Flycut's lists: a shared copy may replace it on return
+        // (a cancelled paste's restored clipboard is not marked).
+        accountShareKeptGeneration = declaredCount;
     [transaction release];
 }
 

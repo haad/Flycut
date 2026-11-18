@@ -56,6 +56,8 @@ enum { kA = 7001, kB = 7002, kUnopted = 7003 };
     NSMutableDictionary *values;
 }
 - (void)copyText:(NSString *)text;
+- (void)copyText:(NSString *)text withTypes:(NSArray *)markers;
+- (void)copyImage;
 @end
 @implementation FCMemoryPasteboard
 - (id)init {
@@ -80,11 +82,44 @@ enum { kA = 7001, kB = 7002, kUnopted = 7003 };
 - (NSInteger)clearContents { changeCount++; [types release]; types = [@[] retain]; [values removeAllObjects]; return changeCount; }
 - (BOOL)setString:(NSString *)s forType:(NSString *)t { if (!s) return NO; values[t] = [[s copy] autorelease]; [self addType:t]; return YES; }
 - (BOOL)setData:(NSData *)d forType:(NSString *)t { if (!d) return NO; values[t] = [[d copy] autorelease]; [self addType:t]; return YES; }
-- (NSArray *)pasteboardItems { return @[]; }
-- (BOOL)writeObjects:(NSArray *)objects { return NO; }
+// One item holding every type, as -snapshotPasteboardItems reads it.
+- (NSArray *)pasteboardItems {
+    if ([types count] == 0) return @[];
+    NSPasteboardItem *item = [[[NSPasteboardItem alloc] init] autorelease];
+    for (NSString *type in types) {
+        id value = values[type];
+        [item setData:[value isKindOfClass:[NSString class]] ? [value dataUsingEncoding:NSUTF8StringEncoding] : value forType:type];
+    }
+    return @[item];
+}
+// Puts items back (a cancelled paste restores the earlier clipboard); no new generation.
+- (BOOL)writeObjects:(NSArray *)objects {
+    for (id object in objects) {
+        if (![object isKindOfClass:[NSPasteboardItem class]]) return NO;
+        for (NSString *type in [object types]) {
+            NSData *data = [object dataForType:type];
+            if ([type isEqualToString:NSPasteboardTypeString])
+                values[type] = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
+            else
+                values[type] = data;
+            [self addType:type];
+        }
+    }
+    return YES;
+}
 - (void)copyText:(NSString *)text {
     changeCount++; [types release]; types = [@[NSPasteboardTypeString] retain];
     [values removeAllObjects]; values[NSPasteboardTypeString] = text;
+}
+// A copy that carries marker types too (a password manager's concealed type).
+- (void)copyText:(NSString *)text withTypes:(NSArray *)markers {
+    [self copyText:text];
+    for (NSString *marker in markers) { values[marker] = [NSData dataWithBytes:"1" length:1]; [self addType:marker]; }
+}
+// A picture only (no text type).
+- (void)copyImage {
+    changeCount++; [types release]; types = [@[NSPasteboardTypeTIFF] retain];
+    [values removeAllObjects]; values[NSPasteboardTypeTIFF] = [NSData dataWithBytes:"II*\0" length:4];
 }
 @end
 
@@ -125,8 +160,18 @@ enum { kA = 7001, kB = 7002, kUnopted = 7003 };
 - (void)setClipboardTrackingPaused:(BOOL)paused;
 - (void)setUpAccountSharing;
 - (void)accountSessionDidBecomeActive:(NSNotification *)notification;
+- (void)accountSessionDidResignActive:(NSNotification *)notification;
+- (void)noteAccountSharePasteboardAtLaunch;
 - (IBAction)toggleShareClippingsAcrossAccounts:(id)sender;
+- (void)rememberFrontmostApplicationForPaste;
+- (void)clearRememberedPasteTarget;
 @end
+
+// The session leaves the console: the controller notes what is on its pasteboard.
+static void Leave(FCShareController *controller) {
+    if ([controller respondsToSelector:@selector(accountSessionDidResignActive:)])
+        [controller accountSessionDidResignActive:nil];
+}
 
 static FCFakeWorkspace *fakeWorkspace;
 static id FCSharedWorkspace(id self, SEL _cmd) { return fakeWorkspace; }
@@ -196,6 +241,9 @@ static Participant Make(uid_t uid) {
     [p.op setFavoritesStoreDelegate:(id)p.controller];
     p.pasteboard = [[FCMemoryPasteboard alloc] init];
     [p.controller installOperator:p.op pasteboard:p.pasteboard];
+    // What -setUpAccountSharing does at launch: the pasteboard is empty here.
+    if ([p.controller respondsToSelector:@selector(noteAccountSharePasteboardAtLaunch)])
+        [p.controller noteAccountSharePasteboardAtLaunch];
     p.service = [[FlycutAccountShareService alloc]
         initWithEngine:FCTracedEngineFor(gShared, uid, (id<FlycutAccountShareFilter>)p.op)
               accounts:^NSArray *{ return @[@(kA), @(kB), @(kUnopted)]; }
@@ -375,14 +423,15 @@ static int RunAwayThenSwitchNoEcho(void) {
     Participant a = Make(kA), b = Make(kB);
     StartBoth(a, b);
     gActive[1] = NO;
-    Copy(a, @"example-02 beta");
-    f += Check(WaitFor(^BOOL { return [Top(b) isEqualToString:@"example-02 beta"]; }, 3.0),
-               "B, in the background, gets A's copy into its history");
     Copy(b, @"example-03 gamma");
     [b.service waitForQueue];
     f += Check([Top(b) isEqualToString:@"example-03 gamma"] && Waiting(kA, kB) == 0,
-               "B's own copy while in the background stays in B");
+               "B's own copy made off the console stays in B");
     f += Check(b.pasteboard->changeCount == 101, "B's pasteboard holds only B's own copy");
+    Leave(b.controller);
+    Copy(a, @"example-02 beta");
+    f += Check(WaitFor(^BOOL { return [Top(b) isEqualToString:@"example-02 beta"]; }, 3.0),
+               "B, in the background, gets A's copy into its history");
     gActive[1] = YES;
     if ([b.controller respondsToSelector:@selector(accountSessionDidBecomeActive:)])
         [b.controller accountSessionDidBecomeActive:nil];
@@ -395,7 +444,7 @@ static int RunAwayThenSwitchNoEcho(void) {
     [b.controller drainCaptures];
     [b.service waitForQueue];
     Spin(1.0);
-    f += Check([b.op jcListCount] == count && [Top(b) isEqualToString:@"example-03 gamma"],
+    f += Check([b.op jcListCount] == count && [Top(b) isEqualToString:@"example-02 beta"],
                "B's next poll does not capture it again");
     f += Check(Waiting(kA, kB) == 0 && [a.op jcListCount] == 1, "and does not send it back to A");
     [a.service stop];
@@ -493,6 +542,310 @@ static int RunToggle(void) {
     [b.controller toggleShareClippingsAcrossAccounts:nil];
     [b.service waitForQueue];
     f += Check(![b.service running] && !Exists(TopPath(kB)), "turning it off wipes the inbox");
+    return f;
+}
+
+// Diagnostics mode ("Diagnostics: save data type, not content") pauses pickup:
+// a copy from another account waits in the inbox and is taken in once it is off.
+static int RunDiagnosticsPausesPickup(void) {
+    int f = 0;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    Participant a = Make(kA), b = Make(kB);
+    [b.service setWatchesSenderFolders:NO];
+    [defaults setBool:YES forKey:@"shareClippingsAcrossAccounts"];
+    [a.controller setUpAccountSharing];
+    [b.controller setUpAccountSharing];
+    [a.service waitForQueue];
+    [b.service waitForQueue];
+    Copy(a, @"example-30 alpha");
+    [a.service waitForQueue];
+    f += Check(Waiting(kB, kA) == 1, "A's copy waits in B's inbox");
+    [defaults setBool:YES forKey:@"revealPasteboardTypes"];
+    [center postNotificationName:NSUserDefaultsDidChangeNotification object:defaults];
+    [b.service pickUp];
+    [b.controller accountSessionDidBecomeActive:nil];
+    [b.service waitForQueue];
+    Spin(0.5);
+    f += Check([b.op jcListCount] == 0 && Waiting(kB, kA) == 1 && b.pasteboard->changeCount == 100,
+               "with pasteboard types in the list (diagnostics) B takes nothing in; the copy waits");
+    [defaults setBool:NO forKey:@"revealPasteboardTypes"];
+    [center postNotificationName:NSUserDefaultsDidChangeNotification object:defaults];
+    f += Check(WaitFor(^BOOL { return [Top(b) isEqualToString:@"example-30 alpha"]; }, 3.0) && Waiting(kB, kA) == 0,
+               "turning diagnostics off takes it in");
+    [defaults setBool:YES forKey:@"revealPasteboardTypes"];
+    Participant c = Make(kB);
+    [c.controller setUpAccountSharing];
+    BOOL paused = [c.service respondsToSelector:@selector(pickupPaused)] && [c.service pickupPaused];
+    f += Check(paused && [c.service running], "Flycut started with diagnostics on runs sharing with pickup paused");
+    [defaults setBool:NO forKey:@"revealPasteboardTypes"];
+    [defaults setBool:NO forKey:@"shareClippingsAcrossAccounts"];
+    [a.service stop];
+    [b.service stop];
+    [c.service stop];
+    return f;
+}
+
+// Turning sharing off in A also deletes A's copy that still waits for B.
+static int RunToggleWithdraws(void) {
+    int f = 0;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    Participant a = Make(kA), b = Make(kB);
+    [b.service setWatchesSenderFolders:NO];
+    StartBoth(a, b);
+    Copy(a, @"example-31 beta");
+    [a.service waitForQueue];
+    f += Check(Waiting(kB, kA) == 1, "A's copy waits in B's inbox");
+    [defaults setBool:NO forKey:@"shareClippingsAcrossAccounts"];
+    [a.controller toggleShareClippingsAcrossAccounts:nil];
+    [a.service waitForQueue];
+    f += Check(![a.service running] && Waiting(kB, kA) == 0 && Exists(FromPath(kB, kA)),
+               "turning sharing off in A deletes it; B's folder for A stays");
+    [b.service stop];
+    return f;
+}
+
+
+static NSString *OnPasteboard(Participant p) {
+    return [p.pasteboard stringForType:NSPasteboardTypeString];
+}
+
+// A copy from A arrives while B is off the console and is in B's history.
+static BOOL ArrivesWhileAway(Participant a, Participant b, NSString *text) {
+    Leave(b.controller);
+    gActive[1] = NO;
+    Copy(a, text);
+    [a.service waitForQueue];
+    [b.service pickUp];
+    return WaitFor(^BOOL { return [Top(b) isEqualToString:text]; }, 3.0);
+}
+
+static void Return(Participant b) {
+    gActive[1] = YES;
+    [b.controller accountSessionDidBecomeActive:nil];
+    [b.service waitForQueue];
+    Spin(0.3);
+}
+
+// A shared copy goes on the pasteboard on return or at launch only if the
+// pasteboard holds nothing the user copied after it: the change count must be
+// the one noted when the session left (or at launch, then only an empty
+// pasteboard), and -pollPB: must have seen it.
+static int RunPasteboardGuard(void) {
+    int f = 0;
+    Participant a = Make(kA), b = Make(kB);
+    [b.service setWatchesSenderFolders:NO];
+    StartBoth(a, b);
+    if (![b.controller respondsToSelector:@selector(accountSessionDidResignActive:)])
+        f += Check(NO, "the controller notes the pasteboard when its session leaves the console");
+    // (a) Something lands on B's pasteboard while B is away (an app there writes it).
+    f += Check(ArrivesWhileAway(a, b, @"example-50 alpha"), "A's copy reaches B's history while B is away");
+    Copy(b, @"example-51 own");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-51 own"], "what B's pasteboard got while away stays on it");
+    // (b) Nothing new on it: the shared copy goes there.
+    f += Check(ArrivesWhileAway(a, b, @"example-52 beta"), "A's next copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-52 beta"], "with nothing new on it, A's copy is on B's pasteboard on return");
+    // (c) B copies the moment it is back, before the delivery and before -pollPB: saw it.
+    f += Check(ArrivesWhileAway(a, b, @"example-53 gamma"), "a third copy reaches B while away");
+    gActive[1] = YES;
+    [b.pasteboard copyText:@"example-54 own"];
+    [b.controller accountSessionDidBecomeActive:nil];
+    [b.service waitForQueue];
+    Spin(0.3);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-54 own"], "a copy made right after coming back is not replaced");
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    // (d) B copied just before leaving and -pollPB: has not seen it yet.
+    [b.pasteboard copyText:@"example-55 own"];
+    f += Check(ArrivesWhileAway(a, b, @"example-56 delta"), "a fourth copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-55 own"], "a copy Flycut has not seen yet is not replaced");
+    [a.service stop];
+    [b.service stop];
+    return f;
+}
+
+// At launch: what is on the pasteboard when Flycut starts was never captured,
+// so a waiting shared copy replaces only an empty pasteboard.
+static int RunLaunchPasteboardGuard(void) {
+    int f = 0;
+    if (![FCShareController instancesRespondToSelector:@selector(noteAccountSharePasteboardAtLaunch)])
+        return Check(NO, "the controller notes the pasteboard at launch");
+    for (int empty = 0; empty < 2; empty++) {
+        Participant a = Make(kA), b = Make(kB);
+        [b.service setWatchesSenderFolders:NO];
+        StartBoth(a, b);
+        [b.service stop];   // B quits
+        [b.service waitForQueue];
+        NSString *text = empty ? @"example-58 beta" : @"example-57 alpha";
+        Copy(a, text);
+        [a.service waitForQueue];
+        // B starts again: a new controller; the pasteboard holds the user's copy or nothing.
+        Participant c = Make(kB);
+        [c.service setWatchesSenderFolders:NO];
+        if (!empty)
+            [c.pasteboard copyText:@"example-59 own"];
+        [c.controller installOperator:c.op pasteboard:c.pasteboard];
+        [c.controller noteAccountSharePasteboardAtLaunch];
+        [c.service start];
+        [c.service waitForQueue];
+        f += Check(WaitFor(^BOOL { return [Top(c) isEqualToString:text]; }, 3.0), "at launch B takes in the copy that waited");
+        Spin(0.3);
+        if (empty)
+            f += Check([OnPasteboard(c) isEqualToString:text], "and puts it on B's empty pasteboard");
+        else
+            f += Check([OnPasteboard(c) isEqualToString:@"example-59 own"], "but leaves what B's pasteboard held at launch");
+        if (!empty) {
+            // B leaves and comes back with that launch content still there: it stays too.
+            Leave(c.controller);
+            gActive[1] = NO;
+            Copy(a, @"example-59 gamma");
+            [a.service waitForQueue];
+            [c.service pickUp];
+            f += Check(WaitFor(^BOOL { return [Top(c) isEqualToString:@"example-59 gamma"]; }, 3.0), "a later copy reaches B while away");
+            Return(c);
+            f += Check([OnPasteboard(c) isEqualToString:@"example-59 own"], "and still does not replace the uncaptured launch content");
+        }
+        [a.service stop];
+        [c.service stop];
+    }
+    return f;
+}
+
+// While clipboard tracking is paused nothing is taken in from the other
+// accounts and nothing goes on the pasteboard; copies wait in the inbox.
+static int RunTrackingPausePausesPickup(void) {
+    int f = 0;
+    Participant a = Make(kA), b = Make(kB);
+    [b.service setWatchesSenderFolders:NO];
+    StartBoth(a, b);
+    [b.controller setClipboardTrackingPaused:YES];
+    f += Check([b.service pickupPaused], "pausing clipboard tracking in B pauses taking in shared copies");
+    Leave(b.controller);
+    gActive[1] = NO;
+    Copy(a, @"example-60 alpha");
+    [a.service waitForQueue];
+    [b.service pickUp];
+    Return(b);
+    f += Check([b.op jcListCount] == 0 && Waiting(kB, kA) == 1 && b.pasteboard->changeCount == 100,
+               "while paused B adds nothing to its history and leaves its pasteboard; the copy waits");
+    [b.controller setClipboardTrackingPaused:NO];
+    f += Check(![b.service pickupPaused], "resuming tracking resumes pickup");
+    f += Check(WaitFor(^BOOL { return [Top(b) isEqualToString:@"example-60 alpha"]; }, 3.0) && Waiting(kB, kA) == 0,
+               "and takes the waiting copy in");
+    Spin(0.3);
+    f += Check(b.pasteboard->changeCount == 100, "into the list only: the pasteboard is left alone");
+    // The delegate keeps to the same rule when it is asked directly.
+    FlycutSharedClipping *clipping = [[[FlycutSharedClipping alloc] initWithSender:kA created:[[NSDate date] timeIntervalSince1970]
+                                                                               text:@"example-61 beta" richData:nil appName:nil] autorelease];
+    [b.controller setClipboardTrackingPaused:YES];
+    [b.controller accountShareService:b.service shouldPutOnPasteboard:clipping];
+    f += Check(b.pasteboard->changeCount == 100, "asked to put a shared copy on the pasteboard while paused, B does not");
+    [b.controller setClipboardTrackingPaused:NO];
+    [b.controller accountShareService:b.service shouldPutOnPasteboard:clipping];
+    f += Check([OnPasteboard(b) isEqualToString:@"example-61 beta"], "the same request is followed once tracking runs again");
+    [b.controller setClipboardTrackingPaused:YES];
+    [b.controller setUpAccountSharing];
+    f += Check([b.service pickupPaused], "Flycut set up with tracking paused starts sharing with pickup paused");
+    [b.controller setClipboardTrackingPaused:NO];
+    [a.service stop];
+    [b.service stop];
+    return f;
+}
+
+// On return a shared copy replaces only what Flycut keeps: the last copy it
+// took into the history, or a clipping it put on the pasteboard from its list.
+// A copy it skipped (a password manager's), one made while tracking was paused,
+// one recorded only by its type (diagnostics), a picture it did not capture and
+// a clipboard put back after a cancelled paste stay on the pasteboard. A copy
+// of the text the history's newest clipping holds is kept too.
+static int RunKeptPasteboard(void) {
+    int f = 0;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    NSArray *concealed = @[@"org.nspasteboard.ConcealedType"];
+    Participant a = Make(kA), b = Make(kB);
+    [b.service setWatchesSenderFolders:NO];
+    StartBoth(a, b);
+    // (a) A password manager's copy: Flycut skips it.
+    [b.pasteboard copyText:@"example-70 own" withTypes:concealed];
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    f += Check([b.op jcListCount] == 0, "B skips a concealed copy");
+    f += Check(ArrivesWhileAway(a, b, @"example-71 alpha"), "A's copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-70 own"], "a concealed copy Flycut skipped is not replaced");
+    // (b) A copy made while tracking was paused; tracking runs again before B leaves.
+    [b.controller setClipboardTrackingPaused:YES];
+    [b.pasteboard copyText:@"example-72 own"];
+    [b.controller pollPB:nil];
+    [b.controller setClipboardTrackingPaused:NO];
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    f += Check(![Top(b) isEqualToString:@"example-72 own"], "a copy made while paused is not captured");
+    f += Check(ArrivesWhileAway(a, b, @"example-73 beta"), "A's next copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-72 own"], "a copy made while tracking was paused is not replaced");
+    // (c) Diagnostics on: the copy goes into the list as its type only.
+    [defaults setBool:YES forKey:@"revealPasteboardTypes"];
+    [center postNotificationName:NSUserDefaultsDidChangeNotification object:defaults];
+    Copy(b, @"example-74 own");
+    f += Check([Top(b) isEqualToString:NSPasteboardTypeString], "with diagnostics on B records the copy's type only");
+    [defaults setBool:NO forKey:@"revealPasteboardTypes"];
+    [center postNotificationName:NSUserDefaultsDidChangeNotification object:defaults];
+    f += Check(ArrivesWhileAway(a, b, @"example-75 gamma"), "a third copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-74 own"], "a copy recorded only by its type is not replaced");
+    // (d) A picture, with image capture off.
+    [b.pasteboard copyImage];
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    f += Check(ArrivesWhileAway(a, b, @"example-76 delta"), "a fourth copy reaches B while away");
+    Return(b);
+    f += Check([[b.pasteboard types] isEqualToArray:@[NSPasteboardTypeTIFF]] && OnPasteboard(b) == nil,
+               "a picture Flycut did not capture is not replaced");
+    // (e) A paste from Flycut's list is cancelled: the skipped copy comes back.
+    [b.pasteboard copyText:@"example-77 own" withTypes:concealed];
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    [b.controller rememberFrontmostApplicationForPaste];
+    [b.controller addClipToPasteboard:Top(b) withRichData:nil];
+    f += Check([OnPasteboard(b) isEqualToString:@"example-76 delta"], "a paste from the list puts that clipping on the pasteboard");
+    [b.controller clearRememberedPasteTarget];
+    f += Check([OnPasteboard(b) isEqualToString:@"example-77 own"] && [[b.pasteboard types] containsObject:concealed[0]],
+               "cancelling the paste puts the skipped copy back");
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    f += Check(ArrivesWhileAway(a, b, @"example-78 epsilon"), "a fifth copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-77 own"], "a copy put back after a cancelled paste is not replaced");
+    // (f) What Flycut keeps is replaced: a clipping it put there from its list ...
+    [b.controller addClipToPasteboard:@"example-75 gamma" withRichData:nil];
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    f += Check(ArrivesWhileAway(a, b, @"example-79 zeta"), "a sixth copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-79 zeta"], "a clipping Flycut put on the pasteboard from its list is replaced");
+    // ... and the last copy it took into the history.
+    Copy(b, @"example-80 own");
+    f += Check([Top(b) isEqualToString:@"example-80 own"], "B takes its own copy into the history");
+    f += Check(ArrivesWhileAway(a, b, @"example-81 eta"), "a seventh copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-81 eta"], "the last copy Flycut took into the history is replaced");
+    // ... also when that copy's text already was the history's newest clipping.
+    Copy(b, @"example-82 own");
+    Copy(b, @"example-82 own");
+    f += Check([Top(b) isEqualToString:@"example-82 own"] && [[b.op clippingAtPosition:1] contents] != nil
+               && ![[[b.op clippingAtPosition:1] contents] isEqualToString:@"example-82 own"],
+               "B copies the same text twice: it is in the history once");
+    f += Check(ArrivesWhileAway(a, b, @"example-83 theta"), "an eighth copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-83 theta"],
+               "a copy of the history's newest text is replaced too: the history holds it");
+    [a.service stop];
+    [b.service stop];
     return f;
 }
 
@@ -709,7 +1062,13 @@ int main(int argc, const char **argv) {
                                 @"away-no-echo": [NSValue valueWithPointer:RunAwayThenSwitchNoEcho],
                                 @"nothing-sent": [NSValue valueWithPointer:RunNothingSent],
                                 @"recopy": [NSValue valueWithPointer:RunRecopyOfNewestIsShared],
-                                @"toggle": [NSValue valueWithPointer:RunToggle]};
+                                @"toggle": [NSValue valueWithPointer:RunToggle],
+                                @"diagnostics-pause": [NSValue valueWithPointer:RunDiagnosticsPausesPickup],
+                                @"toggle-withdraws": [NSValue valueWithPointer:RunToggleWithdraws],
+                                @"pasteboard-guard": [NSValue valueWithPointer:RunPasteboardGuard],
+                                @"launch-pasteboard-guard": [NSValue valueWithPointer:RunLaunchPasteboardGuard],
+                                @"tracking-pause": [NSValue valueWithPointer:RunTrackingPausePausesPickup],
+                                @"kept-pasteboard": [NSValue valueWithPointer:RunKeptPasteboard]};
         NSValue *run = [modes objectForKey:[NSString stringWithUTF8String:argv[1]]];
         if (run == nil) return 3;
         int failures = ((int (*)(void))[run pointerValue])();
