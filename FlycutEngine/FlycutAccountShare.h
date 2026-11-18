@@ -59,10 +59,11 @@ typedef uid_t (^FlycutAccountShareOwnerLookup)(const struct stat *st);
 // Seconds since 1970.
 typedef NSTimeInterval (^FlycutAccountShareClock)(void);
 
-// The privacy decision Flycut already applies to every copy. FlycutOperator
-// implements it (-shouldSkip:ofType:fromAvailableTypes:).
+// Whether a clipping may leave this account. FlycutOperator implements it
+// (-mayShareClipping:ofType:fromAvailableTypes:): its password filters always
+// on, plus a fixed list of types that are never shared.
 @protocol FlycutAccountShareFilter <NSObject>
--(BOOL)shouldSkip:(NSString *)contents ofType:(NSString *)type fromAvailableTypes:(NSArray<NSString *> *)availableTypes;
+-(BOOL)mayShareClipping:(NSString *)contents ofType:(NSString *)type fromAvailableTypes:(NSArray<NSString *> *)availableTypes;
 @end
 
 // One clipping received from another account.
@@ -98,9 +99,6 @@ typedef NSTimeInterval (^FlycutAccountShareClock)(void);
 // Most files one sender may have waiting in one inbox; pickup also accepts at
 // most this many per sender and pass (the newest) and deletes the rest unread.
 +(NSUInteger)filesPerSenderLimit;
-// Pasteboard types that are never shared, whatever the local filter settings:
-// Flycut's factory skip lists plus the other markers listed on nspasteboard.org.
-+(NSArray<NSString *> *)neverSharedTypes;
 
 // rootPath: the directory that holds every account's inbox (/Users/Shared).
 // lookup and now may be nil (st_uid, the system clock).
@@ -133,8 +131,8 @@ typedef NSTimeInterval (^FlycutAccountShareClock)(void);
 
 // Sender: writes one clipping into the recipient's folder for this account.
 // availableTypes is the pasteboard's type list of the copy; the clipping is
-// refused if it is missing, if it holds a never-shared type or if the filter
-// skips the clipping. Only "public.rtf" and "public.html" of richData are sent.
+// refused if it is missing or if the filter refuses the clipping. Only
+// "public.rtf" and "public.html" of richData are sent.
 -(BOOL)sendText:(NSString *)text
 		 ofType:(NSString *)type
  availableTypes:(NSArray<NSString *> *)availableTypes

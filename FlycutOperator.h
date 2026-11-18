@@ -67,6 +67,14 @@ typedef NS_ENUM(NSInteger, FlycutList) {
 -(bool)addImageClipping:(NSData *)imageData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL imageType:(NSString *)imageType target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector fromClipboardGeneration:(NSInteger)generation;
 -(FlycutClipping *)clippingAtIndex:(int)index;
 -(BOOL)shouldSkip:(NSString *)contents ofType:(NSString *)type fromAvailableTypes:(NSArray<NSString *> *)availableTypes;
+// Sharing with another account of this Mac: NO for a clipping that must not
+// leave this account. Applies -shouldSkip:'s password filters as if all were
+// turned on (the factory lengths included) and refuses every type of
+// +neverSharedTypes and a copy without a type list, whatever the local settings.
+-(BOOL)mayShareClipping:(NSString *)contents ofType:(NSString *)type fromAvailableTypes:(NSArray<NSString *> *)availableTypes;
+// Pasteboard types that never leave this account: the factory password and
+// concealed type lists plus the other markers listed on nspasteboard.org.
++(NSArray<NSString *> *)neverSharedTypes;
 -(bool)addClipping:(NSString*)contents ofType:(NSString*)type withRichData:(NSDictionary *)richData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector;
 -(int)stackPosition;
 -(NSString*)getPasteFromStackPosition;

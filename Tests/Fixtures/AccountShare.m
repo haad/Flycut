@@ -982,11 +982,11 @@ static int RunNeverShareFilters(void) {
     NSArray *factoryTypes = [[[[defaults stringForKey:@"skipPboardTypesList"] stringByAppendingFormat:@",%@",
                                [defaults stringForKey:@"skipConcealedTypesList"]]
                               stringByReplacingOccurrencesOfString:@" " withString:@""] componentsSeparatedByString:@","];
-    NSArray *floor = [FlycutAccountShare neverSharedTypes];
+    NSArray *floor = [FlycutOperator neverSharedTypes];
     BOOL covered = [factoryTypes count] == 5;
     for (NSString *type in factoryTypes)
         if (![floor containsObject:type]) covered = NO;
-    f += Check(covered, "the never-share list holds every type of Flycut's factory skip lists");
+    f += Check(covered, "the operator's never-share list holds every type of Flycut's factory skip lists");
     NSArray *types = [factoryTypes arrayByAddingObjectsFromArray:
                       @[@"de.petermaurer.TransientPasteboardType", @"com.typeit4me.clipping", @"Pasteboard generator type"]];
     NSDictionary *rich = @{@"public.rtf": [@"{\\rtf1 x}" dataUsingEncoding:NSUTF8StringEncoding]};
@@ -1012,19 +1012,24 @@ static int RunNeverShareFilters(void) {
     f += Check(allRefused, "password-manager, concealed, transient and auto-generated clippings are refused "
                            "with the local filters on, off and with emptied lists");
     f += Check([Entries(from) count] == 0, "no file and no rich data reach the inbox for them");
-    // The password heuristic is FlycutOperator's own decision.
+    // The password check is the operator's, always on for sharing.
     [defaults reset];
     [gOperator release];
     gOperator = FreshOperator();
     [a setFilter:(id<FlycutAccountShareFilter>)gOperator];
-    [defaults setObject:@YES forKey:@"skipPasswordLengths"];
-    [defaults setObject:@"12" forKey:@"skipPasswordLengthsList"];
     NSInteger code = 0;
-    f += Check(!Send(a, @"Ab3$efGh9!xY", kPlainTypes(), nil, kB, &code) && code == FlycutAccountShareErrorRefused
-               && [Entries(from) count] == 0, "a clipping the operator's password check flags is refused");
-    [defaults setObject:@NO forKey:@"skipPasswordLengths"];
-    f += Check(Send(a, @"Ab3$efGh9!xY", kPlainTypes(), nil, kB, NULL),
-               "the same text is shared when the operator's password check is off");
+    BOOL heuristicRefused = YES;
+    for (NSNumber *local in @[@YES, @NO]) {
+        [defaults setObject:local forKey:@"skipPasswordFields"];
+        [defaults setObject:local forKey:@"skipPasswordLengths"];
+        code = 0;
+        if (Send(a, @"Ab3$efGh9!xY", kPlainTypes(), nil, kB, &code) || code != FlycutAccountShareErrorRefused)
+            heuristicRefused = NO;
+    }
+    f += Check(heuristicRefused && [Entries(from) count] == 0,
+               "a text the operator's password check flags is refused, also with the local check off");
+    f += Check(Send(a, @"example-17 ordinary", kPlainTypes(), nil, kB, NULL),
+               "an ordinary text is shared with the local check off");
     f += Check([Collect(b) count] == 1, "and picked up");
     f += Check(!Send(a, @"example-18", nil, nil, kB, &code) && code == FlycutAccountShareErrorRefused,
                "a clipping without a type snapshot is refused");
