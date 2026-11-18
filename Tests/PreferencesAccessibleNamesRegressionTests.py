@@ -14,8 +14,7 @@ interactive control (the view, or the cell of a cell-based control, which is wha
 VoiceOver reads; new and legacy attribute API). A name must be the
 label shown next to the control (the nearest static text or checkbox to its left on the
 same line, the search window's title, the table's column header, the menu item's
-title), and a stepper's value must be the number shown beside it, because VoiceOver does
-not reach that display-only number field. The search window is built without a NIB.
+title). The search window is built without a NIB.
 The two password list fields are the exception: the checkbox in front of each is a
 sub-option of "Don't save passwords" in MainMenu.xib ("by data type:", "by length &
 complexity:"), which does not say what the field holds, so the fields have fixed names,
@@ -221,8 +220,11 @@ static int Check(NSString *mode, NSView *root, NSMapTable *expected)
         if ([name length] == 0) [unnamed addObject:row];
         else if (want && ![name isEqualToString:want]) [mislabelled addObject:row];
         if ([view isKindOfClass:[NSStepper class]] && bound) {
-            // The number VoiceOver cannot reach in its display-only field is the stepper's value.
-            NSTextField *field = (NSTextField *)FindBound(root, bound, ^BOOL(NSView *v) { return IsStaticText(v); });
+            // A stepper left in a pane: its value is the number shown in the field beside it
+            // (the General pane's steppers are taken out when its number fields are built).
+            NSTextField *field = (NSTextField *)FindBound(root, bound, ^BOOL(NSView *v) {
+                return [v isKindOfClass:[NSTextField class]] && ![v isKindOfClass:[NSSearchField class]];
+            });
             row[@"shownNumber"] = field ? [field stringValue] : @"<no field>";
             if (field == nil || ![value isKindOfClass:[NSNumber class]] || [value integerValue] != [field integerValue])
                 [unreadValues addObject:row];

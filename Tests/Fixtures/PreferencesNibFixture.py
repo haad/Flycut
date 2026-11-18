@@ -185,6 +185,8 @@ class PreferencesNibCase(unittest.TestCase):
     FIXTURE = ""
     NAME = "PreferencesNibFixture"
     NO_NIB_MODES: tuple[str, ...] = ()
+    # Extra compiler flags for every source of the fixture binary (production code included).
+    EXTRA_CFLAGS: tuple[str, ...] = ()
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -205,7 +207,8 @@ class PreferencesNibCase(unittest.TestCase):
         fixture.write_text(PRELUDE + cls.FIXTURE)
         cls.binary = temp / cls.NAME
         command = ["/usr/bin/xcrun", "clang", "-fno-objc-arc", "-fobjc-weak", "-fblocks", "-fmodules", "-DFLYCUT_MAC=1",
-                   "-mmacosx-version-min=13.5", "-arch", "arm64", "-include", str(ROOT / "Flycut_Prefix.pch")]
+                   "-mmacosx-version-min=13.5", "-arch", "arm64", "-include", str(ROOT / "Flycut_Prefix.pch"),
+                   *cls.EXTRA_CFLAGS]
         for include in sorted({ROOT, FIXTURES, *(p.parent for p in sources)}):
             command += ["-I", str(include)]
         command += [str(p) for p in sources] + [str(fixture)]

@@ -53,7 +53,7 @@ static void FlycutSetAccessibilityLabel(NSControl *control, NSString *label)
 }
 
 // Keeps the arrows in step with the values: typing in a General field, a
-// bound stepper or field committing through the defaults controller, and the
+// bound field committing through the defaults controller, and the
 // Preferences window coming up. Lives as long as the app; holds the
 // controller weakly.
 @interface FlycutRestoreDefaultsObserver : NSObject
@@ -80,6 +80,148 @@ static void FlycutSetAccessibilityLabel(NSControl *control, NSString *label)
 {
 	(void)keyPath; (void)object; (void)change; (void)context;
 	[controller updateRestoreDefaultButtons];
+}
+@end
+
+// "Remember", "Display in menu" and "Favorites" are numbers to type. Typing
+// only changes the text: the value is checked and stored when the editing ends
+// (Return, Tab, a click into another field, a pane change, the window
+// closing), so typing 100 never passes through 1 and 10, which would shrink
+// the history. The NIB's steppers held the limits; they are gone at run time
+// (-buildGeneralNumberFields), so the limits are here: Remember and Favorites
+// 10-999, "Display in menu" 5 up to the current "Remember" (the Display
+// stepper's maxValue was bound to it).
+static const NSInteger FlycutRememberNumLowest = 10;
+static const NSInteger FlycutRememberNumHighest = 999;
+static const NSInteger FlycutDisplayNumLowest = 5;
+
+@interface FlycutNumberFieldFormatter : NSNumberFormatter
+@end
+
+@implementation FlycutNumberFieldFormatter
+// Digits only, at most three: no limit of these settings has more.
+- (BOOL)isPartialStringValid:(NSString *)partialString newEditingString:(NSString **)newString errorDescription:(NSString **)error
+{
+	(void)newString; (void)error;
+	NSCharacterSet *other = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789"] invertedSet];
+	return [partialString length] <= 3 && [partialString rangeOfCharacterFromSet:other].location == NSNotFound;
+}
+@end
+
+@interface FlycutNumberFieldEditing : NSObject <NSTextFieldDelegate>
+{
+	__weak AppController *controller;
+	NSMutableArray *fields;
+	NSMutableArray *keys;
+}
+- (instancetype)initWithController:(AppController *)aController;
+- (void)addField:(NSTextField *)field forKey:(NSString *)key;
+@end
+
+@implementation FlycutNumberFieldEditing
+- (instancetype)initWithController:(AppController *)aController
+{
+	self = [super init];
+	if (self != nil) {
+		controller = aController;
+		fields = [[NSMutableArray alloc] init];
+		keys = [[NSMutableArray alloc] init];
+	}
+	return self;
+}
+
+- (void)dealloc
+{
+	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	[fields release];
+	[keys release];
+	[super dealloc];
+}
+
+- (void)addField:(NSTextField *)field forKey:(NSString *)key
+{
+	[fields addObject:field];
+	[keys addObject:key];
+}
+
+- (NSString *)keyForControl:(id)control
+{
+	NSUInteger index = [fields indexOfObjectIdenticalTo:control];
+	return index == NSNotFound ? nil : [keys objectAtIndex:index];
+}
+
+// A value as the field's binding sees it now.
+- (NSInteger)storedValueForKey:(NSString *)key ofField:(NSControl *)field
+{
+	NSDictionary *binding = [field infoForBinding:NSValueBinding];
+	return [[[binding objectForKey:NSObservedObjectKey] valueForKeyPath:[@"values." stringByAppendingString:key]] integerValue];
+}
+
+// The value stored now, as the field shows it.
+- (NSString *)storedStringForField:(NSControl *)field
+{
+	NSDictionary *binding = [field infoForBinding:NSValueBinding];
+	id value = [[binding objectForKey:NSObservedObjectKey] valueForKeyPath:[binding objectForKey:NSObservedKeyPathKey]];
+	return [NSString stringWithFormat:@"%ld", (long)[value integerValue]];
+}
+
+// The text is final here. An empty field, or one showing the stored value,
+// keeps the stored value as it is; a typed number outside the limits becomes
+// the nearest allowed one, silently, as the field shows it. What is left is
+// stored by the field's binding, then the field sends the action the stepper
+// sent, so the value goes the stepper's way (Resize Stack, "Display in menu"
+// following a smaller "Remember").
+- (BOOL)control:(NSControl *)control textShouldEndEditing:(NSText *)fieldEditor
+{
+	NSString *key = [self keyForControl:control];
+	if (key == nil)
+		return YES;
+	NSString *text = [fieldEditor string];
+	NSString *stored = [self storedStringForField:control];
+	if ([text length] == 0) {
+		[fieldEditor setString:stored];
+		return YES;
+	}
+	if ([text isEqualToString:stored])
+		return YES;
+	NSInteger value = [text integerValue];
+	BOOL display = [key isEqualToString:@"displayNum"];
+	NSInteger lowest = display ? FlycutDisplayNumLowest : FlycutRememberNumLowest;
+	NSInteger highest = display ? MAX(lowest, [self storedValueForKey:@"rememberNum" ofField:control]) : FlycutRememberNumHighest;
+	NSInteger allowed = MIN(MAX(value, lowest), highest);
+	if (allowed != value)
+		[fieldEditor setString:[NSString stringWithFormat:@"%ld", (long)allowed]];
+	return YES;
+}
+
+// Escape brings back the stored value; nothing is stored.
+- (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)command
+{
+	if (command != @selector(cancelOperation:) || [self keyForControl:control] == nil)
+		return NO;
+	[textView setString:[self storedStringForField:control]];
+	[textView selectAll:nil];
+	[controller updateRestoreDefaultButtons];
+	return YES;
+}
+
+// A letter, a sign or a fourth digit is not taken, and nothing else shows
+// that; AppKit itself stays silent.
+- (void)control:(NSControl *)control didFailToValidatePartialString:(NSString *)string errorDescription:(NSString *)error
+{
+	(void)string; (void)error;
+	if ([self keyForControl:control] != nil)
+		NSBeep();
+}
+
+// Closing the window does not end the editing by itself: what was typed is
+// stored as on Return.
+- (void)windowWillClose:(NSNotification *)notification
+{
+	NSWindow *window = [notification object];
+	id responder = [window firstResponder];
+	if ([responder isKindOfClass:[NSText class]] && [self keyForControl:[(NSText *)responder delegate]] != nil)
+		[window makeFirstResponder:nil];
 }
 @end
 
@@ -418,6 +560,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	[self buildAppearancesPreferencePanel];
 
 	[self buildMainHotkeyRestoreDefaultButton];
+	[self buildGeneralNumberFields];
 	[self buildGeneralRestoreDefaultButtons];
 	[self buildGeneralPermissionsPreferenceRow];
 	[self buildGeneralAccessibilityLabels];
@@ -1377,19 +1520,18 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 }
 
 // The NIB gives these controls no accessibility label, so VoiceOver said only
-// "stepper", "pop up button" or the field's text. Each gets the label shown
-// next to it, in code, so that it also works with an already compiled NIB.
-// The number beside a stepper is display-only text that VoiceOver does not
-// reach; the stepper's value is that number, so the label makes VoiceOver say
-// "Remember, 40, stepper".
+// "pop up button" or the field's text. Each gets the label shown next to it,
+// in code, so that it also works with an already compiled NIB. The three
+// numbers are fields to type into (-buildGeneralNumberFields), so VoiceOver
+// says "Remember, 40, text field".
 -(void)buildGeneralAccessibilityLabels
 {
 	NSView *pane = [savingSectionLabel superview];
-	NSDictionary *steppers = @{@"rememberNum": @"Remember",
-	                           @"displayNum": @"Display in menu",
-	                           @"favoritesRememberNum": @"Favorites"};
-	for (NSString *key in steppers)
-		FlycutSetAccessibilityLabel(FlycutBoundControl(pane, key, [NSStepper class]), steppers[key]);
+	NSDictionary *numbers = @{@"rememberNum": @"Remember",
+	                          @"displayNum": @"Display in menu",
+	                          @"favoritesRememberNum": @"Favorites"};
+	for (NSString *key in numbers)
+		FlycutSetAccessibilityLabel(FlycutBoundControl(pane, key, [NSTextField class]), numbers[key]);
 	// The two list fields get names of their own. The checkbox in front of each
 	// is a sub-option of "Don't save passwords" in MainMenu.xib ("by data type:",
 	// "by length & complexity:"), which alone does not say what the field holds.
@@ -1407,13 +1549,13 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 }
 
 // The General pane comes from the NIB and is laid out with constraints. Each
-// arrow is tied to the right edge of its field, or of the stepper or folder
-// button next to it. The constraint that held the next control at that edge,
-// or the field at the pane's right margin, makes room for it; the arrow keeps
-// that room while hidden, so nothing moves when it appears.
+// arrow is tied to the right edge of its field or folder button. The
+// constraint that held the next control at that edge, or the field at the
+// pane's right margin, makes room for it; the arrow keeps that room while
+// hidden, so nothing moves when it appears.
 // Arrows that end a line stand in one column: a field that reaches the right
-// margin ends where the right-most stepper ends, so its arrow stands under
-// that stepper's arrow. The two folder buttons share their left edge and
+// margin ends where the right-most number field ends, so its arrow stands
+// under that field's arrow. The two folder buttons share their left edge and
 // width, so their arrows share a column as well.
 -(void)buildGeneralRestoreDefaultButtons
 {
@@ -1438,8 +1580,7 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		NSControl *field = folder ? [self saveLocationButtonForKey:key] : FlycutBoundControl(pane, key, [NSTextField class]);
 		if (field == nil || [field superview] != pane)
 			continue;
-		NSView *stepper = folder ? nil : FlycutBoundControl(pane, key, [NSStepper class]);
-		NSView *anchor = (stepper != nil && NSMinX([stepper frame]) >= NSMinX([field frame])) ? stepper : field;
+		NSView *anchor = field;
 		NSButton *button = [self restoreDefaultButtonWithIdentifier:FlycutRestoreDefaultsIdentifier(key)
 		                                        accessibilityLabel:FlycutGeneralRestoreLabel(key)];
 		[pane addSubview:button];
@@ -1496,7 +1637,7 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 			}
 			if (margined != nil)
 				[heldAtMargin addObject:@[button, margined]];
-			else if (!followed && !folder && anchor == stepper && NSMaxX([anchor frame]) > columnAnchorMaxX) {
+			else if (!followed && !folder && NSMaxX([anchor frame]) > columnAnchorMaxX) {
 				columnArrow = button;
 				columnAnchorMaxX = NSMaxX([anchor frame]);
 			}
@@ -1519,15 +1660,15 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		[[NSNotificationCenter defaultCenter] addObserver:observer selector:@selector(valuesChanged:)
 		                                             name:NSControlTextDidChangeNotification object:field];
 		// The defaults controller the NIB binds this setting to (not necessarily
-		// the shared one) reports stepper clicks, committed typing and direct
-		// changes of the stored value.
+		// the shared one) reports committed typing and direct changes of the
+		// stored value.
 		NSDictionary *binding = [field infoForBinding:NSValueBinding];
 		[[binding objectForKey:NSObservedObjectKey] addObserver:observer
 		                                              forKeyPath:[binding objectForKey:NSObservedKeyPathKey]
 		                                                 options:0 context:NULL];
 	}
-	// A field at the margin ends under the right-most stepper instead (only
-	// ever shorter), so its arrow stands in that stepper's arrow column.
+	// A field at the margin ends under the right-most number field instead
+	// (only ever shorter), so its arrow stands in that field's arrow column.
 	if (columnArrow != nil && columnAnchorMaxX + gap + side + margin <= NSWidth([pane bounds])) {
 		for (NSArray *entry in heldAtMargin) {
 			[(NSLayoutConstraint *)[entry objectAtIndex:1] setActive:NO];
@@ -1544,6 +1685,117 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		                                             name:NSWindowDidBecomeKeyNotification object:prefsPanel];
 	// Values stored before the pane is built show their arrows right away.
 	[self updateRestoreDefaultButtons];
+}
+
+// What the NIB held at the stepper's right edge (the next label, or the pane's
+// right margin) is held at the field's right edge instead, with the same gap,
+// so the row closes up where the stepper stood. Both MainMenu.xib and master's
+// compiled NIB lay this pane out with constraints.
+static void FlycutRemoveStepper(NSView *pane, NSStepper *stepper, NSTextField *field)
+{
+	NSMutableArray *moved = [NSMutableArray array];
+	for (NSLayoutConstraint *constraint in [pane constraints]) {
+		BOOL first = [constraint firstItem] == stepper && [constraint firstAttribute] == NSLayoutAttributeTrailing;
+		BOOL second = [constraint secondItem] == stepper && [constraint secondAttribute] == NSLayoutAttributeTrailing;
+		if (!first && !second)
+			continue;
+		NSLayoutConstraint *held = [NSLayoutConstraint constraintWithItem:first ? field : [constraint firstItem]
+		                                                        attribute:[constraint firstAttribute] relatedBy:[constraint relation]
+		                                                           toItem:second ? field : [constraint secondItem]
+		                                                        attribute:[constraint secondAttribute] multiplier:[constraint multiplier]
+		                                                         constant:[constraint constant]];
+		[held setPriority:[constraint priority]];
+		[moved addObject:held];
+	}
+	// Bound to the setting it would still follow it, out of sight.
+	for (NSString *binding in [stepper exposedBindings])
+		if ([stepper infoForBinding:binding] != nil)
+			[stepper unbind:binding];
+	[stepper removeFromSuperview];   // takes its constraints along
+	[pane addConstraints:moved];
+}
+
+// The numbers next to the General pane's steppers are display-only text in the
+// NIB. Here, in code, so that this also works with an already compiled NIB,
+// they become fields to type into, made like Flycut's search fields (plain
+// NSSearchFields): AppKit's rounded text field with the search field's
+// capsule shape (macOS 26 and later draw a search field as a capsule, a
+// plain text field as a rounded rectangle), the NIB's system font, which is
+// the search field's, and the height AppKit gives both. The digits stand in
+// the middle, away from the round ends. All three fields are as wide as three
+// digits. The steppers go (no other field of the app has them); each field
+// takes its stepper's action and tooltip, and is checked by
+// FlycutNumberFieldEditing. This runs before the Restore Default arrows are
+// placed, so they stand next to the fields.
+-(void)buildGeneralNumberFields
+{
+	NSView *pane = [savingSectionLabel superview];
+	static FlycutNumberFieldEditing *editing = nil;
+	if (pane == nil || editing != nil)
+		return;
+	editing = [[FlycutNumberFieldEditing alloc] initWithController:self];
+	NSMutableArray *built = [NSMutableArray array];
+	CGFloat width = 0.0;
+	for (NSString *key in @[@"rememberNum", @"displayNum", @"favoritesRememberNum"]) {
+		NSTextField *field = (NSTextField *)FlycutBoundControl(pane, key, [NSTextField class]);
+		if (field == nil)
+			continue;
+		FlycutNumberFieldFormatter *formatter = [[[FlycutNumberFieldFormatter alloc] init] autorelease];
+		[formatter setFormatterBehavior:NSNumberFormatterBehavior10_4];
+		[formatter setNumberStyle:NSNumberFormatterNoStyle];
+		[formatter setLocale:[NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"]];
+		[formatter setAllowsFloats:NO];
+		[field setFormatter:formatter];
+		[field setEditable:YES];
+		[field setSelectable:YES];
+		[field setBezeled:YES];
+		[field setBezelStyle:NSTextFieldRoundedBezel];
+		if (@available(macOS 26.0, *))
+			[field setBorderShape:NSControlBorderShapeCapsule];
+		[field setAlignment:NSTextAlignmentCenter];
+		[field setDelegate:editing];
+		NSStepper *stepper = (NSStepper *)FlycutBoundControl(pane, key, [NSStepper class]);
+		if (stepper != nil) {
+			// A typed value goes the way a stepper click went.
+			[field setTarget:[stepper target]];
+			[field setAction:[stepper action]];
+			if ([[field toolTip] length] == 0)
+				[field setToolTip:[stepper toolTip]];
+			FlycutRemoveStepper(pane, stepper, field);
+		}
+		[editing addField:field forKey:key];
+		[built addObject:field];
+		for (char digit = '0'; digit <= '9'; digit++) {
+			NSTextFieldCell *cell = [[[field cell] copy] autorelease];
+			[cell setFormatter:nil];
+			[cell setStringValue:[NSString stringWithFormat:@"%c%c%c", digit, digit, digit]];
+			width = MAX(width, ceil([cell cellSize].width));
+		}
+	}
+	// The NIB gives each field a fixed width (25 or 30 pt, too narrow for three
+	// digits in a bezel). Before the first layout pass AppKit's own size
+	// constraints (subclasses) are there as well.
+	[pane layoutSubtreeIfNeeded];
+	for (NSTextField *field in built) {
+		NSLayoutConstraint *fixed = nil;
+		for (NSLayoutConstraint *constraint in [field constraints])
+			if ([constraint isMemberOfClass:[NSLayoutConstraint class]] && [constraint firstItem] == field &&
+			    [constraint secondItem] == nil && [constraint firstAttribute] == NSLayoutAttributeWidth &&
+			    [constraint relation] == NSLayoutRelationEqual)
+				fixed = constraint;
+		if (fixed != nil)
+			[fixed setConstant:width];
+		else if ([field translatesAutoresizingMaskIntoConstraints])
+			[field setFrameSize:NSMakeSize(width, NSHeight([field frame]))];
+		else
+			[field addConstraint:[NSLayoutConstraint constraintWithItem:field attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationEqual
+			                                                     toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1 constant:width]];
+	}
+	[pane layoutSubtreeIfNeeded];
+	NSWindow *window = prefsPanel != nil ? prefsPanel : [pane window];
+	if (window != nil)
+		[[NSNotificationCenter defaultCenter] addObserver:editing selector:@selector(windowWillClose:)
+		                                             name:NSWindowWillCloseNotification object:window];
 }
 
 // We no longer get autosave from ShortcutRecorder, so let's set the recorders by hand.
@@ -1700,12 +1952,12 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 	} else if (field != nil) {
 		// Unfinished typing is dropped. Dropping the stored value through the
 		// defaults controller the field is bound to brings back the registered
-		// default, and the bound field and stepper show it at once.
+		// default, and the bound field shows it at once.
 		if ([field currentEditor] != nil)
 			[field abortEditing];
 		NSDictionary *binding = [field infoForBinding:NSValueBinding];
 		[[binding objectForKey:NSObservedObjectKey] setValue:nil forKeyPath:[binding objectForKey:NSObservedKeyPathKey]];
-		// The limits go the way a stepper click goes: shrinking below the
+		// The limits go the way a typed value goes: shrinking below the
 		// stored clippings asks first (Resize Stack), and Cancel keeps the
 		// old limit.
 		if ([key isEqualToString:@"rememberNum"])
@@ -1929,7 +2181,15 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	// window shows.
 	[self updateSaveLocationButtonTitles];
 	[self updateRestoreDefaultButtons];
+	BOOL alreadyShown = [prefsPanel isVisible];
 	[prefsPanel makeKeyAndOrderFront:self];
+	// A window that becomes visible makes the first field of its key-view loop
+	// the first responder, or keeps the last opening's, and that field shows the
+	// focus ring before the user chose anything. Hand the focus back to the
+	// window; a click or Tab then moves it. A window that is already open keeps
+	// the focus the user gave it.
+	if (!alreadyShown)
+		[prefsPanel makeFirstResponder:nil];
 	NSString *fileRoot = [[NSBundle mainBundle] pathForResource:@"acknowledgements" ofType:@"txt"];
 	NSString *contents = [NSString stringWithContentsOfFile:fileRoot
 												   encoding:NSUTF8StringEncoding
@@ -2954,7 +3214,7 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 
 - (void) applicationWillResignActive:(NSApplication *)app; {
 	// This should be hidden anyway, but just in case it's not.
-	// Only the bezel's Favorites view ends here: the Favorites stepper swaps the
+	// Only the bezel's Favorites view ends here: the Favorites number swaps the
 	// favorites in for its check and may be waiting in its "Resize Stack" alert, and
 	// restoring under it would apply the favorites limit to the history.
 	if ( isBezelDisplayed )
