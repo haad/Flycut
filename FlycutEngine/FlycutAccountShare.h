@@ -125,6 +125,11 @@ typedef NSTimeInterval (^FlycutAccountShareClock)(void);
 // fail a check are not read.
 -(NSArray<FlycutSharedClipping *> *)collectClippings;
 
+// Recipient: the path of the own inbox and of the folder in it for one sender
+// (for watching and backup settings; all file work goes through descriptors).
+-(NSString *)inboxPath;
+-(NSString *)inboxFolderPathForSender:(uid_t)uid;
+
 // Recipient: deletes the own inbox and everything in it (sharing turned off).
 // Succeeds if there is none; refuses one that belongs to another account.
 -(BOOL)wipeInbox:(NSError **)error;

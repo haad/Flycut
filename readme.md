@@ -80,6 +80,10 @@ The list has a search field at the top, then your favorites (each with a filled 
 | Command+Z | Undo delete, star change or moved favorite |
 | Escape | Clear search, then close the list |
 
+## Sharing With Other Accounts
+
+Turn on "Share copied text with other accounts on this Mac" in Preferences > General, in each account that should take part, and text you copy also shows up in Flycut in those accounts. It is off by default; passwords Flycut recognizes and copies marked as private are never shared. See the [Help File](help.md) for details.
+
 ## Why Flycut?
 
 Flycut is a free, open-source alternative to paid clipboard managers for macOS:

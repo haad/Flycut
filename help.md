@@ -116,6 +116,7 @@ The preferences panel allows you to customize settings including:
 - Sticky bezel mode
 - Removing duplicate clippings
 - Skipping password manager entries
+- Sharing copied text with other accounts on this Mac
 
 A setting that differs from its factory value shows a small round arrow next to it (tooltip "Restore Default"). Click the arrow to go back to the default; for the two "Save … to:" folders that is the Desktop. The arrow disappears once the default is back.
 
@@ -124,3 +125,11 @@ The two "Save … to:" buttons show the name of their folder; a long name is sho
 Command-W closes Preferences, like its close button. While a hotkey field is waiting for a new shortcut, Command-W becomes that shortcut instead.
 
 To change Remember, Display in menu or Favorites, click the number and type a new one (up to three digits). A typed number is applied when you press Return or Tab, click into another field, switch to another pane or close Preferences; Escape brings back the previous one. A number outside the allowed range becomes the nearest allowed one: Remember and Favorites take 10 to 999, Display in menu 5 up to the Remember number.
+
+**Sharing With Other Accounts on This Mac**
+
+Flycut can pass copied text between the accounts of one Mac. Turn on "Share copied text with other accounts on this Mac" under "Other accounts on this Mac:" in the General pane, in every account that should take part; it is off by default. Text you copy then also goes to Flycut in each other account on this Mac that has turned it on too, and shows up in its clipboard history. When you switch to such an account, the newest text that arrived while you were away is on its clipboard, ready to paste. A copy that waited for more than a day is dropped.
+
+Only text is shared, with its formatting (up to 1 MB in all); pictures are not. Nothing is sent while clipboard tracking is paused, while "Diagnostics: save data type, not content" is on, or while your account is not the one in front. Passwords Flycut recognizes are never shared: copies from password managers and password fields, copies marked as private or temporary, and text that the "by length & complexity" check (under "Don't save passwords") takes for a password. These checks always apply to sharing, even when they are turned off for your own history. Text that only looks ordinary, such as a password typed into a document, is shared like any other text.
+
+The copies for an account wait in a hidden folder in /Users/Shared, in one subfolder per sending account; another account can only add its own copies there, and Time Machine skips the folder. Any other account on this Mac can see that the folder exists and which accounts may add copies to it, but not the copies; an account that sends to you can also tell how many copies from the others wait there and when they came or were taken in. Turning the option off deletes your folder with everything in it (if it cannot be deleted at once, Flycut tries again every minute, also after it restarts).

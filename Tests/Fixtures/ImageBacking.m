@@ -397,6 +397,7 @@ static void FixtureBeep(void) { fixtureBeeps++; }
 #if __has_include("ClipboardGenerationPolicy.h")
 #import "ClipboardGenerationPolicy.h"
 #endif
+#import "FlycutAccountShareService.h"
 #if __has_include("AppControllerTypes.inc")
 #include "AppControllerTypes.inc"
 #endif
@@ -418,6 +419,8 @@ static void FixtureBeep(void) { fixtureBeeps++; }
     BOOL isSearchWindowDisplayed;
     BOOL isBezelDisplayed;
     id listController;   // -clippingWasAdded tells the menu-bar list; this harness has none
+    FlycutAccountShareService *accountShareService;   // -pollPB: offers text copies to other accounts; none here
+    NSInteger accountShareOfferedGeneration;          // the copy offered last
     NSUInteger clipboardCaptureEpoch;
     dispatch_queue_t clipboardReadQueue;
     FCClipboardCatchUp *clipboardCatchUp;   // nil: no catch-up poll here

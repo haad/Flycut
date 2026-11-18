@@ -27,12 +27,26 @@
 #import <ServiceManagement/ServiceManagement.h>
 #import "FlycutPasteKey.h"
 #import "FlycutListPanel.h"
+#import "FlycutAccountShareService.h"
 #import <Carbon/Carbon.h>
 
 @interface AppController () <FlycutListControllerDelegate>
 -(NSArray *)listCommandItems;
 -(bool)pasteClipping:(FlycutClipping *)clipping fromList:(FlycutList)list;
 -(bool)pasteFavoriteAtPosition:(int)position;
+@end
+
+// FlycutOperator answers the account-share engine's filter question
+// (-mayShareClipping:ofType:fromAvailableTypes:, declared in FlycutOperator.h);
+// the conformance is stated here so FlycutOperator.h needs no engine header.
+@interface FlycutOperator (AccountShareFilter) <FlycutAccountShareFilter>
+@end
+
+@interface AppController () <FlycutAccountShareServiceDelegate>
+-(void)setUpAccountSharing;
+-(void)accountSessionDidBecomeActive:(NSNotification *)notification;
+-(IBAction)toggleShareClippingsAcrossAccounts:(id)sender;
+-(void)buildGeneralAccountSharingSection;
 @end
 
 @interface AppController ()
@@ -520,6 +534,10 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
         // manager that otherwise never touches the network.
         [NSNumber numberWithBool:NO],
         @"downloadAnimatedGIFs",
+        // Off by default: copies leave the account only when its user turns
+        // this on.
+        [NSNumber numberWithBool:NO],
+        @"shareClippingsAcrossAccounts",
         nil]];
 
 	clipboardReadQueue = dispatch_queue_create("com.Flycut.clipboardReadQueue", DISPATCH_QUEUE_SERIAL);
@@ -686,6 +704,7 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 	[self buildGeneralPermissionsPreferenceRow];
 	[self buildGeneralAccessibilityLabels];
 	[self buildGeneralPasswordOptionStates];
+	[self buildGeneralAccountSharingSection];
 	[self loadHotkeyRecorderCombos];
 
 	// Initialize the FlycutOperator
@@ -741,6 +760,7 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 	srTransformer = [[[SRKeyCodeTransformer alloc] init] retain];
     pbBlockCount = [[NSNumber numberWithInt:0] retain];
     [pollPBTimer fire];
+	[self setUpAccountSharing];
     
     
     // Check if the app is registered as a login item
@@ -1209,6 +1229,94 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
         y = 8;
     }
     [row setFrameOrigin:NSMakePoint(NSMinX([row frame]), y)];
+}
+
+#pragma mark - Sharing with other accounts
+
+static void FlycutCollectPaneLeaves(NSView *container, NSView *pane, BOOL inAppearance, CGFloat *leftmost, CGFloat *rightmost,
+                                    NSMutableArray *leaves);
+
+// Where the sharing section's lines end: where the width rule
+// (-fitPreferencesWindowWidth) ends General's fixed content, measured the same
+// way before any view of the section is added. The window is never narrower,
+// and no width of the pane changes it, so the section keeps its place and its
+// width when the window is fitted, and a section built again later gets the
+// same edge. Without such content it ends with the reference checkbox.
+static CGFloat FlycutAccountSharingRightEdge(NSView *pane, NSControl *reference)
+{
+	CGFloat leftmost = CGFLOAT_MAX, rightmost = 0.0;
+	FlycutCollectPaneLeaves(pane, pane, NO, &leftmost, &rightmost, [NSMutableArray array]);
+	return rightmost > 0.0 ? rightmost : NSMaxX([reference alignmentRectForFrame:[reference frame]]);
+}
+
+// Runs once at launch, after the pasteboard state exists. The service is made
+// whether sharing is on or not, so the checkbox can start it; it runs only
+// while the setting is on.
+-(void)setUpAccountSharing
+{
+	if (accountShareService == nil) {
+		FlycutAccountShare *engine = [[[FlycutAccountShare alloc]
+			initWithSharedRoot:[FlycutAccountShareService sharedRootPath] ownUID:getuid() ownerLookup:nil clock:nil] autorelease];
+		[engine setFilter:flycutOperator];
+		accountShareService = [[FlycutAccountShareService alloc] initWithEngine:engine
+			accounts:^NSArray<NSNumber *> *{ return [FlycutAccountShareService localLoginAccountUIDs]; }
+			sessionIsActive:^BOOL { return [FlycutAccountShareService currentSessionIsOnConsole]; }];
+		[accountShareService setDelegate:self];
+	}
+	[[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:self
+														   selector:@selector(accountSessionDidBecomeActive:)
+															   name:NSWorkspaceSessionDidBecomeActiveNotification
+															 object:nil];
+	// Sharing is off: an inbox left over from a delete that failed (or from
+	// a crash) goes now.
+	if (![[NSUserDefaults standardUserDefaults] boolForKey:@"shareClippingsAcrossAccounts"])
+		[accountShareService wipeLeftoverInbox];
+	if ([[NSUserDefaults standardUserDefaults] boolForKey:@"shareClippingsAcrossAccounts"])
+		[accountShareService start];
+}
+
+-(void)accountSessionDidBecomeActive:(NSNotification *)notification
+{
+	(void)notification;
+	[accountShareService sessionDidBecomeActive];
+}
+
+// The checkbox's binding has stored the new value when this runs.
+-(IBAction)toggleShareClippingsAcrossAccounts:(id)sender
+{
+	(void)sender;
+	if ([[NSUserDefaults standardUserDefaults] boolForKey:@"shareClippingsAcrossAccounts"])
+		[accountShareService start];
+	else
+		[accountShareService stopAndWipeInbox];
+}
+
+// Another account shared a copy: it goes into the history the way a copy
+// made here does. It came after every copy made here so far, so it counts
+// as a copy of the clipboard's next generation: the row of a copy whose
+// read is still running here goes in below it.
+-(void)accountShareService:(FlycutAccountShareService *)service didReceiveClipping:(FlycutSharedClipping *)clipping
+{
+	(void)service;
+	[flycutOperator addClipping:[clipping text]
+						 ofType:NSPasteboardTypeString
+				   withRichData:[clipping richData]
+						fromApp:[clipping appName]
+			   withAppBundleURL:nil
+						 target:self
+		  clippingAddedSelector:@selector(clippingWasAdded)
+		fromClipboardGeneration:[jcPasteboard changeCount] + 1];
+}
+
+// Back at the console: the newest copy that came while away goes on the
+// pasteboard, as Flycut's own write, so -pollPB: neither adds it again nor
+// sends it back. A paste in progress keeps the pasteboard.
+-(void)accountShareService:(FlycutAccountShareService *)service shouldPutOnPasteboard:(FlycutSharedClipping *)clipping
+{
+	(void)service;
+	if (currentPasteTransaction != nil)
+		return;
+	[self addClipToPasteboard:[clipping text] withRichData:[clipping richData]];
 }
 
 - (void)reopenMenu
@@ -1899,6 +2007,76 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 	                          @[@"skipConcealedTypes", [NSButton class], @[@"!revealPasteboardTypes"]]];
 	for (NSArray *dependency in dependencies)
 		FlycutBindEnabledToSwitches(FlycutBoundControl(pane, dependency[0], dependency[1]), defaults, dependency[2]);
+}
+
+// "Other accounts on this Mac:", a section like "Saving:" with one checkbox,
+// built here so the NIB stays as it is. It goes below the Saving section;
+// the pane grows by the section, so every NIB control keeps its distance from
+// the top and the "Check Accessibility Permissions" row its place at the
+// bottom. Font, colour, left edges and widths come from the neighbours.
+-(void)buildGeneralAccountSharingSection
+{
+	NSView *pane = [savingSectionLabel superview];
+	NSBox *box = (NSBox *)[pane superview];
+	NSControl *reference = FlycutBoundControl(pane, @"removeDuplicates", [NSButton class]);
+	if (pane == nil || ![box isKindOfClass:[NSBox class]] || reference == nil || accountSharingCheckbox != nil)
+		return;
+	NSView *permissions = nil;
+	for (NSView *view in [pane subviews])
+		if ([[view identifier] isEqualToString:@"accessibilityPermissionsRow"])
+			permissions = view;
+
+	// Read the frames below from the pane as laid out. The Restore Default
+	// arrows are placed by constraints and sit at the pane's origin until
+	// then; one that shows (its value is not the default) would count as
+	// the lowest control and put the section at the bottom of the pane.
+	[pane layoutSubtreeIfNeeded];
+	// The section ends where General's other controls end once the window is
+	// fitted, not where the pane ends now: the pane is as wide as the NIB until
+	// then. Its views keep that place and width when the pane changes its width.
+	CGFloat sectionRight = FlycutAccountSharingRightEdge(pane, reference);
+
+	CGFloat labelHeight = NSHeight([savingSectionLabel frame]), checkboxHeight = NSHeight([reference frame]);
+	// Spaced like the XIB's sections: the label 16 pt below the lowest
+	// control above it, the checkbox 8 pt below the label.
+	CGFloat above = 16, between = 8, grow = above + labelHeight + between + checkboxHeight;
+	CGFloat lowest = CGFLOAT_MAX;
+	for (NSView *view in [pane subviews])
+		if (view != permissions && ![view isHidden])
+			lowest = MIN(lowest, NSMinY([view alignmentRectForFrame:[view frame]]));
+
+	// Placed in the pane as it is now and kept at their distance from the top
+	// while it grows below them.
+	NSRect labelFrame = [savingSectionLabel frame];
+	labelFrame.origin.y = lowest - above - labelHeight;
+	labelFrame.size.width += sectionRight - NSMaxX([savingSectionLabel alignmentRectForFrame:labelFrame]);
+	NSTextField *label = [NSTextField labelWithString:@"Other accounts on this Mac:"];
+	[label setFont:[savingSectionLabel font]];
+	[label setTextColor:[savingSectionLabel textColor]];
+	[label setFrame:labelFrame];
+	[label setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
+	[pane addSubview:label];
+
+	NSString *title = @"Share copied text with other accounts on this Mac";
+	NSRect checkboxFrame = [reference frame];
+	checkboxFrame.size.width += sectionRight - NSMaxX([reference alignmentRectForFrame:checkboxFrame]);
+	checkboxFrame.origin.y = NSMinY(labelFrame) - between - checkboxHeight;
+	// Its title is also what VoiceOver reads (control and cell).
+	NSButton *checkbox = [NSButton checkboxWithTitle:title target:self
+											  action:@selector(toggleShareClippingsAcrossAccounts:)];
+	[checkbox setIdentifier:@"accountSharingCheckbox"];
+	[checkbox setFont:[reference font]];
+	[checkbox setFrame:checkboxFrame];
+	[checkbox setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
+	[checkbox setToolTip:@"Text you copy also goes to Flycut in the other accounts on this Mac that turn this on too. "
+						  "Passwords Flycut recognizes and copies marked as private or temporary are never shared."];
+	[checkbox bind:NSValueBinding toObject:[NSUserDefaultsController sharedUserDefaultsController]
+	   withKeyPath:@"values.shareClippingsAcrossAccounts" options:nil];
+	[pane addSubview:checkbox];
+	accountSharingCheckbox = checkbox;
+
+	[self growGeneralPaneBy:grow];
+	[[pane window] recalculateKeyViewLoop];
 }
 
 // The General pane comes from the NIB and is laid out with constraints. Each
@@ -3752,14 +3930,30 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                     return;
                 }
 
-                [flycutOperator addClipping:contents
-                                     ofType:type
-                               withRichData:richData
-                                    fromApp:[currRunningApp localizedName]
-                           withAppBundleURL:currRunningApp.bundleURL.path
-                                     target:self
-                     clippingAddedSelector:@selector(clippingWasAdded)
-                   fromClipboardGeneration:pasteboardGeneration];
+                BOOL added = [flycutOperator addClipping:contents
+                                                  ofType:type
+                                            withRichData:richData
+                                                 fromApp:[currRunningApp localizedName]
+                                        withAppBundleURL:currRunningApp.bundleURL.path
+                                                  target:self
+                                  clippingAddedSelector:@selector(clippingWasAdded)
+                                fromClipboardGeneration:pasteboardGeneration];
+                // A copy of the text the history's newest clipping holds is not added
+                // again (-addClipping: answers NO and keeps only its formatting), but
+                // the history holds it all the same.
+                FlycutClipping *newest = [[flycutOperator clippingsInList:FlycutListHistory matching:nil] firstObject];
+                if ( added || [[newest contents] isEqualToString:contents] )
+                    // A text copy made here, not paused, not diagnostics: offer it to the other
+                    // accounts. The service skips it while this session is not on the console;
+                    // FlycutOperator decides whether it may leave the account at all.
+                    // Only in the order the copies were made: a formatted copy whose read ended
+                    // after a newer copy was offered went into this history below it, but the
+                    // other accounts would get it above that newer copy, so it stays here.
+                    if ( pasteboardGeneration > accountShareOfferedGeneration ) {
+                        accountShareOfferedGeneration = pasteboardGeneration;
+                        [accountShareService offerText:contents ofType:type availableTypes:availableTypes
+                                              richData:richData appName:[currRunningApp localizedName]];
+                    }
             };
             if ( !catchingUpText ) {
                 dispatch_async(dispatch_get_main_queue(), ^{ commitText(richDataRead, generationAfterRead); });
@@ -4941,6 +5135,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 - (void)applicationWillTerminate:(NSNotification *)notification {
 	// Closing the list ends its session: image files of rows deleted there go now.
 	[listController close];
+	// What other accounts share from now on waits in the inbox for the next launch.
+	[accountShareService stop];
 	[flycutOperator applicationWillTerminate];
 	//Unregister our hot keys (not required)
 	[[SGHotKeyCenter sharedCenter] unregisterHotKey: mainHotKey];

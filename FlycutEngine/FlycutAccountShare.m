@@ -592,6 +592,16 @@ static size_t FromEntries(uid_t recipient, uid_t sender, FCShareACE *entries)
 	return ok ? YES : Fail(error, FlycutAccountShareErrorIO);
 }
 
+-(NSString *)inboxPath
+{
+	return [sharedRoot stringByAppendingPathComponent:InboxName(ownUID)];
+}
+
+-(NSString *)inboxFolderPathForSender:(uid_t)uid
+{
+	return [[self inboxPath] stringByAppendingPathComponent:SenderFolderName(uid)];
+}
+
 -(BOOL)wipeInbox:(NSError **)error
 {
 	int rootFD = [self openSharedRoot];

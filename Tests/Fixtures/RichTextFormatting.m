@@ -10,6 +10,7 @@
 // defaults, Application Support, other apps or input.
 
 #import <Cocoa/Cocoa.h>
+#import "FlycutAccountShareService.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -220,6 +221,8 @@ static NSArray *FCFakeSearchPath(NSSearchPathDirectory directory, NSSearchPathDo
     BOOL isSearchWindowDisplayed;
     BOOL isBezelDisplayed;
     id listController;   // -clippingWasAdded tells the menu-bar list; this harness has none
+    FlycutAccountShareService *accountShareService;   // -pollPB: offers text copies to other accounts; none here
+    NSInteger accountShareOfferedGeneration;          // the copy offered last
     NSUInteger clipboardCaptureEpoch;
     dispatch_queue_t clipboardReadQueue;
     FCClipboardCatchUp *clipboardCatchUp;   // nil: no catch-up poll here

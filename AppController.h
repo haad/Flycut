@@ -24,6 +24,7 @@
 @class FlycutClipping;
 @class FlycutListController;
 @class FCClipboardCatchUp;
+@class FlycutAccountShareService;
 
 @interface AppController : NSResponder <NSMenuDelegate, NSApplicationDelegate, FlycutStoreDelegate, FlycutOperatorDelegate, BezelWindowDelegate> {
     BezelWindow					*bezel;
@@ -67,6 +68,10 @@
     NSColorWell *menuIconPausedColorWell;
     NSImageView *menuIconActivePreview;
     NSImageView *menuIconPausedPreview;
+    // "Share copied text with other accounts on this Mac" (General pane).
+    FlycutAccountShareService *accountShareService;
+    NSInteger accountShareOfferedGeneration;   // the clipboard generation offered last (-pollPB:)
+    NSButton *accountSharingCheckbox;
 
     IBOutlet NSTextField *savingSectionLabel;
     IBOutlet NSTextField *saveFromBezelToLabel;
