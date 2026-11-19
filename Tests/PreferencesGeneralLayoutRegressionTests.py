@@ -19,6 +19,14 @@ The labels in front of a control ("Save", "Remember", "Display in menu", "Favori
 "Save from bezel to:", ...) share one font, the system font at its regular size; headings are
 semibold. With it every control of the pane still lies inside the window that
 -showPreferencePanel: fits to the panes.
+
+Vertical spacing follows one scheme, between alignment rects: 8 pt from a heading to the first
+row of its section, 6 pt from row to row inside a section (the rows above "Clippings:" are one
+section without a heading), 16 pt from a section's last row to the next heading and to the
+permissions row. A row is the controls side by side (a label, its field, pop-up or folder
+button); it is as tall as its tallest control. The XIB's pane is as tall as the rows and the
+permissions row need, so it does not grow at run time. Laid on 40 pt shorter, the pane grows
+by those 40 pt, and the window with it.
 """
 from __future__ import annotations
 
@@ -38,7 +46,7 @@ FIXTURES = ROOT / "Tests" / "Fixtures"
 sys.path.insert(0, str(FIXTURES))
 import GeneralPaneXib  # noqa: E402
 
-SECTION_GAP = 16
+HEADING_GAP, ROW_GAP, SECTION_GAP = 8, 6, 16
 
 
 def awake_builders(last: str = "buildGeneralPermissionsPreferenceRow") -> list[str]:
@@ -260,6 +268,8 @@ int main(int argc, const char **argv)
 
 
 class PreferencesGeneralLayoutRegressionTests(unittest.TestCase):
+    maxDiff = None
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.temp = tempfile.TemporaryDirectory(prefix="flycut-GeneralLayout-")
@@ -274,6 +284,12 @@ class PreferencesGeneralLayoutRegressionTests(unittest.TestCase):
             "CFBundleIdentifier": "org.flycut.tests.generallayout-resources", "CFBundlePackageType": "BNDL"}))
         cls.spec = temp / "xib.json"
         cls.spec.write_text(json.dumps(GeneralPaneXib.spec(ROOT / "English.lproj" / "MainMenu.xib")))
+        # The same XIB with a pane too short for the permissions row: it has to grow at run time.
+        cls.short_spec = temp / "xib-short.json"
+        short = GeneralPaneXib.spec(ROOT / "English.lproj" / "MainMenu.xib")
+        short["height"] -= 40
+        cls.short_height = short["height"]
+        cls.short_spec.write_text(json.dumps(short))
         sources = [ROOT / p for p in subprocess.check_output(["/usr/bin/git", "ls-files", "*.m"], cwd=ROOT, text=True).splitlines()
                    if p != "main.m" and not p.startswith(("FlycutHelper/", "Tests/"))]
         fixture = temp / "GeneralLayout.m"
@@ -297,11 +313,13 @@ class PreferencesGeneralLayoutRegressionTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.temp.cleanup()
 
-    def steps(self, xib: bool, order: str, values: str, rows: str = "shown") -> list[dict]:
+    def steps(self, xib: bool, order: str, values: str, rows: str = "shown",
+              spec: pathlib.Path | None = None) -> list[dict]:
         if self.nib is None:
             self.skipTest("no compiled MainMenu.nib; set FLYCUT_TEST_RESOURCE_BUNDLE to a built Flycut.app")
-        run = subprocess.run([str(self.binary), str(self.bundle), str(self.spec) if xib else "-", self.builders,
-                              order, values, rows], cwd=ROOT, text=True, capture_output=True, timeout=120)
+        run = subprocess.run([str(self.binary), str(self.bundle), str(spec or self.spec) if xib else "-",
+                              self.builders, order, values, rows], cwd=ROOT, text=True, capture_output=True,
+                             timeout=120)
         reports = [line[len("REPORT "):] for line in run.stdout.splitlines() if line.startswith("REPORT ")]
         self.assertEqual(run.returncode, 0, run.stdout[-1500:] + run.stderr[-1500:])
         self.assertTrue(reports, run.stdout[-1500:] + run.stderr[-1500:])
@@ -346,6 +364,18 @@ class PreferencesGeneralLayoutRegressionTests(unittest.TestCase):
                         self.check_row(s, where)
                         self.assertEqual(s["row"]["frame"][1], 8, f"{where}: the row is not at the pane's bottom")
 
+    def test_the_pane_grows_when_the_xib_leaves_no_room_for_the_permissions_row(self) -> None:
+        # With UKPrefsPanel woken first it has fitted the window to General before the row is
+        # built, so the window must follow the pane; woken after, it fits the grown pane.
+        for order in ("builders-first", "prefs-first"):
+            for values in ("stored", "factory"):
+                with self.subTest(order=order, values=values):
+                    for s in self.steps(True, order, values, spec=self.short_spec):
+                        where = f"XIB 40 pt shorter, {order}, {values}, {s['step']}"
+                        self.check_row(s, where)
+                        self.assertEqual((s["paneHeight"], s["row"]["frame"][1]), (self.short_height + 40, 8),
+                                         f"{where}: the pane did not grow by the 40 pt the row needs")
+
     def test_hidden_controls_do_not_hold_the_permissions_row_down(self) -> None:
         for s in self.steps(True, "builders-first", "factory", "hide-last"):
             self.check_row(s, f"XIB, last row hidden, {s['step']}")
@@ -369,6 +399,49 @@ class PreferencesGeneralLayoutRegressionTests(unittest.TestCase):
                     self.assertEqual(v["font"], 13, f"{s['step']}: '{v['name']}' is not shown at 13 pt")
             right = max(v["align"][0] + v["align"][2] for v in shown)
             self.assertLessEqual(right, s["paneWidth"] - 16, f"{s['step']}: a control reaches into the right margin")
+
+    @staticmethod
+    def rows(step: dict) -> list[dict]:
+        """The pane's shown views grouped into rows (overlapping alignment rects), top down."""
+        rows: list[dict] = []
+        for v in sorted((v for v in step["views"] if not v["hidden"]), key=lambda v: v["align"][1]):
+            top, bottom = v["align"][1], v["align"][1] + v["align"][3]
+            if rows and top < rows[-1]["bottom"]:
+                rows[-1]["views"].append(v)
+                rows[-1]["bottom"] = max(rows[-1]["bottom"], bottom)
+            else:
+                rows.append({"views": [v], "top": top, "bottom": bottom})
+        for r in rows:
+            r["heading"] = len(r["views"]) == 1 and r["views"][0]["bold"]
+            r["name"] = max(r["views"], key=lambda v: v["align"][3])["name"]
+        return rows
+
+    def test_rows_follow_one_spacing_scheme(self) -> None:
+        # The Remember row is as tall as its number field, which -buildGeneralNumberFields makes
+        # a 24 pt field: the permissions row is placed after that, from the rows' final heights.
+        self.assertIn("buildGeneralNumberFields", self.builders.split(","),
+                      "-awakeFromNib places the permissions row before the number fields get their height")
+        height = GeneralPaneXib.spec(ROOT / "English.lproj" / "MainMenu.xib")["height"]
+        for values in ("stored", "factory"):
+            for s in self.steps(True, "builders-first", values):
+                where = f"XIB, {values}, {s['step']}"
+                rows = self.rows(s)
+                self.assertEqual(rows[0]["top"], 16, f"{where}: top margin")
+                self.assertEqual(sum(r["heading"] for r in rows), 4, f"{where}: headings {[r['name'] for r in rows]}")
+                wrong = []
+                for r in rows:
+                    tallest = max(r["views"], key=lambda v: v["align"][3])
+                    top, bottom = tallest["align"][1], tallest["align"][1] + tallest["align"][3]
+                    wrong += [f"'{v['name']}' sticks out of the row of '{tallest['name']}'" for v in r["views"]
+                              if v["align"][1] < top or v["align"][1] + v["align"][3] > bottom]
+                for p, n in zip(rows, rows[1:]):
+                    want = SECTION_GAP if n["heading"] else (HEADING_GAP if p["heading"] else ROW_GAP)
+                    if n["top"] - p["bottom"] != want:
+                        wrong.append(f"'{p['name']}' -> '{n['name']}': {n['top'] - p['bottom']:g} pt, not {want}")
+                self.assertEqual(wrong, [], f"{where}: views out of their row, gaps off the scheme")
+                self.check_row(s, where)
+                self.assertEqual((s["paneHeight"], s["row"]["frame"][1]), (height, 8),
+                                 f"{where}: the XIB's pane is not as tall as its rows and the permissions row need")
 
     def test_masters_nib_keeps_the_permissions_row_in_place(self) -> None:
         for s in self.steps(False, "builders-first", "stored"):
