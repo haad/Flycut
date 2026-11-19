@@ -187,9 +187,9 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <textField verticalHuggingPriority="1000" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="418">
-                                                        <rect key="frame" x="14" y="348" width="29.5" height="28"/>
+                                                        <rect key="frame" x="14" y="344" width="33.5" height="32"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" id="755">
-                                                            <font key="font" metaFont="label" size="11"/>
+                                                            <font key="font" metaFont="system"/>
                                                             <string key="title">Save
 </string>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -197,7 +197,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <popUpButton verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="392">
-                                                        <rect key="frame" x="49.5" y="358" width="182" height="24"/>
+                                                        <rect key="frame" x="53.5" y="356" width="182" height="24"/>
                                                         <constraints>
                                                             <constraint firstAttribute="width" constant="182" id="xgu-QS-ucU"/>
                                                         </constraints>
@@ -217,9 +217,9 @@
                                                         </connections>
                                                     </popUpButton>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="419">
-                                                        <rect key="frame" x="14" y="312" width="60.5" height="28"/>
+                                                        <rect key="frame" x="14" y="304" width="70" height="32"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" id="756">
-                                                            <font key="font" metaFont="label" size="11"/>
+                                                            <font key="font" metaFont="system"/>
                                                             <string key="title">Remember
 </string>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -227,7 +227,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="470">
-                                                        <rect key="frame" x="78.5" y="326" width="34" height="16"/>
+                                                        <rect key="frame" x="88" y="320" width="34" height="16"/>
                                                         <constraints>
                                                             <constraint firstAttribute="width" constant="30" id="CUk-dH-iV9"/>
                                                         </constraints>
@@ -248,7 +248,7 @@
                                                         </connections>
                                                     </textField>
                                                     <stepper toolTip="Controls how many clippings Flycut stores in its stack" horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="472">
-                                                        <rect key="frame" x="115.5" y="322" width="20" height="24"/>
+                                                        <rect key="frame" x="125" y="316" width="20" height="24"/>
                                                         <stepperCell key="cell" continuous="YES" alignment="left" minValue="10" maxValue="999" doubleValue="10" valueWraps="YES" id="760"/>
                                                         <connections>
                                                             <action selector="setRememberNumPref:" target="213" id="485"/>
@@ -256,15 +256,15 @@
                                                         </connections>
                                                     </stepper>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="420">
-                                                        <rect key="frame" x="149.5" y="326" width="87" height="14"/>
+                                                        <rect key="frame" x="159" y="320" width="100" height="16"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Display in menu" id="757">
-                                                            <font key="font" metaFont="label" size="11"/>
+                                                            <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                                         </textFieldCell>
                                                     </textField>
                                                     <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="471">
-                                                        <rect key="frame" x="240.5" y="326" width="29" height="16"/>
+                                                        <rect key="frame" x="263" y="320" width="29" height="16"/>
                                                         <constraints>
                                                             <constraint firstAttribute="width" constant="25" id="xtz-2M-8Nx"/>
                                                         </constraints>
@@ -285,7 +285,7 @@
                                                         </connections>
                                                     </textField>
                                                     <stepper toolTip="Controls how many clippings Flycut shows in the menu" horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="473">
-                                                        <rect key="frame" x="273.5" y="322" width="20" height="24"/>
+                                                        <rect key="frame" x="296" y="316" width="20" height="24"/>
                                                         <stepperCell key="cell" continuous="YES" alignment="left" minValue="5" maxValue="99" doubleValue="5" valueWraps="YES" id="761"/>
                                                         <connections>
                                                             <action selector="setDisplayNumPref:" target="213" id="486"/>
@@ -294,15 +294,15 @@
                                                         </connections>
                                                     </stepper>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Ubt-DS-zHf">
-                                                        <rect key="frame" x="307.5" y="326" width="51.5" height="14"/>
+                                                        <rect key="frame" x="330" y="320" width="59" height="16"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Favorites" id="2L6-OM-5rx">
-                                                            <font key="font" metaFont="label" size="11"/>
+                                                            <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                                         </textFieldCell>
                                                     </textField>
                                                     <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="dM5-eN-Zvt">
-                                                        <rect key="frame" x="363" y="326" width="29" height="16"/>
+                                                        <rect key="frame" x="393" y="320" width="29" height="16"/>
                                                         <constraints>
                                                             <constraint firstAttribute="width" constant="25" id="wV6-2I-Qfq"/>
                                                         </constraints>
@@ -323,7 +323,7 @@
                                                         </connections>
                                                     </textField>
                                                     <stepper toolTip="Controls how many clippings Flycut stores in its favorites stack" horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="wZv-HJ-VdW">
-                                                        <rect key="frame" x="396" y="322" width="20" height="24"/>
+                                                        <rect key="frame" x="426" y="316" width="20" height="24"/>
                                                         <stepperCell key="cell" continuous="YES" alignment="left" minValue="10" maxValue="999" doubleValue="10" valueWraps="YES" id="gUi-gl-RH6"/>
                                                         <connections>
                                                             <action selector="setFavoritesRememberNumPref:" target="213" id="rm7-TX-1af"/>
@@ -331,7 +331,7 @@
                                                         </connections>
                                                     </stepper>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="IZZ-Ep-7nD" userLabel="Passwords:">
-                                                        <rect key="frame" x="14" y="288" width="479" height="16"/>
+                                                        <rect key="frame" x="14" y="280" width="479" height="16"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Passwords &amp; privacy:" id="cLX-o3-ZMz">
                                                             <font key="font" metaFont="systemSemibold" size="13"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -339,7 +339,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <button toolTip="Keep sensitive clipboard content out of Flycut's history. Turning this off stops the length &amp; complexity check; the data-type options below still apply while they are on." translatesAutoresizingMaskIntoConstraints="NO" id="897">
-                                                        <rect key="frame" x="16" y="264" width="475" height="16"/>
+                                                        <rect key="frame" x="16" y="256" width="475" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Don't save passwords" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="898">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -349,7 +349,7 @@
                                                         </connections>
                                                     </button>
                                                     <button toolTip="Skip clipboard content whose data type marks it as a password (password managers, password fields). The field lists those data-type identifiers." translatesAutoresizingMaskIntoConstraints="NO" id="pDS-jE-9jb">
-                                                        <rect key="frame" x="36" y="244" width="101.5" height="16"/>
+                                                        <rect key="frame" x="36" y="236" width="101.5" height="16"/>
                                                         <buttonCell key="cell" type="check" title="by data type:" bezelStyle="regularSquare" imagePosition="left" inset="2" id="tzh-NM-RSb">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -359,7 +359,7 @@
                                                         </connections>
                                                     </button>
                                                     <textField toolTip="Comma-separated clipboard data-type identifiers treated as passwords, e.g. PasswordPboardType, com.agilebits.onepassword." verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="x34-dK-wxl">
-                                                        <rect key="frame" x="145.5" y="240" width="345.5" height="24"/>
+                                                        <rect key="frame" x="145.5" y="232" width="345.5" height="24"/>
                                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" title="PasswordPboardType" drawsBackground="YES" id="kTZ-dC-s1q">
                                                             <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -370,7 +370,7 @@
                                                         </connections>
                                                     </textField>
                                                     <button toolTip="Password managers, Firefox private windows and some tools mark copies as concealed or temporary (org.nspasteboard.ConcealedType / TransientType / AutoGeneratedType). On by default so such content is not saved; turn off to keep Firefox private-window clippings, which can then include passwords." verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Cnc-b0-001">
-                                                        <rect key="frame" x="36" y="224" width="328.5" height="16"/>
+                                                        <rect key="frame" x="36" y="216" width="328.5" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Also skip private-browsing &amp; temporary clipboards" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="Cnc-c0-002">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -380,7 +380,7 @@
                                                         </connections>
                                                     </button>
                                                     <button toolTip="Also skip strings whose length is listed and that mix upper- and lower-case letters, digits and symbols – typical of generated passwords." translatesAutoresizingMaskIntoConstraints="NO" id="Bxp-pI-XMk">
-                                                        <rect key="frame" x="36" y="204" width="164.5" height="16"/>
+                                                        <rect key="frame" x="36" y="196" width="164.5" height="16"/>
                                                         <buttonCell key="cell" type="check" title="by length &amp; complexity:" bezelStyle="regularSquare" imagePosition="left" inset="2" id="aAK-L0-EHa">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -390,7 +390,7 @@
                                                         </connections>
                                                     </button>
                                                     <textField toolTip="Comma-separated lengths to treat as likely passwords, e.g. 12, 20, 32." verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="RYj-wx-tTx">
-                                                        <rect key="frame" x="208.5" y="200" width="282.5" height="24"/>
+                                                        <rect key="frame" x="208.5" y="192" width="282.5" height="24"/>
                                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" title="12, 20, 32" drawsBackground="YES" id="aqQ-SR-BmT">
                                                             <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -401,7 +401,7 @@
                                                         </connections>
                                                     </textField>
                                                     <button toolTip="For identifying types to include in Pasteboard Types above." translatesAutoresizingMaskIntoConstraints="NO" id="mka-NZ-Esg">
-                                                        <rect key="frame" x="36" y="184" width="269.5" height="16"/>
+                                                        <rect key="frame" x="36" y="176" width="269.5" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Include pasteboard types in clippings list" bezelStyle="regularSquare" imagePosition="left" inset="2" id="9Vi-RY-G0b">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -411,7 +411,7 @@
                                                         </connections>
                                                     </button>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Y84-Ix-WCR" userLabel="Organizing:">
-                                                        <rect key="frame" x="14" y="160" width="479" height="16"/>
+                                                        <rect key="frame" x="14" y="152" width="479" height="16"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Organizing:" id="3tC-1z-0C9">
                                                             <font key="font" metaFont="systemSemibold" size="13"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -419,7 +419,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <button translatesAutoresizingMaskIntoConstraints="NO" id="903">
-                                                        <rect key="frame" x="16" y="136" width="475" height="16"/>
+                                                        <rect key="frame" x="16" y="128" width="475" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Remove duplicates" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="904">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -429,7 +429,7 @@
                                                         </connections>
                                                     </button>
                                                     <button translatesAutoresizingMaskIntoConstraints="NO" id="914">
-                                                        <rect key="frame" x="16" y="116" width="475" height="16"/>
+                                                        <rect key="frame" x="16" y="108" width="475" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Move pasted item to top of stack" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="915">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -439,7 +439,7 @@
                                                         </connections>
                                                     </button>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="g6p-DW-uAA" userLabel="Saving:">
-                                                        <rect key="frame" x="14" y="92" width="479" height="16"/>
+                                                        <rect key="frame" x="14" y="84" width="479" height="16"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Saving:" id="bsj-XZ-XVF">
                                                             <font key="font" metaFont="systemSemibold" size="13"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -447,7 +447,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="GRg-nv-Opa" userLabel="Save from bezel to:">
-                                                        <rect key="frame" x="14" y="68" width="121" height="16"/>
+                                                        <rect key="frame" x="14" y="60" width="121" height="16"/>
                                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Save from bezel to:" id="5L1-9C-Fdd">
                                                             <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -455,7 +455,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Bqn-So-8E9" userLabel="SaveToButton">
-                                                        <rect key="frame" x="141" y="64" width="74.5" height="24"/>
+                                                        <rect key="frame" x="141" y="56" width="74.5" height="24"/>
                                                         <buttonCell key="cell" type="push" title="Desktop" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="Ldc-9D-vz1">
                                                             <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -465,7 +465,7 @@
                                                         </connections>
                                                     </button>
                                                     <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="FNU-zj-OIm">
-                                                        <rect key="frame" x="14" y="44" width="149" height="16"/>
+                                                        <rect key="frame" x="14" y="36" width="149" height="16"/>
                                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Save forgotten items to:" id="ksy-al-FbE">
                                                             <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -473,7 +473,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <button verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" translatesAutoresizingMaskIntoConstraints="NO" id="PJD-Fc-76A" userLabel="AutoSaveToButton">
-                                                        <rect key="frame" x="169" y="40" width="74.5" height="24"/>
+                                                        <rect key="frame" x="169" y="32" width="74.5" height="24"/>
                                                         <buttonCell key="cell" type="push" title="Desktop" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="K2A-qx-BB8">
                                                             <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -483,7 +483,7 @@
                                                         </connections>
                                                     </button>
                                                     <button translatesAutoresizingMaskIntoConstraints="NO" id="LLh-vf-2Q3">
-                                                        <rect key="frame" x="251.5" y="44" width="79" height="16"/>
+                                                        <rect key="frame" x="251.5" y="36" width="79" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Clippings" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="oLu-XL-Wuo">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -493,7 +493,7 @@
                                                         </connections>
                                                     </button>
                                                     <button translatesAutoresizingMaskIntoConstraints="NO" id="cGj-g9-2Dm">
-                                                        <rect key="frame" x="338.5" y="44" width="77" height="16"/>
+                                                        <rect key="frame" x="338.5" y="36" width="77" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Favorites" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="vC2-Ch-UPQ">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>

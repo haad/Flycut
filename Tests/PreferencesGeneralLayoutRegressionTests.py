@@ -14,6 +14,11 @@ The "Check Accessibility Permissions" row (#20) is built at run time; the XIB's 
 must not run into it: its separator sits one section gap (16 pt) below the lowest control
 shown, the pane is tall enough for it, and the window shows the whole pane. A run without
 the XIB step checks that master's NIB keeps the row where it was.
+
+The labels in front of a control ("Save", "Remember", "Display in menu", "Favorites",
+"Save from bezel to:", ...) share one font, the system font at its regular size; headings are
+semibold. With it every control of the pane still lies inside the window that
+-showPreferencePanel: fits to the panes.
 """
 from __future__ import annotations
 
@@ -153,6 +158,7 @@ static NSDictionary *Measure(NSString *step)
     }
     NSRect boxInContent = [content convertRect:[box bounds] fromView:box];
     return @{@"step": step, @"views": views, @"row": row ?: [NSNull null], @"paneHeight": @(NSHeight([pane bounds])),
+             @"paneWidth": @(NSWidth([pane bounds])),
              @"boxHeight": @(NSHeight([box frame])), @"tabHeight": @(NSHeight([[prefs tabView] frame])),
              @"contentHeight": @(NSHeight([content frame])), @"windowWidth": @(NSWidth([window frame])),
              @"boxInContent": @(NSContainsRect([content bounds], boxInContent))};
@@ -343,6 +349,26 @@ class PreferencesGeneralLayoutRegressionTests(unittest.TestCase):
     def test_hidden_controls_do_not_hold_the_permissions_row_down(self) -> None:
         for s in self.steps(True, "builders-first", "factory", "hide-last"):
             self.check_row(s, f"XIB, last row hidden, {s['step']}")
+
+    def test_labels_in_front_of_controls_share_one_font(self) -> None:
+        _, content, _ = GeneralPaneXib.general_pane(ROOT / "English.lproj" / "MainMenu.xib")
+        fonts = {}
+        for v in content.findall("subviews/textField"):
+            cell = v.find("*[@key='cell']")
+            font = dict(cell.find("font[@key='font']").attrib)
+            if v.find(".//binding") is not None or font.get("metaFont") == "systemSemibold":
+                continue    # number and list fields; headings
+            fonts[(GeneralPaneXib._title(cell) or v.get("id")).strip()] = font
+        self.assertIn("Save from bezel to:", fonts)
+        self.assertEqual({title: font for title, font in fonts.items() if font != {"key": "font", "metaFont": "system"}}, {},
+                         "labels in a font other than the system font at its regular size")
+        for s in self.steps(True, "builders-first", "stored"):
+            shown = [v for v in s["views"] if not v["hidden"]]
+            for v in shown:
+                if v["cls"] == "NSTextField" and not v["bold"] and v["name"] in fonts:
+                    self.assertEqual(v["font"], 13, f"{s['step']}: '{v['name']}' is not shown at 13 pt")
+            right = max(v["align"][0] + v["align"][2] for v in shown)
+            self.assertLessEqual(right, s["paneWidth"] - 16, f"{s['step']}: a control reaches into the right margin")
 
     def test_masters_nib_keeps_the_permissions_row_in_place(self) -> None:
         for s in self.steps(False, "builders-first", "stored"):
