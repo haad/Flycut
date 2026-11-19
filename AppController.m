@@ -368,11 +368,11 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	NSLog(@"[Flycut Startup] Bundle ID: %@", bundleID);
 	NSLog(@"[Flycut Startup] Initial Accessibility Trust State: %@", initialTrustState ? @"TRUSTED" : @"NOT TRUSTED");
 	
-	[self buildGeneralPermissionsPreferenceRow];
 	[self buildAppearancesPreferencePanel];
 
 	[self buildMainHotkeyRestoreDefaultButton];
 	[self buildGeneralRestoreDefaultButtons];
+	[self buildGeneralPermissionsPreferenceRow];
 	[self loadHotkeyRecorderCombos];
 
 	// Initialize the FlycutOperator
@@ -755,6 +755,46 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     return row;
 }
 
+// Makes the General pane taller by grow points at its bottom. The tab view is
+// as tall as the tallest pane, and the General box is tied to it on every
+// side; the other panes keep their height at its bottom. UKPrefsPanel fits the
+// window to the box when the pane changes; if it already fitted the window to
+// this pane, the window follows now.
+-(void)growGeneralPaneBy:(CGFloat)grow
+{
+	NSView *pane = [savingSectionLabel superview];
+	NSBox *box = (NSBox *)[pane superview];
+	NSView *item = [box superview];
+	NSTabView *tabs = (NSTabView *)[item superview];
+	if (![tabs isKindOfClass:[NSTabView class]]) {
+		tabs = nil;
+		for (NSView *view in [[prefsPanel contentView] subviews])
+			if ([view isKindOfClass:[NSTabView class]])
+				for (NSTabViewItem *tab in [(NSTabView *)view tabViewItems])
+					if ([tab view] == item)
+						tabs = (NSTabView *)view;
+	}
+	if (grow <= 0 || ![box isKindOfClass:[NSBox class]] || item == nil || tabs == nil)
+		return;
+	CGFloat boxHeight = NSHeight([box frame]);
+	[tabs setFrameSize:NSMakeSize(NSWidth([tabs frame]), NSHeight([tabs frame]) + grow)];
+	// A pane that is not shown gets the tab view's size when it is selected.
+	if ([item superview] != tabs)
+		[item setFrameSize:NSMakeSize(NSWidth([item frame]), NSHeight([item frame]) + grow)];
+	[item layoutSubtreeIfNeeded];
+	NSWindow *window = [pane window];
+	if (window != nil && NSHeight([[window contentView] frame]) == boxHeight) {
+		NSRect windowFrame = [window frame];
+		windowFrame.origin.y -= grow;
+		windowFrame.size.height += grow;
+		[window setFrame:windowFrame display:NO];
+	}
+}
+
+// The row ends the General pane, below everything the NIB and the builders
+// before it put there; -awakeFromNib builds it after them. It is placed from
+// the pane as laid out, so rows that a newer XIB adds above it cannot run
+// into it, and the pane grows when it would not fit.
 -(void)buildGeneralPermissionsPreferenceRow
 {
     // The existing General outlet anchors this row without changing the NIB.
@@ -790,6 +830,22 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     [button setAction:@selector(recheckAccessibility:)];
     [row addSubview:button];
     [generalContent addSubview:row];
+
+    // The separator one section gap (16 pt) below the lowest control shown,
+    // read once the pane is laid out: views placed by constraints sit at the
+    // pane's origin until then. The row's bottom stays 8 pt above the pane's;
+    // the pane grows by what is missing.
+    [generalContent layoutSubtreeIfNeeded];
+    CGFloat lowest = NSHeight([generalContent bounds]);
+    for (NSView *view in [generalContent subviews])
+        if (view != row && ![view isHidden])
+            lowest = MIN(lowest, NSMinY([view alignmentRectForFrame:[view frame]]));
+    CGFloat y = lowest - 16 - NSMaxY([separator alignmentRectForFrame:[separator frame]]);
+    if (y < 8) {
+        [self growGeneralPaneBy:8 - y];
+        y = 8;
+    }
+    [row setFrameOrigin:NSMakePoint(NSMinX([row frame]), y)];
 }
 
 - (void)reopenMenu
