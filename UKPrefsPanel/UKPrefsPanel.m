@@ -162,6 +162,12 @@ Tab identifier  -	System-symbol mapping and toolbar item identifier.
     // We are the delegate
     [toolbar setDelegate: self];
     
+    // The title on top, the items centred below it. The default style of
+    // macOS 26 and later puts both in one row, wider than the panes.
+    // Set before the window is sized to a pane, so that the taller
+    // toolbar takes nothing from the pane.
+    [[tabView window] setToolbarStyle: NSWindowToolbarStylePreference];
+
     // Attach the toolbar to the document window 
     [[tabView window] setToolbar: toolbar];
 	
@@ -175,12 +181,8 @@ Tab identifier  -	System-symbol mapping and toolbar item identifier.
 	if( [toolbar respondsToSelector: @selector(setSelectedItemIdentifier:)] )
 		[toolbar setSelectedItemIdentifier: [currPage identifier]];
 #endif
-
-	// Jam in a flexible space to seperate out our acknowledgements tab
-	// sbc
-	int foo = [[toolbar items] count] - 1;
-	[toolbar insertItemWithItemIdentifier:NSToolbarFlexibleSpaceItemIdentifier atIndex:foo];
-
+	// No space in front of Acknowledgements: the Preference style centres the items, so a
+	// flexible space there no longer moves it to the edge, it only widens its gap.
 }
 
 

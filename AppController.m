@@ -1853,6 +1853,67 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
     
 }
 
+// The right edge of what a pane shows, and its left inset, in the pane's own
+// coordinates: every visible control and every Restore Default arrow, shown
+// or not (an arrow that appears with a changed value must not be cut off),
+// looking through plain views and boxes.
+static void FlycutCollectPaneContentEdges(NSView *container, NSView *pane, CGFloat *leftmost, CGFloat *rightmost)
+{
+	for (NSView *view in [container subviews]) {
+		BOOL restoreArrow = [view isKindOfClass:[NSButton class]] && [[view identifier] hasPrefix:@"restoreDefault"];
+		if ([view isHidden] && !restoreArrow)
+			continue;
+		BOOL isBox = [view isKindOfClass:[NSBox class]];
+		BOOL holdsViews = isBox ? [(NSBox *)view boxType] != NSBoxSeparator
+		                        : ([view isMemberOfClass:[NSView class]] && [[view subviews] count] > 0);
+		if (holdsViews) {
+			FlycutCollectPaneContentEdges(isBox ? [(NSBox *)view contentView] : view, pane, leftmost, rightmost);
+		} else {
+			NSRect frame = [pane convertRect:[view bounds] fromView:view];
+			*leftmost = MIN(*leftmost, NSMinX(frame));
+			*rightmost = MAX(*rightmost, NSMaxX(frame));
+		}
+	}
+}
+
+static NSTabView *FlycutPreferencesTabView(NSView *view)
+{
+	if ([view isKindOfClass:[NSTabView class]])
+		return (NSTabView *)view;
+	for (NSView *child in [view subviews]) {
+		NSTabView *found = FlycutPreferencesTabView(child);
+		if (found != nil)
+			return found;
+	}
+	return nil;
+}
+
+// Preferences is as wide as its panes need: every pane's content with the
+// pane's own left inset as its right margin, never narrower than the NIB,
+// around the centre the window has. In the Preference style UKPrefsPanel
+// gives the toolbar, its items need less than that.
+-(void)fitPreferencesWindowWidth
+{
+	NSTabView *tabView = FlycutPreferencesTabView([prefsPanel contentView]);
+	if (tabView == nil)
+		return;
+	NSRect original = [prefsPanel frame];
+	[[prefsPanel contentView] layoutSubtreeIfNeeded];
+	CGFloat width = NSWidth([tabView frame]);
+	for (NSTabViewItem *item in [tabView tabViewItems]) {
+		NSView *pane = [item view];
+		CGFloat leftmost = CGFLOAT_MAX, rightmost = 0.0;
+		FlycutCollectPaneContentEdges(pane, pane, &leftmost, &rightmost);
+		if (rightmost > 0.0)
+			width = MAX(width, ceil(rightmost + leftmost));
+	}
+	NSRect content = [prefsPanel contentRectForFrameRect:original];
+	content.size.width = width;
+	NSRect fitted = [prefsPanel frameRectForContentRect:content];
+	fitted.origin.x = NSMidX(original) - NSWidth(fitted) / 2.0;
+	[prefsPanel setFrame:fitted display:NO animate:NO];
+}
+
 -(IBAction) showPreferencePanel:(id)sender
 {
     [self cancelPendingPasteCompletion];
@@ -1860,15 +1921,10 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 		[prefsPanel setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces];
 	[NSApp activateIgnoringOtherApps: YES];
 
-    // Set minimum width but let UKPrefsPanel control the height based on tab content
-    NSRect currentFrame = [prefsPanel frame];
-    if (currentFrame.size.width < 700) {
-        NSRect newFrame = currentFrame;
-        newFrame.size.width = 720;
-        // Adjust position to keep window centered horizontally
-        newFrame.origin.x = currentFrame.origin.x - (newFrame.size.width - currentFrame.size.width) / 2;
-        [prefsPanel setFrame:newFrame display:NO animate:NO];
-    }
+	// UKPrefsPanel controls the height; the width is worked out here, once
+	// the window is opened. A window that is already open keeps its size.
+	if (![prefsPanel isVisible])
+		[self fitPreferencesWindowWidth];
 	// Folder names and Restore Default arrows as they are now, before the
 	// window shows.
 	[self updateSaveLocationButtonTitles];
