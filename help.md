@@ -42,7 +42,7 @@ Here's a complete list of keys you can use in the Bezel.
 
 **Esc**: Close the Bezel without pasting, preserving bezel position in the history.
 
-**Enter** (Fn-Return): Move the clipboard history item currently displayed to the front of the history, closing the Bezel.
+**Enter** (Fn-Return): Copy the item currently displayed to the clipboard, closing the Bezel. If "Move pasted item to top of stack" is on in Preferences, a clipboard history item also moves to the front of the history; a favorite always keeps its place.
 
 **Backspace** or **Delete**: Delete the clipboard history item currently displayed, closing the Bezel.
 
@@ -56,9 +56,9 @@ Here's a complete list of keys you can use in the Bezel.
 
 **Shift-S**: Save the item to a file and delete it from the clipboard history.
 
-**F**: Switch between the main clipboard history store and the favorites store. The favorites store appears in the Bezel with a yellow tint and a star after the counter at the bottom ("1 of 2 ★"), and works in the same way as the main clipboard history store.
+**F**: Switch between the main clipboard history store and the favorites store. The favorites store appears in the Bezel with a yellow tint and a star after the counter at the bottom ("1 of 2 ★"), and works in the same way as the main clipboard history store, except that pasting never changes the order of your favorites: "Move pasted item to top of stack" in Preferences applies to the clipboard history only.
 
-**Shift-F**: Save the clipboard history item currently displayed to the favorites store, deleting it from the main clipboard history store and closing the Bezel.
+**Shift-F**: Save the clipboard history item currently displayed to the favorites store, deleting it from the main clipboard history store and closing the Bezel. A new favorite goes to the top of the favorites. If the favorites are full (the Favorites number in Preferences), it drops the last one; with the Favorites box of "Save forgotten items to:" checked, as it is by default, that one is saved to a file first. If "Remove duplicates" is on in Preferences and the item already is a favorite, it replaces that favorite in its place instead of adding a second copy.
 
 **Space**: Pin the bezel open so it stays visible after releasing modifier keys. You can then browse freely and press Return to paste or Escape to cancel. While the bezel is pinned, its counter says "(pinned)".
 

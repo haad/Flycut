@@ -259,7 +259,7 @@
 }
 
 // Must be called before getPasteFromIndex:/getPasteFromStackPosition, which may
-// reorder the list when pasteMovesToTop is enabled.
+// reorder the history when pasteMovesToTop is enabled.
 - (NSDictionary*)getRichDataFromStackPosition
 {
 	if ( [clippingStore jcListCount] > stackPosition ) {
@@ -380,11 +380,22 @@
     return NO;
 }
 
+// A new favorite goes to the top of the favorites. The favorites keep the order the
+// user gave them: with "Remove duplicates" a clipping equal to a favorite takes that
+// favorite's place instead of the top (the store drops the equal one, as it does in
+// the history), so there is no second copy. Without "Remove duplicates" a second
+// copy goes on top, as before.
+-(void)addClippingToFavorites:(FlycutClipping *)clipping
+{
+	int equal = [favoritesStore removeDuplicates] ? [favoritesStore indexOfClipping:clipping] : -1;
+	[favoritesStore insertClipping:clipping atIndex:( equal >= 0 ) ? equal : 0];
+}
+
 - (bool)saveFromStackToFavorites
 {
     if ( clippingStore != favoritesStore && [clippingStore jcListCount] > stackPosition ) {
         // Get text from clipping store.
-        [favoritesStore addClipping:[clippingStore clippingAtPosition:stackPosition] ];
+        [self addClippingToFavorites:[clippingStore clippingAtPosition:stackPosition]];
         [self clearItemAtStackPosition];
         return YES;
     }
@@ -394,7 +405,11 @@
 - (NSString*)getPasteFromIndex:(int) position {
 	NSString *clipping = [self getClipFromCount:position];
 
-	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"] ) {
+	// "Move pasted item to top of stack" reorders the history only. The favorites keep
+	// the order the user gave them however a favorite is pasted or copied, and the
+	// selection stays on it.
+	if ( clippingStore != favoritesStore
+		&& [[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"] ) {
 		// Settle the stack position BEFORE moving, because the store redraws the bezel from
 		// inside the move (delegateEndUpdates -> -[AppController endUpdates]).  Assigning
 		// afterwards meant that redraw used the pre-move position, which then pointed at the

@@ -424,7 +424,7 @@
                                                             <binding destination="808" name="value" keyPath="values.removeDuplicates" id="906"/>
                                                         </connections>
                                                     </button>
-                                                    <button translatesAutoresizingMaskIntoConstraints="NO" id="914">
+                                                    <button toolTip="Applies to the clipboard history only. Favorites keep their order when you paste them." translatesAutoresizingMaskIntoConstraints="NO" id="914">
                                                         <rect key="frame" x="16" y="162" width="475" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Move pasted item to top of stack" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="915">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
