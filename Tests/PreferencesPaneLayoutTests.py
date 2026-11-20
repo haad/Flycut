@@ -528,7 +528,7 @@ static int Colons(void)
 {
     NSArray *panes = @[@(appearancePane), @(hotkeysPane)];
     NSArray *wanted = @[@[@"Bezel transparency:", @"Bezel width:", @"Bezel height:", @"Search clipboard hotkey:", @"Active:", @"Paused:"],
-                        @[@"Main Hotkey:"]];
+                        @[@"Main Hotkey:", @"Paste as Plain Text:"]];
     NSMutableArray *seen = [NSMutableArray array];
     for (NSUInteger p = 0; p < [panes count]; p++) {
         NSInteger index = [panes[p] integerValue];

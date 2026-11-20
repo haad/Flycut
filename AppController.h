@@ -44,6 +44,8 @@
 	// Accessibility granted, as asked at the last activation.
 	BOOL						plainPasteAccessibilityTrusted;
 	SRRecorderControl			*searchRecorder;
+	// Built in code under the bezel's (-buildPlainPasteHotkeyRow).
+	SRRecorderControl			*plainPasteRecorder;
 	IBOutlet NSPanel			*prefsPanel;
 	IBOutlet NSTextView			*acknowledgementsView;
 	IBOutlet NSBox			  *appearancePanel;

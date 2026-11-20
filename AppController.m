@@ -546,6 +546,7 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 -(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY;
 -(void)buildGeneralPermissionsPreferenceRow;
 -(void)buildGeneralPasswordOptionStates;
+-(void)buildPlainPasteHotkeyRow;
 -(NSString *)bezelCounterString;
 @end
 
@@ -774,6 +775,7 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 	[self buildAppearancesPreferencePanel];
 
 	[self buildMainHotkeyRestoreDefaultButton];
+	[self buildPlainPasteHotkeyRow];
 	[self buildGeneralNumberFields];
 	[self buildGeneralRestoreDefaultButtons];
 	[self buildGeneralPermissionsPreferenceRow];
@@ -1643,6 +1645,7 @@ static NSString *FlycutRestoreDefaultsKey(NSString *identifier)
 {
 	if ([identifier isEqualToString:@"restoreDefaultMainHotkey"]) return @"ShortcutRecorder mainHotkey";
 	if ([identifier isEqualToString:@"restoreDefaultSearchHotkey"]) return @"ShortcutRecorder searchHotkey";
+	if ([identifier isEqualToString:@"restoreDefaultPlainPasteHotkey"]) return FlycutPlainPasteHotkeyKey;
 	if (![identifier hasPrefix:@"restoreDefault"] || [identifier length] <= [@"restoreDefault" length])
 		return nil;
 	NSString *rest = [identifier substringFromIndex:[@"restoreDefault" length]];
@@ -1931,6 +1934,43 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 			                                                    withString:[clear stringByAppendingString:@" To go back to the default, click the arrow that appears next to a changed hotkey."]]];
 	}
 	[pane addSubview:button];
+	[self layOutHotkeysPaneForWidth:NSWidth([FlycutPaneRoot(pane) bounds])];
+}
+
+// "Paste as Plain Text" gets a row under the bezel's hotkey, built in code like the search
+// hotkey's row: the NIB gives this pane one recorder. The pane's layout
+// (-layOutHotkeysPaneForWidth:) then treats it like the bezel's row: its label in front, its
+// recorder on the recorders' column up to its Restore Default arrow; the help text, which
+// applies to both, goes under the two rows, and the pane grows to fit it.
+-(void)buildPlainPasteHotkeyRow
+{
+	NSView *pane = [mainRecorder superview];
+	if (pane == nil || plainPasteRecorder != nil)
+		return;
+	// Below the bezel's row, the label in front of the recorder: where the
+	// layout looks for a row's label and arrow.
+	NSRect mainFrame = [mainRecorder frame];
+	NSTextField *label = [NSTextField labelWithString:@"Paste as Plain Text:"];
+	FlycutStyleAsLabel(label);
+	NSSize labelSize = [label fittingSize];
+	NSRect plainFrame = NSOffsetRect(mainFrame, 0, -(NSHeight(mainFrame) + FlycutRowGap));
+	plainFrame.origin.x = MAX(NSMinX(mainFrame), ceil(labelSize.width) + FlycutLabelGap);
+	plainPasteRecorder = [[SRRecorderControl alloc] initWithFrame:plainFrame];
+	[plainPasteRecorder setDelegate:self];
+	[plainPasteRecorder setAccessibilityElement:YES];
+	[plainPasteRecorder setAccessibilityLabel:@"Paste as plain text hotkey"];
+	[plainPasteRecorder setAccessibilityHelp:FlycutHotkeyRecorderHelp];
+	[pane addSubview:plainPasteRecorder];
+
+	[label setFrame:NSMakeRect(0, NSMidY(plainFrame) - ceil(labelSize.height) / 2.0, ceil(labelSize.width), ceil(labelSize.height))];
+	[pane addSubview:label];
+
+	NSButton *arrow = [self restoreDefaultButtonWithIdentifier:@"restoreDefaultPlainPasteHotkey"
+	                                       accessibilityLabel:@"Restore default paste as plain text hotkey"];
+	[arrow setFrame:NSMakeRect(NSMaxX(plainFrame) + FlycutRestoreArrowGap, NSMidY(plainFrame) - FlycutRestoreArrowSide / 2.0,
+	                           FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
+	[pane addSubview:arrow];
+
 	[self layOutHotkeysPaneForWidth:NSWidth([FlycutPaneRoot(pane) bounds])];
 }
 
@@ -2277,6 +2317,8 @@ static void FlycutRemoveStepper(NSView *pane, NSStepper *stepper, NSTextField *f
 		                                             name:NSWindowWillCloseNotification object:window];
 }
 
+static KeyCombo FlycutKeyComboForDefaultsKey(NSString *key);
+
 // We no longer get autosave from ShortcutRecorder, so let's set the recorders by hand.
 -(void)loadHotkeyRecorderCombos
 {
@@ -2287,6 +2329,9 @@ static void FlycutRemoveStepper(NSView *pane, NSStepper *stepper, NSTextField *f
 	NSDictionary *search = [defaults dictionaryForKey:@"ShortcutRecorder searchHotkey"];
 	if ( search && searchRecorder )
 		[searchRecorder setKeyCombo:SRMakeKeyCombo([[search objectForKey:@"keyCode"] intValue], [[search objectForKey:@"modifierFlags"] intValue])];
+	KeyCombo plain = FlycutKeyComboForDefaultsKey(FlycutPlainPasteHotkeyKey);
+	if ( plainPasteRecorder )
+		[plainPasteRecorder setKeyCombo:plain];
 	[self updateRestoreDefaultButtons];
 }
 
@@ -2294,6 +2339,7 @@ static void FlycutRemoveStepper(NSView *pane, NSStepper *stepper, NSTextField *f
 {
 	if ([identifier isEqualToString:@"restoreDefaultMainHotkey"]) return mainRecorder;
 	if ([identifier isEqualToString:@"restoreDefaultSearchHotkey"]) return searchRecorder;
+	if ([identifier isEqualToString:@"restoreDefaultPlainPasteHotkey"]) return plainPasteRecorder;
 	return nil;
 }
 
@@ -2397,6 +2443,18 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 	return fabs([current doubleValue] - factory) < 0.0005 * MAX(1.0, fabs(factory));
 }
 
+// Whether another Flycut hotkey uses the factory combination of this arrow's hotkey now
+// (-shortcutRecorder:isKeyCode:andFlagsTaken:reason:, which names that hotkey).
+-(BOOL)restoreDefaultIsTakenForIdentifier:(NSString *)identifier reason:(NSString **)reason
+{
+	NSString *key = FlycutRestoreDefaultsKey(identifier);
+	SRRecorderControl *recorder = [self restoreDefaultRecorderForIdentifier:identifier];
+	if (key == nil || recorder == nil || ![key hasPrefix:@"ShortcutRecorder "])
+		return NO;
+	KeyCombo factory = FlycutRegisteredKeyCombo(key);
+	return [self shortcutRecorder:recorder isKeyCode:factory.code andFlagsTaken:factory.flags reason:reason];
+}
+
 -(void)updateRestoreDefaultButtons
 {
 	NSMutableArray *buttons = [NSMutableArray array];
@@ -2405,10 +2463,14 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 	FlycutCollectRestoreDefaultButtons([savingSectionLabel superview], buttons);
 	for (NSButton *button in buttons) {
 		BOOL atDefault = [self restoreDefaultValueIsDefaultForIdentifier:[button identifier]];
+		// A default that another Flycut hotkey uses now cannot be restored (-restoreDefault:):
+		// the arrow stays in view, dimmed, and its tooltip says why.
+		BOOL taken = !atDefault && [self restoreDefaultIsTakenForIdentifier:[button identifier] reason:NULL];
 		[button setHidden:atDefault];
 		// Next to a greyed-out field the arrow is greyed out too: it would reset a list that does
 		// nothing.
-		[button setEnabled:!atDefault && FlycutRestoreDefaultSwitchesOn(FlycutRestoreDefaultsKey([button identifier]))];
+		[button setEnabled:!atDefault && !taken && FlycutRestoreDefaultSwitchesOn(FlycutRestoreDefaultsKey([button identifier]))];
+		[button setToolTip:taken ? @"The default is used by another Flycut hotkey" : @"Restore Default"];
 	}
 }
 
@@ -2436,7 +2498,16 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 		// value is dropped (-setHotKeyPreferenceForRecorder:).
 		if (recorder != nil && [[recorder window] firstResponder] == recorder)
 			[[recorder window] makeFirstResponder:nil];
-		[recorder setKeyCombo:FlycutRegisteredKeyCombo(key)];
+		// One combination, one Flycut hotkey, as for a recorded one: a default that another
+		// Flycut hotkey uses now is refused. Its arrow is dimmed then; this is the safety net.
+		KeyCombo factory = FlycutRegisteredKeyCombo(key);
+		NSString *reason = nil;
+		if ([self restoreDefaultIsTakenForIdentifier:identifier reason:&reason]) {
+			NSLog(@"Restore Default refused: %@", reason);
+			NSBeep();
+			return;
+		}
+		[recorder setKeyCombo:factory];
 	} else if ([FlycutFolderRestoreKeys() containsObject:key]) {
 		// No stored folder means the Desktop again.
 		[defaults removeObjectForKey:key];
@@ -5368,7 +5439,8 @@ static NSString *FlycutMenuShortcutCacheKey(NSRunningApplication *application)
 
 - (void)setHotKeyPreferenceForRecorder:(SRRecorderControl *)aRecorder {
     NSString *key = aRecorder == mainRecorder ? @"ShortcutRecorder mainHotkey" :
-                    aRecorder == searchRecorder ? @"ShortcutRecorder searchHotkey" : nil;
+                    aRecorder == searchRecorder ? @"ShortcutRecorder searchHotkey" :
+                    aRecorder == plainPasteRecorder ? FlycutPlainPasteHotkeyKey : nil;
     if (key == nil)
         return;
     // The registered shortcut applies while none is stored, so a shortcut
@@ -5384,7 +5456,22 @@ static NSString *FlycutMenuShortcutCacheKey(NSRunningApplication *application)
     [[NSUserDefaults standardUserDefaults] setObject:hotKeyDict forKey:key];
 }
 
+// One combination, one Flycut hotkey: a recorder refuses one that another Flycut hotkey
+// uses (ShortcutRecorder then shows the reason in its alert).
 - (BOOL)shortcutRecorder:(SRRecorderControl *)aRecorder isKeyCode:(NSInteger)keyCode andFlagsTaken:(NSUInteger)flags reason:(NSString **)aReason {
+	NSArray *recorders = @[mainRecorder ?: (id)[NSNull null], searchRecorder ?: (id)[NSNull null], plainPasteRecorder ?: (id)[NSNull null]];
+	NSArray *names = @[@"Main Hotkey", @"search hotkey", @"Paste as Plain Text hotkey"];
+	for (NSUInteger i = 0; i < [recorders count]; i++) {
+		SRRecorderControl *other = [recorders objectAtIndex:i];
+		if ( other == (id)[NSNull null] || other == aRecorder )
+			continue;
+		KeyCombo combo = [other keyCombo];
+		if ( FlycutHotkeysCollide(keyCode, flags, combo.code, combo.flags) ) {
+			if ( aReason != NULL )
+				*aReason = [NSString stringWithFormat:@"it is Flycut's %@", [names objectAtIndex:i]];
+			return YES;
+		}
+	}
 	return NO;
 }
 
@@ -5397,6 +5484,8 @@ static NSString *FlycutMenuShortcutCacheKey(NSRunningApplication *application)
 	} else if (aRecorder == searchRecorder) {
 		NSLog(@"Search recorder keyCombo changed");
 		[self toggleSearchHotKey: aRecorder];
+		[self setHotKeyPreferenceForRecorder: aRecorder];
+	} else if (aRecorder == plainPasteRecorder) {
 		[self setHotKeyPreferenceForRecorder: aRecorder];
 	}
 	// The bezel's and the search window's hotkeys win over the plain-text one.

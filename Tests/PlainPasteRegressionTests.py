@@ -836,7 +836,8 @@ class PlainPasteRegressionTests(unittest.TestCase):
         self.assertEqual(paragraphs[0],
                          'Press the Paste as Plain Text hotkey (Option-Shift-Command-V by default, the shortcut Apple uses for '
                          '"Paste and Match Style") to paste what is on the clipboard now, without its formatting such as fonts, '
-                         'colors and links, into the app you are working in. Command-V still pastes it with its formatting.')
+                         'colors and links, into the app you are working in. Command-V still pastes it with its formatting. '
+                         'You can change or clear it under Hotkeys in Preferences.')
         self.assertEqual(paragraphs[1],
                          'For formatted text, Flycut puts the plain text on the clipboard for the paste and then puts back what '
                          'you had copied: right after the app has read the plain text, or after three seconds if no app reads '

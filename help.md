@@ -72,7 +72,7 @@ Press the Search Hotkey (Control-Shift-S by default) to open the search window. 
 
 **Paste as Plain Text**
 
-Press the Paste as Plain Text hotkey (Option-Shift-Command-V by default, the shortcut Apple uses for "Paste and Match Style") to paste what is on the clipboard now, without its formatting such as fonts, colors and links, into the app you are working in. Command-V still pastes it with its formatting.
+Press the Paste as Plain Text hotkey (Option-Shift-Command-V by default, the shortcut Apple uses for "Paste and Match Style") to paste what is on the clipboard now, without its formatting such as fonts, colors and links, into the app you are working in. Command-V still pastes it with its formatting. You can change or clear it under Hotkeys in Preferences.
 
 For formatted text, Flycut puts the plain text on the clipboard for the paste and then puts back what you had copied: right after the app has read the plain text, or after three seconds if no app reads it. If you copy something else in the meantime, your new copy stays. Neither the plain text nor what Flycut puts back is added to your clipboard history; a copy you made just before is added once, as usual. Text without formatting, such as a password from a password manager, is pasted as it is, and the clipboard is not touched. If the clipboard holds no text (a picture, files from the Finder, or nothing), you hear the alert sound and nothing is pasted. The hotkey works while clipboard tracking is paused and needs the same Accessibility permission as pasting from the Bezel; while the Bezel, the search window or the clipping list is open, it only plays the alert sound.
 
@@ -133,7 +133,7 @@ The preferences panel allows you to customize settings including:
 - Removing duplicate clippings
 - Skipping password manager entries
 
-A setting that differs from its factory value shows a small round arrow next to it (tooltip "Restore Default"). Click the arrow to go back to the default; for the two "Save … to:" folders that is the Desktop. The arrow disappears once the default is back.
+A setting that differs from its factory value shows a small round arrow next to it (tooltip "Restore Default"). Click the arrow to go back to the default; for the two "Save … to:" folders that is the Desktop. The arrow disappears once the default is back. While another Flycut hotkey uses the default of a hotkey, the arrow next to that hotkey is dimmed and its tooltip says why; give the other hotkey a different combination first.
 
 The two "Save … to:" buttons show the name of their folder; a long name is shortened in the middle ("…"). Point at a button to see the folder's full path.
 

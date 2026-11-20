@@ -634,7 +634,7 @@
                                                         <autoresizingMask key="autoresizingMask"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" id="748">
                                                             <font key="font" metaFont="system" size="10"/>
-                                                            <string key="title">To change the hotkey, simply click on the recorder and type another. To clear the hotkey, click on the "X". Use of a hotkey claimed by another application can lead to unpredictable results.</string>
+                                                            <string key="title">To change a hotkey, click its recorder and type another. To clear it, click the X. To go back to the default, click the arrow that appears next to a changed hotkey. Use of a hotkey claimed by another application can lead to unpredictable results.</string>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                                         </textFieldCell>
