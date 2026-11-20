@@ -424,6 +424,7 @@ static void FixtureBeep(void) { fixtureBeeps++; }
     FixturePasteboard *jcPasteboard;
     NSNumber *pbCount;
     NSNumber *pbBlockCount;
+    NSInteger pbDecidedGeneration;   // -pollPB: notes the generation it decided on
     FlycutOperator *flycutOperator;
     FixtureControl *searchBox;
     FixtureControl *searchWindowSearchField;

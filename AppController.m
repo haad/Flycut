@@ -27,6 +27,7 @@
 #import <ServiceManagement/ServiceManagement.h>
 #import "FlycutPasteKey.h"
 #import "FlycutHotkeyDefaults.h"
+#import "FlycutPlainPaste.h"
 #import "FlycutListPanel.h"
 #import <Carbon/Carbon.h>
 
@@ -344,6 +345,12 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 	NSArray *_previousPasteboardItems;
 	BOOL _clipboardCommitted;
 	BOOL _copiesOnly;
+	BOOL _pastesPlainText;
+	BOOL _previousGenerationWasSeen;
+	NSInteger _previousGeneration;
+	BOOL _commandVSent;
+	NSTimeInterval _modifierReleaseDeadline;
+	id _plainTextProvider;
 }
 @property(nonatomic, readonly, retain) NSRunningApplication *targetApplication;
 @property(nonatomic, readonly) pid_t targetProcessIdentifier;
@@ -362,6 +369,19 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 // Set while the bezel's copy key writes the clipboard: a failed write is a failed copy then,
 // not a cancelled paste.
 @property(nonatomic, assign) BOOL copiesOnly;
+// "Paste as plain text" of the current clipboard (-hitPlainPasteHotKey:): the plain text
+// is only borrowed, so the clipboard always goes back to what it held.
+@property(nonatomic, assign) BOOL pastesPlainText;
+// The clipboard generation the plain text replaced, and whether what goes back in its
+// place is never captured: Flycut wrote it itself, or tracking was paused.
+@property(nonatomic, assign) NSInteger previousGeneration;
+@property(nonatomic, assign) BOOL previousGenerationWasSeen;
+// Command-V has gone to the target: from now on a read of the plain text is the paste.
+@property(nonatomic, assign) BOOL commandVSent;
+// Until when (system uptime) Command-V waits for the hotkey's modifier keys to go up.
+@property(nonatomic, assign) NSTimeInterval modifierReleaseDeadline;
+// Offers the plain text lazily, so Flycut learns when the target app reads it.
+@property(nonatomic, retain) id plainTextProvider;
 - (id)initWithApplication:(NSRunningApplication *)application
 		processIdentifier:(pid_t)processIdentifier
 			 generation:(NSUInteger)generation;
@@ -381,6 +401,12 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 @synthesize previousPasteboardItems = _previousPasteboardItems;
 @synthesize clipboardCommitted = _clipboardCommitted;
 @synthesize copiesOnly = _copiesOnly;
+@synthesize pastesPlainText = _pastesPlainText;
+@synthesize previousGeneration = _previousGeneration;
+@synthesize previousGenerationWasSeen = _previousGenerationWasSeen;
+@synthesize commandVSent = _commandVSent;
+@synthesize modifierReleaseDeadline = _modifierReleaseDeadline;
+@synthesize plainTextProvider = _plainTextProvider;
 
 - (id)initWithApplication:(NSRunningApplication *)application
 		processIdentifier:(pid_t)processIdentifier
@@ -404,11 +430,59 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 
 - (void)dealloc
 {
+	[_plainTextProvider release];
 	[_previousPasteboardItems release];
 	[_selectedPayloadData release];
 	[_selectedPayloadType release];
 	[_selectedPayload release];
 	[_targetApplication release];
+	[super dealloc];
+}
+@end
+
+@interface AppController ()
+- (void)plainTextWasReadForTransaction:(FCPasteTransaction *)transaction;
+@end
+
+// The plain text of "Paste as plain text", handed out only when an app reads it: that
+// read is the paste, and the clipboard can go back right after it.
+@interface FCPlainTextProvider : NSObject <NSPasteboardItemDataProvider> {
+@private
+	__weak AppController *_controller;
+	__weak FCPasteTransaction *_transaction;
+	NSString *_text;
+}
+- (id)initWithText:(NSString *)text controller:(AppController *)controller transaction:(FCPasteTransaction *)transaction;
+@end
+
+@implementation FCPlainTextProvider
+- (id)initWithText:(NSString *)text controller:(AppController *)controller transaction:(FCPasteTransaction *)transaction
+{
+	self = [super init];
+	if ( self ) {
+		_text = [text copy];
+		_controller = controller;
+		_transaction = transaction;
+	}
+	return self;
+}
+
+- (void)pasteboard:(NSPasteboard *)pasteboard item:(NSPasteboardItem *)item provideDataForType:(NSPasteboardType)type
+{
+	(void)pasteboard;
+	[item setString:_text forType:type];
+	// The paste transaction lives on the main thread.
+	AppController *controller = _controller;
+	FCPasteTransaction *transaction = _transaction;
+	if ( controller != nil && transaction != nil )
+		dispatch_async(dispatch_get_main_queue(), ^{
+			[controller plainTextWasReadForTransaction:transaction];
+		});
+}
+
+- (void)dealloc
+{
+	[_text release];
 	[super dealloc];
 }
 @end
@@ -431,6 +505,11 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 - (void)hideAppForPasteTransaction:(FCPasteTransaction *)transaction;
 - (void)completePasteInRememberedApplication:(FCPasteTransaction *)transaction;
 - (void)postPasteAndClearRememberedApplication:(FCPasteTransaction *)transaction;
+- (BOOL)placePlainTextForTransaction:(FCPasteTransaction *)transaction;
+- (void)pastePlainTextWhenModifiersAreReleased:(FCPasteTransaction *)transaction;
+- (void)restoreClipboardAfterPlainTextPaste:(FCPasteTransaction *)transaction;
+- (void)finishPlainTextPaste:(FCPasteTransaction *)transaction;
+- (NSEventModifierFlags)liveModifierFlags;
 - (void)cancelPendingPasteCompletion;
 - (NSArray *)snapshotPasteboardItems;
 - (void)restorePasteboardForCancelledTransaction:(FCPasteTransaction *)transaction;
@@ -722,6 +801,9 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 	// Observe the current pasteboard without replacing its contents.
     jcPasteboard = [NSPasteboard generalPasteboard];
     pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
+    // Decided on: what the clipboard holds at launch is no new copy, also when "Paste as
+    // plain text" puts it back.
+    pbDecidedGeneration = [pbCount integerValue];
 
 	// Build the statusbar menu
     statusItem = [[[NSStatusBar systemStatusBar]
@@ -929,6 +1011,8 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
     if (wasPaused && !paused) {
         [pbCount release];
         pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
+        // Decided on, also when "Paste as plain text" puts it back.
+        pbDecidedGeneration = [pbCount integerValue];
     }
 
     [self updateMenuBarIcon];
@@ -2215,6 +2299,16 @@ static KeyCombo FlycutRegisteredKeyCombo(NSString *key)
 	return SRMakeKeyCombo([[value objectForKey:@"keyCode"] integerValue], [[value objectForKey:@"modifierFlags"] unsignedIntegerValue]);
 }
 
+// The stored combination of a hotkey, else its registered one; neither means no hotkey.
+// Read with -objectForKey:, as every defaults store answers it.
+static KeyCombo FlycutKeyComboForDefaultsKey(NSString *key)
+{
+	id value = [[NSUserDefaults standardUserDefaults] objectForKey:key];
+	if (![value isKindOfClass:[NSDictionary class]] || [value objectForKey:@"keyCode"] == nil)
+		return SRMakeKeyCombo(ShortcutRecorderEmptyCode, ShortcutRecorderEmptyFlags);
+	return SRMakeKeyCombo([[value objectForKey:@"keyCode"] integerValue], [[value objectForKey:@"modifierFlags"] unsignedIntegerValue]);
+}
+
 static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 {
 	KeyCombo factory = FlycutRegisteredKeyCombo(key);
@@ -3108,7 +3202,9 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 {
 	if ( ![self pasteTransactionIsCurrent:transaction] )
 		return;
-	[transaction setClipboardCommitted:YES];
+	// A plain-text paste only borrows the clipboard: it always goes back.
+	if ( ![transaction pastesPlainText] )
+		[transaction setClipboardCommitted:YES];
 	[self clearRememberedPasteTarget];
 }
 
@@ -3188,9 +3284,16 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	BOOL targetIsFrontmost = targetIsValid && frontmostApplication != nil &&
 		targetProcessIdentifier == [frontmostApplication processIdentifier];
 	if ( targetIsFrontmost ) {
+		[transaction setCommandVSent:[transaction pastesPlainText]];
 		// Use the same immutable local PID for validation and posting.
-		if ( ![self postCommandVToProcessIdentifier:targetProcessIdentifier] ) {
-			NSLog(@"Paste could not be posted; the selection stays on the clipboard");
+		BOOL posted = [self postCommandVToProcessIdentifier:targetProcessIdentifier];
+		if ( posted && [transaction pastesPlainText] ) {
+			[self restoreClipboardAfterPlainTextPaste:transaction];
+			return;
+		}
+		if ( !posted ) {
+			NSLog(@"Paste could not be posted; %@", [transaction pastesPlainText] ? @"the clipboard goes back" :
+			      @"the selection stays on the clipboard");
 			NSBeep();
 		}
 		[self finishPasteTransactionKeepingSelection:transaction];
@@ -3251,14 +3354,25 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	[jcPasteboard clearContents];
 	if ([items count] > 0 && ![jcPasteboard writeObjects:items])
 		NSLog(@"Could not restore the cancelled paste's clipboard snapshot");
-	[self setPBBlockCount:@([jcPasteboard changeCount])];
+	// What Flycut puts back is no new copy. Only a copy made right before "Paste as plain
+	// text", on which Flycut had not decided yet, is captured now, once: a poll that was still
+	// reading it when the plain text took its place dropped its capture.
+	if (![transaction pastesPlainText] || [transaction previousGenerationWasSeen] ||
+		pbDecidedGeneration == [transaction previousGeneration])
+		[self setPBBlockCount:@([jcPasteboard changeCount])];
 }
 
 - (BOOL)pasteboardIsOwnedByTransaction:(FCPasteTransaction *)transaction
 {
-	if (transaction == nil || ![transaction hasSelectedPayload] ||
-		[transaction ownedChangeCount] < 0 ||
+	if (transaction == nil || [transaction ownedChangeCount] < 0 ||
 		[jcPasteboard changeCount] != [transaction ownedChangeCount])
+		return NO;
+	// A plain-text paste offers its text lazily, and reading it here would count as the
+	// paste. Every write starts a new generation, so an unchanged one is still Flycut's
+	// (or, for a clipboard left as it was, still the one the hotkey found).
+	if ([transaction pastesPlainText])
+		return YES;
+	if (![transaction hasSelectedPayload])
 		return NO;
 	BOOL contentsMatch;
 	if ([transaction selectedPayload] != nil) {
@@ -3283,6 +3397,12 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 								   object:transaction];
 		[NSObject cancelPreviousPerformRequestsWithTarget:self
 								 selector:@selector(postPasteAndClearRememberedApplication:)
+								   object:transaction];
+		[NSObject cancelPreviousPerformRequestsWithTarget:self
+								 selector:@selector(pastePlainTextWhenModifiersAreReleased:)
+								   object:transaction];
+		[NSObject cancelPreviousPerformRequestsWithTarget:self
+								 selector:@selector(finishPlainTextPaste:)
 								   object:transaction];
 	}
 	[self clearRememberedPasteTarget];
@@ -3648,6 +3768,11 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 
     [pbCount release];
     pbCount = [[NSNumber numberWithInteger:pasteboardGeneration] retain];
+    // Flycut's own writes are never captured (FCShouldCommitClipboardRead), so they are not
+    // read either: "Paste as plain text" offers its text lazily, and only the target
+    // app's read may fetch it.
+    if ( pasteboardGeneration == [pbBlockCount integerValue] )
+        return;
 
     NSString *type = [jcPasteboard availableTypeFromArray:[NSArray arrayWithObject:NSPasteboardTypeString]];
     NSString *imageType = [jcPasteboard availableTypeFromArray:@[@"com.compuserve.gif", NSPasteboardTypeTIFF, NSPasteboardTypePNG]];
@@ -3666,13 +3791,16 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
     if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"] ) {
         if ( [availableTypes count] > 0 &&
              FCShouldCommitClipboardRead(pasteboardGeneration, pasteboardGeneration, blockedGeneration,
-                                         captureEpoch, clipboardCaptureEpoch, [flycutOperator storeDisabled]) )
+                                         captureEpoch, clipboardCaptureEpoch, [flycutOperator storeDisabled]) ) {
+            // Flycut has decided on this copy, as when it captures or skips one.
+            pbDecidedGeneration = pasteboardGeneration;
             [flycutOperator addClipping:[availableTypes componentsJoinedByString:@", "]
                                  ofType:NSPasteboardTypeString
                                 fromApp:@"Flycut"
                        withAppBundleURL:nil
                                  target:self
                  clippingAddedSelector:@selector(clippingWasAdded)];
+        }
         return;
     }
     if ( type == nil && imageType == nil )
@@ -3748,6 +3876,11 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                     DLog(@"Contents: Blocked, paused, or changed during read");
                     return;
                 }
+                // Flycut has decided on this copy: captured, or skipped by a filter. A
+                // formatted copy's late commit (-captureClipboardChangeNow) can come after a
+                // newer copy was decided on; that one stays the newest decided.
+                if ( pasteboardGeneration > pbDecidedGeneration )
+                    pbDecidedGeneration = pasteboardGeneration;
 
                 if (revealPasteboardTypes) {
                     // Diagnostics went on during the read: never the content.
@@ -4097,6 +4230,7 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	//Create our hot keys
 	[self toggleMainHotKey:[NSNull null]];
 	[self toggleSearchHotKey:[NSNull null]];
+	[self updatePlainPasteHotKeyRegistration];
 }
 
 - (void) updateBezel
@@ -4226,6 +4360,189 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	} else {
 		[self stackDown];
 	}
+}
+
+#pragma mark - Paste as plain text
+
+// Command-V goes out once the hotkey's keys are up; an app that reads the live modifier
+// state would otherwise see Shift or Option with it. Checked this often, for this long.
+static const NSTimeInterval kPlainPasteModifierCheckInterval = 0.02;
+static const NSTimeInterval kPlainPasteModifierWaitLimit = 3.0;
+// The clipboard goes back this long after the target app read the plain text, or this
+// long after Command-V when no read comes (the app had nothing to paste into, or another
+// tool read the text first, so the app's read went unseen).
+static const NSTimeInterval kPlainPasteReadGrace = 0.25;
+static const NSTimeInterval kPlainPasteReadTimeout = 3.0;
+
+// "Paste as plain text": pastes the current clipboard without its formatting into the app
+// in front. Its plain text takes the clipboard's place for the paste, offered lazily and
+// marked transient, and the clipboard goes back afterwards; plain text alone is pasted as
+// it is. Flycut's bezel, search window and list own a selection of their own while open.
+- (void)hitPlainPasteHotKey:(SGHotKey *)hotKey
+{
+	(void)hotKey;
+	if ( isBezelDisplayed || isSearchWindowDisplayed || [listController isOpen] ) {
+		NSBeep();
+		return;
+	}
+	// A new paste supersedes the delayed steps of an older one, and an earlier plain-text
+	// paste gives the clipboard back before it is looked at.
+	[self cancelPendingPasteCompletion];
+	NSMutableArray *itemTypes = [NSMutableArray array];
+	for ( NSPasteboardItem *item in [jcPasteboard pasteboardItems] )
+		[itemTypes addObject:[item types] ?: @[]];
+	FlycutPlainPasteKind kind = FlycutPlainPasteKindForItems(itemTypes);
+	if ( kind == FlycutPlainPasteNothing ) {
+		NSLog(@"Paste as plain text: the clipboard holds no text");
+		NSBeep();
+		return;
+	}
+	[self rememberFrontmostApplicationForPaste];
+	FCPasteTransaction *transaction = [currentPasteTransaction retain];
+	BOOL ready = transaction != nil && [transaction targetProcessIdentifier] > 0;
+	if ( ready ) {
+		[transaction setPastesPlainText:YES];
+		if ( kind == FlycutPlainPasteAsIs )
+			[transaction setOwnedChangeCount:[jcPasteboard changeCount]];
+		else
+			ready = [self placePlainTextForTransaction:transaction];
+	}
+	if ( ready ) {
+		[transaction setModifierReleaseDeadline:[[NSProcessInfo processInfo] systemUptime] + kPlainPasteModifierWaitLimit];
+		[self pastePlainTextWhenModifiersAreReleased:transaction];
+	} else {
+		// No app to paste into (Flycut itself is in front), or the clipboard changed or
+		// could not be read while it was replaced.
+		NSLog(@"Paste as plain text: nothing pasted");
+		[self clearPasteTransactionIfCurrent:transaction];
+		NSBeep();
+	}
+	[transaction release];
+}
+
+// Puts the clipboard's plain text alone on the pasteboard, after a snapshot of every item
+// for the restore (#7's snapshot, which refuses a representation it cannot read back).
+- (BOOL)placePlainTextForTransaction:(FCPasteTransaction *)transaction
+{
+	NSInteger originalCount = [jcPasteboard changeCount];
+	BOOL concealed = [[jcPasteboard types] containsObject:FlycutConcealedPasteboardType];
+	NSArray *snapshot = [self snapshotPasteboardItems];
+	if ( snapshot == nil || [jcPasteboard changeCount] != originalCount || ![self pasteTransactionIsCurrent:transaction] )
+		return NO;
+	// The text the pasteboard's string read gives: its first item with text.
+	NSString *text = nil;
+	for ( NSDictionary *representations in snapshot ) {
+		NSData *data = [representations objectForKey:NSPasteboardTypeString];
+		if ( data != nil ) {
+			text = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
+			break;
+		}
+	}
+	if ( text == nil )
+		return NO;
+	[transaction setPreviousPasteboardItems:snapshot];
+	// Flycut's own write (a paste from the history), or a copy while tracking is paused:
+	// what goes back is never captured. Whether a poll decided on the copy is asked only
+	// when it goes back (-restorePasteboardForCancelledTransaction:), as that decision may
+	// still be on its way to the main thread now.
+	[transaction setPreviousGeneration:originalCount];
+	[transaction setPreviousGenerationWasSeen:[pbBlockCount integerValue] == originalCount || [flycutOperator storeDisabled]];
+	[transaction setSelectedPayload:text];
+	FCPlainTextProvider *provider = [[[FCPlainTextProvider alloc] initWithText:text controller:self transaction:transaction] autorelease];
+	[transaction setPlainTextProvider:provider];
+	NSPasteboardItem *item = [[[NSPasteboardItem alloc] init] autorelease];
+	// Other clipboard tools skip the borrowed item; a private copy stays marked private.
+	[item setData:[NSData data] forType:FlycutTransientPasteboardType];
+	if ( concealed )
+		[item setData:[NSData data] forType:FlycutConcealedPasteboardType];
+	if ( ![item setDataProvider:provider forTypes:@[NSPasteboardTypeString]] )
+		return NO;
+	NSInteger declaredCount = [jcPasteboard clearContents];
+	[transaction setOwnedChangeCount:declaredCount];
+	// Flycut's own write: never captured, never read by -pollPB:.
+	[self setPBBlockCount:@(declaredCount)];
+	// A failed write leaves the transaction owning the generation, so the caller's
+	// clean-up puts the snapshot back.
+	return [jcPasteboard writeObjects:@[item]] && [jcPasteboard changeCount] == declaredCount;
+}
+
+// The live state of the modifier keys, as -handleStatusItemEvent: reads it (Cocoa's
+// modifier flags use the same bits as CGEventFlags).
+- (NSEventModifierFlags)liveModifierFlags
+{
+	return (NSEventModifierFlags)CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState);
+}
+
+- (void)pastePlainTextWhenModifiersAreReleased:(FCPasteTransaction *)transaction
+{
+	if ( ![self pasteTransactionIsCurrent:transaction] )
+		return;
+	if ( [self liveModifierFlags] & FlycutHotkeyModifierMask ) {
+		if ( [[NSProcessInfo processInfo] systemUptime] >= [transaction modifierReleaseDeadline] ) {
+			NSLog(@"Paste as plain text cancelled: the hotkey's modifier keys stayed down");
+			[self clearPasteTransactionIfCurrent:transaction];
+			return;
+		}
+		[self performSelector:@selector(pastePlainTextWhenModifiersAreReleased:) withObject:transaction
+				   afterDelay:kPlainPasteModifierCheckInterval];
+		return;
+	}
+	// The paste transaction's own path: the target must still be in front, the clipboard
+	// still Flycut's, Accessibility granted (-postCommandVToProcessIdentifier:).
+	[self completePasteInRememberedApplication:transaction];
+}
+
+- (void)restoreClipboardAfterPlainTextPaste:(FCPasteTransaction *)transaction
+{
+	if ( [transaction previousPasteboardItems] == nil ) {
+		// The clipboard was left as it was: nothing goes back.
+		[self finishPasteTransactionKeepingSelection:transaction];
+		return;
+	}
+	[self performSelector:@selector(finishPlainTextPaste:) withObject:transaction afterDelay:kPlainPasteReadTimeout];
+}
+
+// The provider handed out the plain text. A read before Command-V (another clipboard tool)
+// is not the paste; the timeout stays.
+- (void)plainTextWasReadForTransaction:(FCPasteTransaction *)transaction
+{
+	if ( ![self pasteTransactionIsCurrent:transaction] || ![transaction commandVSent] )
+		return;
+	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(finishPlainTextPaste:) object:transaction];
+	[self performSelector:@selector(finishPlainTextPaste:) withObject:transaction afterDelay:kPlainPasteReadGrace];
+}
+
+// Puts the clipboard back, unless something was copied since Flycut's write
+// (-restorePasteboardForCancelledTransaction:).
+- (void)finishPlainTextPaste:(FCPasteTransaction *)transaction
+{
+	[self finishPasteTransactionKeepingSelection:transaction];
+}
+
+// The one place that decides whether the plain-text hotkey is registered. Its combination
+// is the stored or the factory one; the bezel's and the search window's hotkeys win.
+- (void)updatePlainPasteHotKeyRegistration
+{
+	KeyCombo plain = FlycutKeyComboForDefaultsKey(FlycutPlainPasteHotkeyKey);
+	KeyCombo main = mainRecorder != nil ? [mainRecorder keyCombo] : FlycutKeyComboForDefaultsKey(FlycutMainHotkeyKey);
+	KeyCombo search = searchRecorder != nil ? [searchRecorder keyCombo] : FlycutKeyComboForDefaultsKey(@"ShortcutRecorder searchHotkey");
+	BOOL wanted = FlycutPlainPasteHotkeyIsWanted(plain.code, plain.flags, main.code, main.flags, search.code, search.flags);
+	NSInteger modifiers = (NSInteger)SRCocoaToCarbonFlags(plain.flags);
+	if ( plainPasteHotKey != nil ) {
+		if ( wanted && [[plainPasteHotKey keyCombo] keyCode] == plain.code && [[plainPasteHotKey keyCombo] modifiers] == modifiers )
+			return;
+		[[SGHotKeyCenter sharedCenter] unregisterHotKey:plainPasteHotKey];
+		[plainPasteHotKey release];
+		plainPasteHotKey = nil;
+	}
+	if ( !wanted )
+		return;
+	plainPasteHotKey = [[SGHotKey alloc] initWithIdentifier:@"plainPasteHotKey"
+	                                               keyCombo:[SGKeyCombo keyComboWithKeyCode:plain.code modifiers:modifiers]];
+	[plainPasteHotKey setName:@"Paste as Plain Text HotKey"];
+	[plainPasteHotKey setTarget:self];
+	[plainPasteHotKey setAction:@selector(hitPlainPasteHotKey:)];
+	[[SGHotKeyCenter sharedCenter] registerHotKey:plainPasteHotKey];
 }
 
 - (IBAction)toggleMainHotKey:(id)sender
@@ -4881,6 +5198,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 		[self toggleSearchHotKey: aRecorder];
 		[self setHotKeyPreferenceForRecorder: aRecorder];
 	}
+	// The bezel's and the search window's hotkeys win over the plain-text one.
+	[self updatePlainPasteHotKeyRegistration];
 	[self updateRestoreDefaultButtons];
 }
 
@@ -4946,6 +5265,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
+	// A paste still under way ends first: a plain-text paste puts the clipboard back.
+	[self cancelPendingPasteCompletion];
 	// Closing the list ends its session: image files of rows deleted there go now.
 	[listController close];
 	[flycutOperator applicationWillTerminate];
@@ -4956,6 +5277,9 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	[[SGHotKeyCenter sharedCenter] unregisterHotKey: searchHotKey];
 	[searchHotKey release];
 	searchHotKey = nil;
+	[[SGHotKeyCenter sharedCenter] unregisterHotKey: plainPasteHotKey];
+	[plainPasteHotKey release];
+	plainPasteHotKey = nil;
 	[self hideBezel];
 	[self hideSearchWindow];
 	[[NSDistributedNotificationCenter defaultCenter]

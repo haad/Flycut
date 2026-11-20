@@ -294,6 +294,10 @@ CASES = r"""
             if ([after count] != [before count] + 2 || ![[after objectAtIndex:1] isEqualToString:older]) return Emit(264);
             if (!image && RichRTF(1) == nil) return Emit(265);   // the older row came without its formatting
             if (![[pasteboard stringForType:NSPasteboardTypeString] isEqualToString:newer]) return Emit(266);
+            // "Paste as plain text" puts back as decided only what Flycut decided on: the older
+            // copy's late commit leaves the newer copy decided.
+            Ivar decided = class_getInstanceVariable([AppController class], "pbDecidedGeneration");
+            if (*(NSInteger *)((char *)controller + ivar_getOffset(decided)) != [pasteboard changeCount]) return Emit(267);
             return Emit(0);
         }
         if ([mode isEqualToString:@"late-rich-unread"]) {

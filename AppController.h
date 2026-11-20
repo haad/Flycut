@@ -30,6 +30,8 @@
 	SGHotKey					*mainHotKey;
 	IBOutlet SRRecorderControl	*mainRecorder;
 	SGHotKey					*searchHotKey;
+	// "Paste as plain text" (-updatePlainPasteHotKeyRegistration).
+	SGHotKey					*plainPasteHotKey;
 	SRRecorderControl			*searchRecorder;
 	IBOutlet NSPanel			*prefsPanel;
 	IBOutlet NSTextView			*acknowledgementsView;
@@ -98,6 +100,9 @@
     NSNumber *pbCount;
     //stores PasteboardCount for internal Flycut pasteboard actions so they don't trigger any events
     NSNumber *pbBlockCount;
+    // The last clipboard generation Flycut decided on: captured or skipped by a poll's filter,
+    // or ignored on purpose (launch: the clipboard found at start; resume: copies made while paused)
+    NSInteger pbDecidedGeneration;
     // Advanced whenever clipboard capture is paused or resumed; a capture commits only in the epoch it started in
     NSUInteger clipboardCaptureEpoch;
     //Preferences
@@ -121,6 +126,8 @@
 // Hotkey related
 -(void)hitMainHotKey:(SGHotKey *)hotKey;
 -(void)hitSearchHotKey:(SGHotKey *)hotKey;
+-(void)hitPlainPasteHotKey:(SGHotKey *)hotKey;
+-(void)updatePlainPasteHotKeyRegistration;
 -(IBAction)toggleSearchHotKey:(id)sender;
 
 // Search window related

@@ -214,6 +214,7 @@ static NSArray *FCFakeSearchPath(NSSearchPathDirectory directory, NSSearchPathDo
     FCFakePasteboard *jcPasteboard;
     NSNumber *pbCount;
     NSNumber *pbBlockCount;
+    NSInteger pbDecidedGeneration;   // -pollPB: notes the generation it decided on
     FlycutOperator *flycutOperator;
     int menuUpdates;
     BOOL isMenuOpen;

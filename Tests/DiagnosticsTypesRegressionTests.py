@@ -119,6 +119,17 @@ static void RunDiagnosticsSameTypesMerge(void) {
     Check([texts count] == 2, "with Remove duplicates on, an equal row is not added again");
     Check(RowIs([texts firstObject], @[NSPasteboardTypeString]), "the equal row moved to the top");
 }
+
+// A row is Flycut's decision on that copy: the plain-text paste puts such a clipboard back
+// without taking it in again.
+static void RunDiagnosticsRowDecidesItsCopy(void) {
+    FCOperator *op = FreshOperator(0);
+    FCAppHarness *app = DiagnosticsHarness(op);
+    [app->jcPasteboard copyGeneration:@{NSPasteboardTypeString: @"example-1"}];
+    [app pollPB:nil];
+    Check([op jcListCount] == 1, "one row for the copy");
+    Check(app->pbDecidedGeneration == [app->jcPasteboard changeCount], "the recorded copy counts as decided");
+}
 """
 MODES = {
     "diagnostics-password-manager": "RunDiagnosticsPasswordManager",
@@ -127,6 +138,7 @@ MODES = {
     "diagnostics-image-with-capture-off": "RunDiagnosticsImageWithCaptureOff",
     "diagnostics-own-write": "RunDiagnosticsOwnWrite",
     "diagnostics-same-types-merge": "RunDiagnosticsSameTypesMerge",
+    "diagnostics-row-decides-its-copy": "RunDiagnosticsRowDecidesItsCopy",
 }
 
 
@@ -193,6 +205,9 @@ class DiagnosticsTypesRegressionTests(unittest.TestCase):
         self.assertTrue(tip.startswith("For troubleshooting: saves one row per copy with all of its data types "), tip)
         self.assertIn(" skip. A copy with the same data types as the newest row adds none, and with \"Remove duplicates\" "
                       "on, a listed row with the same types moves to the top. Use it ", tip)
+
+    def test_a_row_counts_as_a_decision_on_its_copy(self) -> None:
+        self.run_case("diagnostics-row-decides-its-copy")
 
     def test_flycuts_own_write_gives_no_row(self) -> None:
         self.run_case("diagnostics-own-write")

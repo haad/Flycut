@@ -70,6 +70,18 @@ Here's a complete list of keys you can use in the Bezel.
 
 Press the Search Hotkey (Control-Shift-S by default) to open the search window. Type to filter your clipboard history, use the arrow keys to navigate results and press Return to paste the selected item. You can change or clear the shortcut under "Search clipboard hotkey:" in Preferences.
 
+**Paste as Plain Text**
+
+Press the Paste as Plain Text hotkey (Option-Shift-Command-V by default, the shortcut Apple uses for "Paste and Match Style") to paste what is on the clipboard now, without its formatting such as fonts, colors and links, into the app you are working in. Command-V still pastes it with its formatting.
+
+For formatted text, Flycut puts the plain text on the clipboard for the paste and then puts back what you had copied: right after the app has read the plain text, or after three seconds if no app reads it. If you copy something else in the meantime, your new copy stays. Neither the plain text nor what Flycut puts back is added to your clipboard history; a copy you made just before is added once, as usual. Text without formatting, such as a password from a password manager, is pasted as it is, and the clipboard is not touched. If the clipboard holds no text (a picture, files from the Finder, or nothing), you hear the alert sound and nothing is pasted. The hotkey works while clipboard tracking is paused and needs the same Accessibility permission as pasting from the Bezel; while the Bezel, the search window or the clipping list is open, it only plays the alert sound.
+
+Putting back what you had copied counts as a new copy for other apps: a password manager that clears the clipboard after a while may no longer clear its copy if that copy also had formatting, a copy from a private window in Safari or Chrome no longer expires, another clipboard manager may record it once more, and the app you copied from is no longer the owner of the clipboard.
+
+While Flycut holds this hotkey, the app in front does not get it: in TextEdit, Mail, Notes and Safari ("Paste and Match Style") and in the Finder ("Paste Exactly"), Flycut's paste runs instead of the app's own command.
+
+On a new install Flycut no longer uses Shift-Command-V, so it does what each app makes of it again: the paste without formatting of Google Docs, Chrome and Firefox, "Paste as Quotation" in Mail, "Paste Selection" in Terminal and the Markdown preview in VS Code. If you used Flycut before and Shift-Command-V opens your Bezel, it stays that way, and Paste as Plain Text is on Option-Shift-Command-V for you too. If your Main Hotkey or Search Hotkey already was Option-Shift-Command-V, it stays there, and Paste as Plain Text starts without a hotkey.
+
 **Text Formatting**
 
 Flycut preserves the formatting (RTF and HTML) of copied text, so pasting an older clipping into a rich text editor keeps its bold, fonts, links, and colors. Plain-text-only targets are unaffected – they always receive the plain text. RTF and HTML are each kept up to 1 MiB; a larger format is dropped, and the plain text is always kept. Formatting data can contain more than the visible text, such as hidden markup or links; previews and search show the plain text only.
