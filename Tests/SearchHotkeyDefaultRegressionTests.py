@@ -110,10 +110,10 @@ static int FactoryDefault(AppController *controller)
     }
     if (ControlShift != 393216 || ([[search objectForKey:@"modifierFlags"] unsignedIntegerValue] & NSEventModifierFlagCommand))
         return 21;
-    // Same storage format as the main hotkey: Cocoa modifier flags (Shift-Command = 1179648).
+    // Same storage format as the main hotkey: Cocoa modifier flags (Control-Option-Command = 1835008).
     if ([[main objectForKey:@"keyCode"] integerValue] != 9 ||
-        [[main objectForKey:@"modifierFlags"] unsignedIntegerValue] != (NSEventModifierFlagShift | NSEventModifierFlagCommand) ||
-        [[main objectForKey:@"modifierFlags"] unsignedIntegerValue] != 1179648)
+        [[main objectForKey:@"modifierFlags"] unsignedIntegerValue] != (NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand) ||
+        [[main objectForKey:@"modifierFlags"] unsignedIntegerValue] != 1835008)
         return 22;
     return 0;
 }

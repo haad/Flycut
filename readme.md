@@ -10,7 +10,7 @@ Flycut is a clean and simple clipboard manager for developers. Based on the open
 
 This is an actively maintained fork, updated to work on the latest macOS versions.
 
-Every time you copy a code piece, Flycut stores it in history. Later, you can paste it using Shift-Command-V even if you have something different in your current clipboard. You can change the hotkey and other settings in preferences.
+Every time you copy a code piece, Flycut stores it in history. Later, you can paste it using Control-Option-Command-V even if you have something different in your current clipboard. You can change the hotkey and other settings in preferences.
 
 ## Install
 
@@ -27,7 +27,7 @@ Every time you copy a code piece, Flycut stores it in history. Later, you can pa
 
 | Shortcut | Action |
 |----------|--------|
-| Shift+Command+V | Open clipboard history (bezel) |
+| Control+Option+Command+V | Open clipboard history (bezel) |
 | Control+Shift+S | Open search window |
 
 ### Bezel Navigation

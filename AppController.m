@@ -26,6 +26,7 @@
 #import <CoreFoundation/CoreFoundation.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import "FlycutPasteKey.h"
+#import "FlycutHotkeyDefaults.h"
 #import "FlycutListPanel.h"
 #import <Carbon/Carbon.h>
 
@@ -470,10 +471,14 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 - (id)init
 {
 	[[NSUserDefaults standardUserDefaults] registerDefaults:[NSDictionary dictionaryWithObjectsAndKeys:
-		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:9],[NSNumber numberWithLong:1179648],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
-		@"ShortcutRecorder mainHotkey",
+		// The bezel and "Paste as plain text"; earlier users keep their bezel hotkey
+		// (FlycutCarryOverHotkeyDefaults in -awakeFromNib).
+		FlycutBezelHotkeyDefault(),
+		FlycutMainHotkeyKey,
+		FlycutPlainPasteHotkeyDefault(),
+		FlycutPlainPasteHotkeyKey,
 		// Search window: Control-Shift-S (keyCode 1 is the S key; Cocoa flags Control|Shift =
-		// 393216, stored like the main hotkey's Shift|Command = 1179648).  The old default,
+		// 393216, stored like the other hotkeys' Cocoa flags).  The old default,
 		// Shift-Command-S, is Save As... or Duplicate in most document apps, and the other
 		// Command combinations with S are mostly taken as well (Save, Save All, sidebar);
 		// Control-Shift-S is in none of the shortcut lists checked.  A value the user has
@@ -666,6 +671,8 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 - (void)awakeFromNib
 {
 	[self checkAndPerformSandboxDataMigration];
+	// Before anything of this launch stores a value or loads the recorders.
+	FlycutCarryOverHotkeyDefaults([NSUserDefaults standardUserDefaults], [[NSBundle mainBundle] bundleIdentifier]);
 
 	// Log startup diagnostics for accessibility troubleshooting
 	NSString *bundlePath = [[NSBundle mainBundle] bundlePath];

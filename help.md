@@ -6,13 +6,15 @@ Copy the same way as always.
 
 Paste the same way as always.
 
-Press the Main Hotkey (Shift-Command-V, by default) to access your clipboard history. Or just click the Flycut icon in the menu bar.
+Press the Main Hotkey (Control-Option-Command-V by default) to access your clipboard history. Or just click the Flycut icon in the menu bar.
+
+If you used Flycut before, your Main Hotkey stays as it was: Shift-Command-V, or the one you chose. To move to the new default, click the arrow next to the Main Hotkey in Preferences.
 
 **The Bezel**
 
 The Bezel is what you see when you press the Main Hotkey. It's the semi-transparent box that appears in the middle of your screen, showing you your clipboard history. Use the arrow keys to step through your history.
 
-If the "sticky bezel" option is enabled, there is no need to hold the command key. When you find something you want to paste, press Return and it is pasted while the Bezel closes automatically. If you don't want to paste, just press the Esc key.
+If the "sticky bezel" option is enabled, there is no need to hold the hotkey's modifier keys. When you find something you want to paste, press Return and it is pasted while the Bezel closes automatically. If you don't want to paste, just press the Esc key.
 
 **Bezel Keystrokes**
 
