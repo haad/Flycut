@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import pathlib
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -202,7 +203,7 @@ static NSDictionary *GeneralLabels(void)
 {
     return @{
         @"rememberNum": @"Restore default number of clippings to remember",
-        @"displayNum": @"Restore default number of clippings in the menu",
+        @"displayNum": @"Restore default number of rows in the menu",
         @"favoritesRememberNum": @"Restore default number of favorites to remember",
         @"skipPboardTypesList": @"Restore default pasteboard types",
         @"skipPasswordLengthsList": @"Restore default password lengths",
@@ -214,7 +215,7 @@ static NSString *IdentifierForKey(NSString *key)
     return [@"restoreDefault" stringByAppendingString:[[[key substringToIndex:1] uppercaseString] stringByAppendingString:[key substringFromIndex:1]]];
 }
 
-// As a committed edit or a stepper click: through the controller the NIB binds the field to.
+// As a committed edit: through the controller the NIB binds the field to.
 static void SetUserValue(NSString *key, id value)
 {
     NSDictionary *binding = [BoundControl(key, [NSTextField class]) infoForBinding:NSValueBinding];
@@ -400,9 +401,8 @@ static int GeneralButtons(void)
         if (failed) return failed;
         if (![button isHidden]) { fprintf(stderr, "%s is shown at the factory default\n", [identifier UTF8String]); return 91; }
         NSTextField *field = (NSTextField *)BoundControl(key, [NSTextField class]);
-        NSStepper *stepper = (NSStepper *)BoundControl(key, [NSStepper class]);
         if (field == nil) { fprintf(stderr, "no field bound to %s\n", [key UTF8String]); return 92; }
-        NSView *anchor = stepper ?: field;
+        NSView *anchor = field;
         NSRect frame = [button convertRect:[button bounds] toView:pane];
         if (!NSContainsRect([pane bounds], frame) || NSMinX(frame) < NSMaxX([anchor frame]) ||
             NSMinX(frame) > NSMaxX([anchor frame]) + 8 || fabs(NSMidY(frame) - NSMidY([field frame])) > 1.0) {
@@ -435,7 +435,7 @@ static NSText *Edit(NSTextField *field, NSString *text)
     return editor;
 }
 
-// The arrow follows the value while it changes: typing, stepping.
+// The arrow follows the value while it changes: typing, and a typed number once stored.
 static int GeneralLive(void)
 {
     NSTextField *lengths = (NSTextField *)BoundControl(@"skipPasswordLengthsList", [NSTextField class]);
@@ -450,19 +450,19 @@ static int GeneralLive(void)
     if (![lengthsButton isHidden]) { fprintf(stderr, "the same lengths without spaces count as custom\n"); return 104; }
     [window makeFirstResponder:nil];
 
-    NSStepper *stepper = (NSStepper *)BoundControl(@"displayNum", [NSStepper class]);
+    NSTextField *display = (NSTextField *)BoundControl(@"displayNum", [NSTextField class]);
     NSButton *displayButton = AnyRestoreButton(IdentifierForKey(@"displayNum"));
     NSInteger value = [[Registered() objectForKey:@"displayNum"] integerValue];
-    [stepper setIntegerValue:value + 1];
-    [stepper sendAction:[stepper action] to:[stepper target]];
+    [(NSTextView *)Edit(display, [NSString stringWithFormat:@"%ld", (long)value + 1]) doCommandBySelector:@selector(insertNewline:)];
+    [window makeFirstResponder:nil];
     if ([displayButton isHidden]) {
-        fprintf(stderr, "stepping does not show the arrow: stepper %ld stored %s\n", (long)[stepper integerValue],
+        fprintf(stderr, "a stored typed number does not show the arrow: field %s stored %s\n", [[display stringValue] UTF8String],
                 [[[[NSUserDefaults standardUserDefaults] objectForKey:@"displayNum"] description] UTF8String]);
         return 105;
     }
-    [stepper setIntegerValue:value];
-    [stepper sendAction:[stepper action] to:[stepper target]];
-    if (![displayButton isHidden]) { fprintf(stderr, "stepping back does not hide the arrow\n"); return 106; }
+    [(NSTextView *)Edit(display, [NSString stringWithFormat:@"%ld", (long)value]) doCommandBySelector:@selector(insertNewline:)];
+    [window makeFirstResponder:nil];
+    if (![displayButton isHidden]) { fprintf(stderr, "storing the default back does not hide the arrow\n"); return 106; }
     return 0;
 }
 
@@ -478,6 +478,8 @@ static int GeneralLive(void)
 @implementation FCRememberOperator
 - (int)rememberNum { return favorites ? favoritesRemember : remember; }
 - (int)jcListCount { return count; }
+// #17: -checkFavoritesRememberNumPref: asks which store is selected before switching.
+- (bool)favoritesStoreIsSelected { return favorites; }
 - (void)switchToFavoritesStore { favorites = YES; [calls addObject:@"switchToFavoritesStore"]; }
 - (void)restoreStashedStore { favorites = NO; [calls addObject:@"restoreStashedStore"]; }
 // The contract of -[FlycutOperator setRememberNum:forPrimaryStore:]: shrinking
@@ -509,7 +511,7 @@ static FCRememberOperator *Operator(int remember, int count, NSString *choice)
 }
 
 // Every General arrow restores the registered value; the remember limits go
-// through the operator's resize path like a stepper change.
+// through the operator's resize path like a typed change.
 static int GeneralRestore(void)
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -804,9 +806,9 @@ static int ArrowColumns(void)
     // General.
     NSView *pane = GeneralPane();
     NSDictionary *anchors = @{
-        @"rememberNum": BoundControl(@"rememberNum", [NSStepper class]),
-        @"displayNum": BoundControl(@"displayNum", [NSStepper class]),
-        @"favoritesRememberNum": BoundControl(@"favoritesRememberNum", [NSStepper class]),
+        @"rememberNum": BoundControl(@"rememberNum", [NSTextField class]),
+        @"displayNum": BoundControl(@"displayNum", [NSTextField class]),
+        @"favoritesRememberNum": BoundControl(@"favoritesRememberNum", [NSTextField class]),
         @"skipPboardTypesList": BoundControl(@"skipPboardTypesList", [NSTextField class]),
         @"skipPasswordLengthsList": BoundControl(@"skipPasswordLengthsList", [NSTextField class]),
         @"saveToLocation": [controller valueForKey:@"saveToLocationButton"],
@@ -1029,10 +1031,12 @@ int main(int argc, const char **argv)
         originalSetBezelWidth = method_setImplementation(class_getInstanceMethod([AppController class], @selector(setBezelWidth:)), (IMP)CountBezelWidth);
         originalSetBezelHeight = method_setImplementation(class_getInstanceMethod([AppController class], @selector(setBezelHeight:)), (IMP)CountBezelHeight);
         [controller buildAppearancesPreferencePanel];
-        if ([controller respondsToSelector:@selector(buildMainHotkeyRestoreDefaultButton)])
-            [controller buildMainHotkeyRestoreDefaultButton];
-        if ([controller respondsToSelector:@selector(buildGeneralRestoreDefaultButtons)])
-            [controller buildGeneralRestoreDefaultButtons];
+        // The arrow builders, and the number fields' builder that changes the row they
+        // stand in, in the order -awakeFromNib sends them (argv[3], read from AppController.m).
+        for (NSString *name in [[NSString stringWithUTF8String:argc > 3 ? argv[3] : ""] componentsSeparatedByString:@","]) {
+            SEL builder = NSSelectorFromString(name);
+            if ([name length] && [controller respondsToSelector:builder]) ((void (*)(id, SEL))objc_msgSend)(controller, builder);
+        }
         searchRecorder = [controller valueForKey:@"searchRecorder"];
         mainRecorder = [controller valueForKey:@"mainRecorder"];
         [prefs mapTabsToToolbar];
@@ -1130,8 +1134,18 @@ class PreferencesHotkeyRecorderRegressionTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.temp.cleanup()
 
+    @staticmethod
+    def builders() -> list[str]:
+        """The builders this fixture needs, in the order -[AppController awakeFromNib] sends them."""
+        source = (ROOT / "AppController.m").read_text()
+        start = source.index("- (void)awakeFromNib\n{")
+        body = source[start:source.index("\n}\n", start)]
+        wanted = ("buildMainHotkeyRestoreDefaultButton", "buildGeneralNumberFields", "buildGeneralRestoreDefaultButtons")
+        order = [name for name in re.findall(r"\[self (build\w+)\]", body) if name in wanted]
+        return list(dict.fromkeys(order)) or ["buildMainHotkeyRestoreDefaultButton", "buildGeneralRestoreDefaultButtons"]
+
     def run_mode(self, mode: str) -> None:
-        run = subprocess.run([str(self.binary), str(self.bundle), mode], cwd=ROOT, text=True,
+        run = subprocess.run([str(self.binary), str(self.bundle), mode, ",".join(self.builders())], cwd=ROOT, text=True,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
@@ -1159,7 +1173,7 @@ class PreferencesHotkeyRecorderRegressionTests(unittest.TestCase):
     def test_general_pane_has_restore_arrows_next_to_its_fields(self) -> None:
         self.run_mode("general-buttons")
 
-    def test_general_arrows_follow_typing_and_stepping(self) -> None:
+    def test_general_arrows_follow_typing_and_stored_typed_numbers(self) -> None:
         self.run_mode("general-live")
 
     def test_general_arrows_restore_registered_values_through_the_resize_path(self) -> None:

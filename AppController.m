@@ -14,17 +14,26 @@
 
 #import "AppController.h"
 #import "ClipboardGenerationPolicy.h"
+#import "FlycutMenuIcon.h"
+#import "AccessibilityPromptPolicy.h"
 #import "SGHotKey.h"
 #import "SGHotKeyCenter.h"
 #import "SRRecorderCell.h"
 #import "NSWindow+TrueCenter.h"
 #import "NSWindow+ULIZoomEffect.h"
 #import "FlycutImageStore.h"
-//#import "MJCloudKitUserDefaultsSync/MJCloudKitUserDefaultsSync.h"
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <ServiceManagement/ServiceManagement.h>
 #import "FlycutPasteKey.h"
+#import "FlycutListPanel.h"
+#import <Carbon/Carbon.h>
+
+@interface AppController () <FlycutListControllerDelegate>
+-(NSArray *)listCommandItems;
+-(bool)pasteClipping:(FlycutClipping *)clipping fromList:(FlycutList)list;
+-(bool)pasteFavoriteAtPosition:(int)position;
+@end
 
 @interface AppController ()
 -(void)updateRestoreDefaultButtons;
@@ -36,13 +45,25 @@
 // right of the control it belongs to.
 static const CGFloat FlycutRestoreArrowSide = 20.0;
 static const CGFloat FlycutRestoreArrowGap = 4.0;
+// The status item's button action that comes this soon after the mouse-down monitor
+// answered a press is that press again (seconds).
+static const NSTimeInterval kStatusItemSamePressInterval = 0.5;
 
 // What VoiceOver says about both hotkey fields (ShortcutRecorder has no
 // accessibility support of its own).
 static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then type the new shortcut. Escape cancels.";
 
+// VoiceOver reads a cell-based control (slider, stepper, pop-up button, text
+// field) through its cell, and the cell does not take the label set on the
+// control, so both get it.
+static void FlycutSetAccessibilityLabel(NSControl *control, NSString *label)
+{
+	[control setAccessibilityLabel:label];
+	[[control cell] setAccessibilityLabel:label];
+}
+
 // Keeps the arrows in step with the values: typing in a General field, a
-// bound stepper or field committing through the defaults controller, and the
+// bound field committing through the defaults controller, and the
 // Preferences window coming up. Lives as long as the app; holds the
 // controller weakly.
 @interface FlycutRestoreDefaultsObserver : NSObject
@@ -69,6 +90,148 @@ static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then t
 {
 	(void)keyPath; (void)object; (void)change; (void)context;
 	[controller updateRestoreDefaultButtons];
+}
+@end
+
+// "Remember", "Display in menu" and "Favorites" are numbers to type. Typing
+// only changes the text: the value is checked and stored when the editing ends
+// (Return, Tab, a click into another field, a pane change, the window
+// closing), so typing 100 never passes through 1 and 10, which would shrink
+// the history. The NIB's steppers held the limits; they are gone at run time
+// (-buildGeneralNumberFields), so the limits are here: Remember and Favorites
+// 10-999, "Display in menu" 5 up to the current "Remember" (the Display
+// stepper's maxValue was bound to it).
+static const NSInteger FlycutRememberNumLowest = 10;
+static const NSInteger FlycutRememberNumHighest = 999;
+static const NSInteger FlycutDisplayNumLowest = 5;
+
+@interface FlycutNumberFieldFormatter : NSNumberFormatter
+@end
+
+@implementation FlycutNumberFieldFormatter
+// Digits only, at most three: no limit of these settings has more.
+- (BOOL)isPartialStringValid:(NSString *)partialString newEditingString:(NSString **)newString errorDescription:(NSString **)error
+{
+	(void)newString; (void)error;
+	NSCharacterSet *other = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789"] invertedSet];
+	return [partialString length] <= 3 && [partialString rangeOfCharacterFromSet:other].location == NSNotFound;
+}
+@end
+
+@interface FlycutNumberFieldEditing : NSObject <NSTextFieldDelegate>
+{
+	__weak AppController *controller;
+	NSMutableArray *fields;
+	NSMutableArray *keys;
+}
+- (instancetype)initWithController:(AppController *)aController;
+- (void)addField:(NSTextField *)field forKey:(NSString *)key;
+@end
+
+@implementation FlycutNumberFieldEditing
+- (instancetype)initWithController:(AppController *)aController
+{
+	self = [super init];
+	if (self != nil) {
+		controller = aController;
+		fields = [[NSMutableArray alloc] init];
+		keys = [[NSMutableArray alloc] init];
+	}
+	return self;
+}
+
+- (void)dealloc
+{
+	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	[fields release];
+	[keys release];
+	[super dealloc];
+}
+
+- (void)addField:(NSTextField *)field forKey:(NSString *)key
+{
+	[fields addObject:field];
+	[keys addObject:key];
+}
+
+- (NSString *)keyForControl:(id)control
+{
+	NSUInteger index = [fields indexOfObjectIdenticalTo:control];
+	return index == NSNotFound ? nil : [keys objectAtIndex:index];
+}
+
+// A value as the field's binding sees it now.
+- (NSInteger)storedValueForKey:(NSString *)key ofField:(NSControl *)field
+{
+	NSDictionary *binding = [field infoForBinding:NSValueBinding];
+	return [[[binding objectForKey:NSObservedObjectKey] valueForKeyPath:[@"values." stringByAppendingString:key]] integerValue];
+}
+
+// The value stored now, as the field shows it.
+- (NSString *)storedStringForField:(NSControl *)field
+{
+	NSDictionary *binding = [field infoForBinding:NSValueBinding];
+	id value = [[binding objectForKey:NSObservedObjectKey] valueForKeyPath:[binding objectForKey:NSObservedKeyPathKey]];
+	return [NSString stringWithFormat:@"%ld", (long)[value integerValue]];
+}
+
+// The text is final here. An empty field, or one showing the stored value,
+// keeps the stored value as it is; a typed number outside the limits becomes
+// the nearest allowed one, silently, as the field shows it. What is left is
+// stored by the field's binding, then the field sends the action the stepper
+// sent, so the value goes the stepper's way (Resize Stack, "Display in menu"
+// following a smaller "Remember").
+- (BOOL)control:(NSControl *)control textShouldEndEditing:(NSText *)fieldEditor
+{
+	NSString *key = [self keyForControl:control];
+	if (key == nil)
+		return YES;
+	NSString *text = [fieldEditor string];
+	NSString *stored = [self storedStringForField:control];
+	if ([text length] == 0) {
+		[fieldEditor setString:stored];
+		return YES;
+	}
+	if ([text isEqualToString:stored])
+		return YES;
+	NSInteger value = [text integerValue];
+	BOOL display = [key isEqualToString:@"displayNum"];
+	NSInteger lowest = display ? FlycutDisplayNumLowest : FlycutRememberNumLowest;
+	NSInteger highest = display ? MAX(lowest, [self storedValueForKey:@"rememberNum" ofField:control]) : FlycutRememberNumHighest;
+	NSInteger allowed = MIN(MAX(value, lowest), highest);
+	if (allowed != value)
+		[fieldEditor setString:[NSString stringWithFormat:@"%ld", (long)allowed]];
+	return YES;
+}
+
+// Escape brings back the stored value; nothing is stored.
+- (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)command
+{
+	if (command != @selector(cancelOperation:) || [self keyForControl:control] == nil)
+		return NO;
+	[textView setString:[self storedStringForField:control]];
+	[textView selectAll:nil];
+	[controller updateRestoreDefaultButtons];
+	return YES;
+}
+
+// A letter, a sign or a fourth digit is not taken, and nothing else shows
+// that; AppKit itself stays silent.
+- (void)control:(NSControl *)control didFailToValidatePartialString:(NSString *)string errorDescription:(NSString *)error
+{
+	(void)string; (void)error;
+	if ([self keyForControl:control] != nil)
+		NSBeep();
+}
+
+// Closing the window does not end the editing by itself: what was typed is
+// stored as on Return.
+- (void)windowWillClose:(NSNotification *)notification
+{
+	NSWindow *window = [notification object];
+	id responder = [window firstResponder];
+	if ([responder isKindOfClass:[NSText class]] && [self keyForControl:[(NSText *)responder delegate]] != nil)
+		[window makeFirstResponder:nil];
 }
 @end
 
@@ -102,13 +265,128 @@ static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then t
 
 @end
 
+@interface FCPasteTransaction : NSObject {
+@private
+	NSRunningApplication *_targetApplication;
+	pid_t _targetProcessIdentifier;
+	NSUInteger _generation;
+	NSUInteger _focusCheckAttempts;
+	BOOL _selectionStarted;
+	NSString *_selectedPayload;
+	NSString *_selectedPayloadType;
+	NSData *_selectedPayloadData;
+	NSInteger _ownedChangeCount;
+	NSArray *_previousPasteboardItems;
+	BOOL _clipboardCommitted;
+}
+@property(nonatomic, readonly, retain) NSRunningApplication *targetApplication;
+@property(nonatomic, readonly) pid_t targetProcessIdentifier;
+@property(nonatomic, readonly) NSUInteger generation;
+@property(nonatomic, assign) NSUInteger focusCheckAttempts;
+@property(nonatomic, assign) BOOL selectionStarted;
+@property(nonatomic, copy) NSString *selectedPayload;
+// An image selection owns one representation instead of text: its type and bytes.
+@property(nonatomic, copy) NSString *selectedPayloadType;
+@property(nonatomic, copy) NSData *selectedPayloadData;
+@property(nonatomic, assign) NSInteger ownedChangeCount;
+@property(nonatomic, copy) NSArray *previousPasteboardItems;
+// YES once the selection is meant to stay on the clipboard: it was copied on purpose
+// (the bezel's copy-only action) or the paste attempt ended without a cancellation.
+@property(nonatomic, assign) BOOL clipboardCommitted;
+- (id)initWithApplication:(NSRunningApplication *)application
+		processIdentifier:(pid_t)processIdentifier
+			 generation:(NSUInteger)generation;
+- (BOOL)hasSelectedPayload;
+@end
+
+@implementation FCPasteTransaction
+@synthesize targetApplication = _targetApplication;
+@synthesize targetProcessIdentifier = _targetProcessIdentifier;
+@synthesize generation = _generation;
+@synthesize focusCheckAttempts = _focusCheckAttempts;
+@synthesize selectionStarted = _selectionStarted;
+@synthesize selectedPayload = _selectedPayload;
+@synthesize selectedPayloadType = _selectedPayloadType;
+@synthesize selectedPayloadData = _selectedPayloadData;
+@synthesize ownedChangeCount = _ownedChangeCount;
+@synthesize previousPasteboardItems = _previousPasteboardItems;
+@synthesize clipboardCommitted = _clipboardCommitted;
+
+- (id)initWithApplication:(NSRunningApplication *)application
+		processIdentifier:(pid_t)processIdentifier
+			 generation:(NSUInteger)generation
+{
+	self = [super init];
+	if ( self ) {
+		_targetApplication = [application retain];
+		_targetProcessIdentifier = processIdentifier;
+		_generation = generation;
+		_focusCheckAttempts = 0;
+		_ownedChangeCount = -1;
+	}
+	return self;
+}
+
+- (BOOL)hasSelectedPayload
+{
+	return _selectedPayload != nil || _selectedPayloadData != nil;
+}
+
+- (void)dealloc
+{
+	[_previousPasteboardItems release];
+	[_selectedPayloadData release];
+	[_selectedPayloadType release];
+	[_selectedPayload release];
+	[_targetApplication release];
+	[super dealloc];
+}
+@end
+
 @interface AppController ()
 // Returns the source GIF URL embedded in the clipboard HTML (e.g. Chrome "Copy Image"),
 // but only for https URLs that point at a .gif. nil otherwise.
 -(NSURL *)animatedGifURLFromPasteboard;
-// Asynchronously downloads url and, if it is an animated GIF, adds it as a clipping.
--(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL;
+// Asynchronously downloads url and, if it is an animated GIF, adds it as a clipping
+// while the clipboard is still at the given generation.
+-(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL pasteboardGeneration:(NSInteger)generation;
+// YES while an asynchronously read image may still be added for that clipboard generation.
+-(BOOL)isImageCaptureCurrentForGeneration:(NSInteger)generation;
+- (NSRunningApplication *)frontmostApplicationForPaste;
+- (void)rememberFrontmostApplicationForPaste;
+- (BOOL)pasteTransactionIsCurrent:(FCPasteTransaction *)transaction;
+- (void)clearPasteTransactionIfCurrent:(FCPasteTransaction *)transaction;
+- (void)finishPasteTransactionKeepingSelection:(FCPasteTransaction *)transaction;
+- (void)clearRememberedPasteTarget;
+- (void)hideAppForPasteTransaction:(FCPasteTransaction *)transaction;
+- (void)completePasteInRememberedApplication:(FCPasteTransaction *)transaction;
+- (void)postPasteAndClearRememberedApplication:(FCPasteTransaction *)transaction;
+- (void)cancelPendingPasteCompletion;
+- (NSArray *)snapshotPasteboardItems;
+- (void)restorePasteboardForCancelledTransaction:(FCPasteTransaction *)transaction;
+- (BOOL)pasteboardIsOwnedByTransaction:(FCPasteTransaction *)transaction;
+- (void)hideSearchWindowPreservingPasteTransaction;
+- (BOOL)postCommandVToProcessIdentifier:(pid_t)processIdentifier;
+-(void)configureStatusItemInteraction;
+-(IBAction)statusItemButtonPressed:(id)sender;
+-(NSEvent *)handleStatusItemMouseDown:(NSEvent *)event;
+-(void)handleStatusItemEvent:(NSEvent *)event;
+-(void)showStatusItemMenu;
+-(void)updateMenuBarIcon;
+-(void)updateClipboardTrackingMenuItem;
+-(void)setClipboardTrackingPaused:(BOOL)paused;
+-(IBAction)toggleClipboardTracking:(id)sender;
+-(void)setupClipboardTrackingMenuItem;
+-(void)refreshMenuIconColorControls;
+-(IBAction)toggleMenuIconCustomColors:(id)sender;
+-(IBAction)setActiveMenuIconColor:(id)sender;
+-(IBAction)setPausedMenuIconColor:(id)sender;
+-(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY;
+-(void)buildGeneralPermissionsPreferenceRow;
+-(NSString *)bezelCounterString;
 @end
+
+static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 
 @implementation AppController
 
@@ -118,14 +396,20 @@ static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then t
 	[[NSUserDefaults standardUserDefaults] registerDefaults:[NSDictionary dictionaryWithObjectsAndKeys:
 		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:9],[NSNumber numberWithLong:1179648],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
 		@"ShortcutRecorder mainHotkey",
-		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:1],[NSNumber numberWithLong:1179648|NSEventModifierFlagShift],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
+		// Search window: Control-Shift-S (keyCode 1 is the S key; Cocoa flags Control|Shift =
+		// 393216, stored like the main hotkey's Shift|Command = 1179648).  The old default,
+		// Shift-Command-S, is Save As... or Duplicate in most document apps, and the other
+		// Command combinations with S are mostly taken as well (Save, Save All, sidebar);
+		// Control-Shift-S is in none of the shortcut lists checked.  A value the user has
+		// stored, a cleared field included, lives in the user domain and wins over this.
+		[NSDictionary dictionaryWithObjects:[NSArray arrayWithObjects:[NSNumber numberWithInt:1],[NSNumber numberWithLong:NSEventModifierFlagControl|NSEventModifierFlagShift],nil] forKeys:[NSArray arrayWithObjects:@"keyCode",@"modifierFlags",nil]],
 		@"ShortcutRecorder searchHotkey",
-		[NSNumber numberWithInt:10],
+		// "Display in menu": the height of the menu-bar list in rows (it lists every
+		// clipping and scrolls), capped to the screen.
+		[NSNumber numberWithInt:20],
 		@"displayNum",
 		[NSNumber numberWithInt:40],
 		@"displayLen",
-		[NSNumber numberWithInt:0],
-		@"menuIcon",
 		[NSNumber numberWithFloat:.25],
 		@"bezelAlpha",
 		[NSNumber numberWithBool:NO],
@@ -162,30 +446,6 @@ static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then t
         @"downloadAnimatedGIFs",
         nil]];
 
-	/* For testing, the ability to force initial values of the sync settings:
-	[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:NO]
-											 forKey:@"syncSettingsViaICloud"];
-	[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:NO]
-											 forKey:@"syncClippingsViaICloud"];*/
-
-	settingsSyncList = @[@"displayNum",
-						 @"displayLen",
-						 @"menuIcon",
-						 @"bezelAlpha",
-						 @"stickyBezel",
-						 @"wraparoundBezel",
-						 @"loadOnStartup",
-						 @"menuSelectionPastes",
-						 @"bezelWidth",
-						 @"bezelHeight",
-						 @"popUpAnimation",
-						 @"displayClippingSource",
-						 @"saveForgottenClippings",
-						 @"saveForgottenFavorites",
-                         @"suppressAccessibilityAlert",
-                        ];
-	[settingsSyncList retain];
-
 	clipboardReadQueue = dispatch_queue_create("com.Flycut.clipboardReadQueue", DISPATCH_QUEUE_SERIAL);
 
 	// Initialize search window pointers to nil
@@ -195,27 +455,10 @@ static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then t
 	searchResults = nil;
 	isSearchWindowDisplayed = NO;
 
+	[FlycutMenuIcon registerColorDefaults:[NSUserDefaults standardUserDefaults]];
+
 	return [super init];
 }
-
-//- (void)registerOrDeregisterICloudSync
-//{
-//	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"syncSettingsViaICloud"] ) {
-//		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationChanges forTarget:self];
-//		[[MJCloudKitUserDefaultsSync sharedSync] addNotificationFor:MJSyncNotificationChanges withSelector:@selector(checkPreferencesChanges:) withTarget: self];
-//		// Not registering for conflict notifications, since we just sync settings, and if the settings are conflictingly adjusted simultaneously on two systems there is nothing to say which setting is better.
-//
-//		[[MJCloudKitUserDefaultsSync sharedSync] startWithKeyMatchList:settingsSyncList
-//					withContainerIdentifier:kiCloudId];
-//	}
-//	else {
-//		[[MJCloudKitUserDefaultsSync sharedSync] stopForKeyMatchList:settingsSyncList];
-//
-//		[[MJCloudKitUserDefaultsSync sharedSync] removeNotificationsFor:MJSyncNotificationChanges forTarget:self];
-//	}
-//
-//	[flycutOperator registerOrDeregisterICloudSync];
-//}
 
 - (void)openAccessibilitySettings {
     NSString *urlString;
@@ -229,7 +472,8 @@ static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then t
 }
 
 - (void)requestAccessibilityWithPrompt {
-    // This method WILL trigger the system prompt if permissions are not granted
+    // Ask macOS to present consent asynchronously. The OS decides whether to show
+    // a prompt; this call neither grants access nor resumes an aborted paste.
     NSLog(@"[Accessibility] User requested system prompt for accessibility permissions");
     
     NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
@@ -240,46 +484,23 @@ static NSString *const FlycutHotkeyRecorderHelp = @"Click or press Space, then t
     
     NSLog(@"[Accessibility] After prompt request - Bundle: %@, ID: %@, Trusted: %@", 
           bundlePath, bundleID, trusted ? @"YES" : @"NO");
-    
-    if (!trusted) {
-        // Give the system a moment to show the prompt, then open settings
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self openAccessibilitySettings];
-        });
-    }
 }
 
 - (void)showAccessibilityAlert {
-    BOOL suppressAlert = [[NSUserDefaults standardUserDefaults] boolForKey:@"suppressAccessibilityAlert"];
     NSDictionary* options = @{(id) (kAXTrustedCheckOptionPrompt): @NO};
     BOOL trusted = AXIsProcessTrustedWithOptions((CFDictionaryRef) (options));
     
     // Log context for diagnostics
     NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    NSLog(@"[Accessibility] Alert check - Bundle: %@, ID: %@, Trusted: %@, Suppressed: %@", 
-          bundlePath, bundleID, trusted ? @"YES" : @"NO", suppressAlert ? @"YES" : @"NO");
+    NSLog(@"[Accessibility] Permission check - Bundle: %@, ID: %@, Trusted: %@",
+          bundlePath, bundleID, trusted ? @"YES" : @"NO");
     
-    if (!suppressAlert && &AXIsProcessTrustedWithOptions != NULL && !trusted) {
-        NSAlert *alert = [[NSAlert alloc] init];
-        [alert setMessageText:@"Flycut"];
-        [alert setInformativeText:@"For correct functioning of the app please tick Flycut in Accessibility apps list.\n\nIf Flycut is already listed but paste doesn't work, remove it from the list, then add it again and restart Flycut."];
-        [alert addButtonWithTitle:@"Open Settings"];
-        [alert addButtonWithTitle:@"Request System Prompt"];
-        alert.showsSuppressionButton = YES;
-        NSModalResponse response = [alert runModal];
-        
-        if (alert.suppressionButton.state == NSControlStateValueOn) {
-            [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:YES]
-                                                     forKey:@"suppressAccessibilityAlert"];
-        }
-        [alert release];
-        
-        if (response == NSAlertFirstButtonReturn) {
-            [self openAccessibilitySettings];
-        } else if (response == NSAlertSecondButtonReturn) {
-            [self requestAccessibilityWithPrompt];
-        }
+    if (&AXIsProcessTrustedWithOptions != NULL && !trusted) {
+        // The paste paths (-fakeCommandV, -postCommandVToProcessIdentifier:) gate this
+        // explicit paste action once per session.
+        // Let macOS own consent and Settings navigation, without a prerequisite alert.
+        [self requestAccessibilityWithPrompt];
     }
 }
 
@@ -346,11 +567,16 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	[self buildAppearancesPreferencePanel];
 
 	[self buildMainHotkeyRestoreDefaultButton];
+	[self buildGeneralNumberFields];
 	[self buildGeneralRestoreDefaultButtons];
+	[self buildGeneralPermissionsPreferenceRow];
+	[self buildGeneralAccessibilityLabels];
 	[self loadHotkeyRecorderCombos];
 
 	// Initialize the FlycutOperator
 	flycutOperator = [[FlycutOperator alloc] init];
+	// The operator has registered its defaults; nothing has filtered a copy yet.
+	[FlycutOperator carryOverConcealedTypesSetting];
 	flycutOperator.delegate = self;
 	[flycutOperator setClippingsStoreDelegate:self];
 	[flycutOperator setFavoritesStoreDelegate:self];
@@ -358,6 +584,9 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 						 withDisplayLength:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayLen"]
 						  withSaveSelector:@selector(savePreferencesOnDict:)
 								 forTarget:self];
+	// Creating the image store removes temporary image copies that an earlier Flycut
+	// process left behind (it ended without cleaning up), even if no image is used.
+	[FlycutImageStore sharedStore];
 
     [bezel setColor:NO];
     
@@ -368,26 +597,19 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	dateFormat = [[NSDateFormatter alloc] init];
 	[dateFormat setDateFormat:@"EEEE, MMMM dd 'at' h:mm a"];
 
-	// Create our pasteboard interface
+	// Observe the current pasteboard without replacing its contents.
     jcPasteboard = [NSPasteboard generalPasteboard];
-    [jcPasteboard declareTypes:[NSArray arrayWithObject:NSPasteboardTypeString] owner:nil];
     pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
 
 	// Build the statusbar menu
     statusItem = [[[NSStatusBar systemStatusBar]
             statusItemWithLength:NSVariableStatusItemLength] retain];
     [statusItem setHighlightMode:YES];
-    [self switchMenuIconTo: [[NSUserDefaults standardUserDefaults] integerForKey:@"menuIcon"]];
-	[statusItem setMenu:jcMenu];
+	[self setupClipboardTrackingMenuItem];
+	[self updateMenuBarIcon];
     [jcMenu setDelegate:self];
-    jcMenuBaseItemsCount = [[[[jcMenu itemArray] reverseObjectEnumerator] allObjects] count];
+	[self configureStatusItemInteraction];
     [statusItem setEnabled:YES];
-
-    // If our preferences indicate that we are saving, we may have loaded the dictionary from the
-    // saved plist and should update the menu.
-	if ( [[NSUserDefaults standardUserDefaults] integerForKey:@"savePreference"] >= 1 ) {
-        [self updateMenu];
-	}
 
 	// Build our listener timer
 	NSDate *oneSecondFromNow = [NSDate dateWithTimeIntervalSinceNow:1.0];
@@ -397,7 +619,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 										   selector:@selector(pollPB:)
 										   userInfo:nil
 											repeats:YES];
-	// Assign it to NSRunLoopCommonModes so that it will still poll while the menu is open.  Using a simple NSTimer scheduledTimerWithTimeInterval: would result in polling that stops while the menu is active.  In the past this was okay but with Universal Clipboard a new clipping an arrive while the user has the menu open.
+	// Assign it to NSRunLoopCommonModes so the timer keeps ticking while the menu is open.  Using a simple NSTimer scheduledTimerWithTimeInterval: would suspend polling during menu tracking.  Note that -pollPB: intentionally skips capture while the menu or search window is open (a new clipping inserted mid-selection would shift the indices and cause the wrong entry to be pasted); the tick still runs so capture resumes promptly, and menuDidClose: performs a catch-up poll.
 	[[NSRunLoop currentRunLoop] addTimer:pollPBTimer forMode:NSRunLoopCommonModes];
 
     // Finish up
@@ -411,12 +633,6 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     BOOL isEnabled = (loginItem.status == SMAppServiceStatusEnabled);
     [[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:isEnabled]
                                              forKey:@"loadOnStartup"];
-//    [self registerOrDeregisterICloudSync];
-
-    [NSApp activateIgnoringOtherApps: YES];
-    
-    // Check if the app has Accessibility permission
-    [self showAccessibilityAlert];
 }
 
 -(void)savePreferencesOnDict:(NSMutableDictionary *)saveDict
@@ -429,53 +645,437 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 
 -(void)menuWillOpen:(NSMenu *)menu
 {
-    NSEvent *event = [NSApp currentEvent];
-    if([event modifierFlags] & NSEventModifierFlagOption) {
-        [menu cancelTracking];
-        bool disableStore = [self toggleMenuIconDisabled];
-        // Captures still in flight belong to the previous epoch and are discarded,
-        // even when capture is resumed before they finish.
-        clipboardCaptureEpoch += 1;
-        if (!disableStore)
-        {
-            // Update the pbCount so we don't enable and have it immediately copy the thing the user was trying to avoid.
-            // Code copied from pollPB, which is disabled at this point, so the "should be okay" should still be okay.
-
-            // Reload pbCount with the current changeCount
-            // Probably poor coding technique, but pollPB should be the only thing messing with pbCount, so it should be okay
-            [pbCount release];
-            pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
-        }
-        [flycutOperator setDisableStoreTo:disableStore];
-    }
-    // Note: Removed the search box activation code. The search box in the menu is for manual use only.
-    // Users should use the dedicated search window (cmd-shift-s) for keyboard-driven search.
+    (void)menu;
+    // Freeze clipping capture while the menu is open so the item indices the user sees stay
+    // stable until they make a selection (see -pollPB:).
+    isMenuOpen = YES;
+    [self updateClipboardTrackingMenuItem];
+    // Option-click is handled before AppKit starts tracking the menu (pause/resume goes
+    // through -setClipboardTrackingPaused:, which also advances the capture epoch).
 }
 
 -(void)menuDidClose:(NSMenu *)menu
 {
-    // Menu closed - no special handling needed now that we removed search box activation
+    // Resume clipping capture and immediately pick up anything that landed on the pasteboard
+    // while the menu was open (a selection's own paste is ignored via pbBlockCount in -pollPB:).
+    isMenuOpen = NO;
+    [self pollPB:nil];
 }
 
--(bool)toggleMenuIconDisabled
+-(void)configureStatusItemInteraction
 {
-    // Toggles the "disabled" look of the menu icon.  Returns if the icon looks disabled or not, allowing the caller to decide if anything is actually being disabled or if they just wanted the icon to be a status display.
-    if (nil == statusItemText)
-    {
-        statusItemText = statusItem.button.title;
-        statusItemImage = statusItem.button.image;
-        statusItem.button.title = @"";
-        statusItem.button.image = [NSImage imageNamed:@"com.generalarcade.flycut.xout.16.png"];
-        return true;
+    NSStatusBarButton *button = [statusItem button];
+    [statusItem setMenu:nil];
+    [button setTarget:self];
+    [button setAction:@selector(statusItemButtonPressed:)];
+    [button sendActionOn:(NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown)];
+
+    if (statusItemMouseDownMonitor != nil) {
+        [NSEvent removeMonitor:statusItemMouseDownMonitor];
+        [statusItemMouseDownMonitor release];
+        statusItemMouseDownMonitor = nil;
     }
-    else
-    {
-        statusItem.button.title = statusItemText;
-        statusItem.button.image = statusItemImage;
-        statusItemText = nil;
-        statusItemImage = nil;
+
+    __weak AppController *weakSelf = self;
+    statusItemMouseDownMonitor = [[NSEvent
+        addLocalMonitorForEventsMatchingMask:(NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown)
+        handler:^NSEvent *(NSEvent *event) {
+            AppController *controller = weakSelf;
+            if (controller == nil)
+                return event;
+            return [controller handleStatusItemMouseDown:event];
+        }] retain];
+}
+
+-(IBAction)statusItemButtonPressed:(id)sender
+{
+    (void)sender;
+    // The button's action: VoiceOver's press, or a press the mouse-down monitor did not see.
+    // One press is answered once: right after the monitor answered a press, the action is
+    // that press arriving a second time.
+    NSTimeInterval now = [[NSProcessInfo processInfo] systemUptime];
+    if (now - statusItemMouseDownHandledAt < kStatusItemSamePressInterval)
+        return;
+    // A press that closed the list on its way here (key focus, the menu bar) leaves it closed.
+    if ([listController closeForStatusItemPressAt:now])
+        return;
+    [self showStatusItemMenu];
+}
+
+-(NSEvent *)handleStatusItemMouseDown:(NSEvent *)event
+{
+    NSStatusBarButton *button = [statusItem button];
+    if (button == nil || [event window] != [button window])
+        return event;
+
+    NSPoint location = [button convertPoint:[event locationInWindow] fromView:nil];
+    if (!NSPointInRect(location, [button bounds]))
+        return event;
+
+    [self handleStatusItemEvent:event];
+    return nil;
+}
+
+-(void)handleStatusItemEvent:(NSEvent *)event
+{
+    NSEventType type = [event type];
+    BOOL isMouseDown = event != nil &&
+        (type == NSEventTypeLeftMouseDown || type == NSEventTypeRightMouseDown);
+    NSEventModifierFlags eventModifiers = [event modifierFlags];
+    CGEventFlags liveModifiers = CGEventSourceFlagsState(kCGEventSourceStateCombinedSessionState);
+    BOOL optionKeyIsDown = (eventModifiers & NSEventModifierFlagOption) != 0 ||
+        (liveModifiers & kCGEventFlagMaskAlternate) != 0;
+
+    if (isMouseDown && optionKeyIsDown) {
+        [self toggleClipboardTracking:nil];
+        return;
     }
-    return false;
+
+    // A press that found the list open is the second click and closes it, as with a menu.
+    // The press may have closed the list before it got here: on macOS 27 the menu bar
+    // (MenuBarAgent) hands the press to Flycut about 50 ms after the list closed (system
+    // log of build 9's sight test), and the panel may lose key focus to it. Such a close within a moment of the press is
+    // this press's; it must not open the list again (-closeForStatusItemPressAt:).
+    NSTimeInterval pressTime = isMouseDown ? [event timestamp] : [[NSProcessInfo processInfo] systemUptime];
+    if ([listController closeForStatusItemPressAt:pressTime]) {
+        if (isMouseDown)
+            statusItemMouseDownHandledAt = [[NSProcessInfo processInfo] systemUptime];
+        return;
+    }
+    BOOL listWasOpen = [listController isOpen];
+    [self showStatusItemMenu];
+    // Like a menu: the list follows the pressed button, so press, drag and release on a
+    // row chooses it.
+    if (isMouseDown && !listWasOpen && [listController isOpen])
+        [listController trackMouseFromEvent:event];
+    if (isMouseDown)
+        statusItemMouseDownHandledAt = [[NSProcessInfo processInfo] systemUptime];
+}
+
+-(void)showStatusItemMenu
+{
+    if (statusItem == nil || jcMenu == nil)
+        return;
+
+    // A list in a non-activating panel instead of the status menu: views inside an
+    // NSMenu get no keyboard events, and the list needs keys (search, Cmd-Delete,
+    // Cmd-Z) without activating Flycut, so pasting still goes to the user's application.
+    if (listController == nil)
+        listController = [[FlycutListController alloc] initWithOperator:flycutOperator delegate:self];
+    // A second click on the status item closes the list, as with a menu.
+    if ([listController isOpen]) {
+        [listController close];
+        return;
+    }
+    [listController setCommandItems:[self listCommandItems]];
+    // "Display in menu" is the list's height in rows; the list holds every clipping.
+    [listController setVisibleRows:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"]];
+    NSStatusBarButton *button = [statusItem button];
+    NSRect anchor = [[button window] convertRectToScreen:[button convertRect:[button bounds] toView:nil]];
+    [listController openBelowRect:anchor onScreen:[[button window] screen]];
+}
+
+-(void)updateMenuBarIcon
+{
+    BOOL paused = [flycutOperator storeDisabled];
+    NSColor *tintColor = [FlycutMenuIcon tintColorForPaused:paused
+                                               userDefaults:[NSUserDefaults standardUserDefaults]];
+    statusItem.button.title = @"";
+    statusItem.button.image = [FlycutMenuIcon imageForPaused:paused tintColor:tintColor];
+    statusItem.button.contentTintColor = nil;
+    statusItem.button.toolTip = paused ? @"Flycut – Clipboard Tracking Paused" : @"Flycut – Clipboard Tracking Active";
+    statusItem.button.accessibilityLabel = paused ? @"Flycut, clipboard tracking paused" : @"Flycut, clipboard tracking active";
+}
+
+-(void)updateClipboardTrackingMenuItem
+{
+    BOOL paused = [flycutOperator storeDisabled];
+    [clipboardTrackingMenuItem setTitle:paused ? @"Resume Clipboard Tracking" : @"Pause Clipboard Tracking"];
+}
+
+-(void)setClipboardTrackingPaused:(BOOL)paused
+{
+    BOOL wasPaused = [flycutOperator storeDisabled];
+    [flycutOperator setDisableStoreTo:paused];
+
+    // Captures still in flight belong to the previous epoch and are discarded,
+    // even when capture is resumed before they finish.
+    if (wasPaused != paused)
+        clipboardCaptureEpoch += 1;
+
+    // Ignore clipboard changes made intentionally while tracking was paused.
+    if (wasPaused && !paused) {
+        [pbCount release];
+        pbCount = [[NSNumber numberWithInt:[jcPasteboard changeCount]] retain];
+    }
+
+    [self updateMenuBarIcon];
+    [self updateClipboardTrackingMenuItem];
+}
+
+-(IBAction)toggleClipboardTracking:(id)sender
+{
+    (void)sender;
+    [self setClipboardTrackingPaused:![flycutOperator storeDisabled]];
+}
+
+-(void)setupClipboardTrackingMenuItem
+{
+    clipboardTrackingMenuItem = [[NSMenuItem alloc] initWithTitle:@"Pause Clipboard Tracking"
+                                                            action:@selector(toggleClipboardTracking:)
+                                                     keyEquivalent:@""];
+    [clipboardTrackingMenuItem setTarget:self];
+
+    NSInteger insertionIndex = [jcMenu indexOfItemWithTarget:self andAction:@selector(showPreferencePanel:)];
+    if (insertionIndex < 0)
+        insertionIndex = [jcMenu numberOfItems];
+    [jcMenu insertItem:clipboardTrackingMenuItem atIndex:insertionIndex];
+    [self updateClipboardTrackingMenuItem];
+}
+
+-(void)refreshMenuIconColorControls
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    BOOL enabled = [defaults boolForKey:FlycutMenuIconCustomColorsEnabledKey];
+    NSColor *activeColor = [FlycutMenuIcon configuredColorForPaused:NO userDefaults:defaults];
+    NSColor *pausedColor = [FlycutMenuIcon configuredColorForPaused:YES userDefaults:defaults];
+
+    [menuIconCustomColorsCheckbox setState:enabled ? NSControlStateValueOn : NSControlStateValueOff];
+    [menuIconActiveColorWell setColor:activeColor];
+    [menuIconPausedColorWell setColor:pausedColor];
+    [menuIconActiveColorWell setEnabled:enabled];
+    [menuIconPausedColorWell setEnabled:enabled];
+    [menuIconActivePreview setContentTintColor:enabled ? activeColor : nil];
+    [menuIconPausedPreview setContentTintColor:enabled ? pausedColor : nil];
+}
+
+-(IBAction)toggleMenuIconCustomColors:(id)sender
+{
+    BOOL enabled = [sender state] == NSControlStateValueOn;
+    [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:FlycutMenuIconCustomColorsEnabledKey];
+    [self refreshMenuIconColorControls];
+    [self updateMenuBarIcon];
+}
+
+-(IBAction)setActiveMenuIconColor:(id)sender
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [FlycutMenuIcon setTintColor:[sender color] forPaused:NO userDefaults:defaults];
+    [self refreshMenuIconColorControls];
+    [self updateMenuBarIcon];
+}
+
+-(IBAction)setPausedMenuIconColor:(id)sender
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [FlycutMenuIcon setTintColor:[sender color] forPaused:YES userDefaults:defaults];
+    [self refreshMenuIconColorControls];
+    [self updateMenuBarIcon];
+}
+
+-(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY
+{
+    // One line at the pitch of the checkbox rows above it, every control
+    // exactly as high as the checkbox and centred on its line: the color wells
+    // use the mini control size (16 pt) and the state labels take the font and
+    // title colour of the checkbox itself. The hint below the line is made like
+    // the other row labels of this pane (same label factory, so the same font
+    // and colour) and starts at their left edge.
+    NSRect panelFrame = [appearancePanel frame];
+    const int height = 56;
+    NSBox *row = [[[NSBox alloc] initWithFrame:NSMakeRect(0, frameMaxY - height + 5,
+                                                          panelFrame.size.width - 10, height)] autorelease];
+    [row setTitlePosition:NSNoTitle];
+    [row setTransparent:YES];
+
+    CGFloat contentWidth = [[row contentView] bounds].size.width;
+    const CGFloat rowLabelX = FlycutAppearanceRowInset;  // where every row label of this pane starts
+    const CGFloat lineMidY = 32.0;
+    const NSSize wellSize = NSMakeSize(32.0, 16.0);  // NSColorWell at NSControlSizeMini
+    const CGFloat previewSide = 16.0;                // the menu bar icon's own size
+
+    menuIconCustomColorsCheckbox = [[NSButton alloc] initWithFrame:NSZeroRect];
+    [menuIconCustomColorsCheckbox setButtonType:NSButtonTypeSwitch];
+    [menuIconCustomColorsCheckbox setTitle:@"Use custom menu bar icon colors"];
+    NSFont *checkboxFont = [menuIconCustomColorsCheckbox font];
+    NSColor *checkboxTitleColor = [[menuIconCustomColorsCheckbox attributedTitle] attribute:NSForegroundColorAttributeName
+                                                                                    atIndex:0
+                                                                             effectiveRange:NULL];
+    if (checkboxTitleColor == nil)
+        checkboxTitleColor = [NSColor controlTextColor];  // NSButtonCell's title colour
+
+    NSTextField *activeLabel = [NSTextField labelWithString:@"Active"];
+    NSTextField *pausedLabel = [NSTextField labelWithString:@"Paused"];
+    for (NSTextField *label in @[activeLabel, pausedLabel]) {
+        [label setFont:checkboxFont];
+        [label setTextColor:checkboxTitleColor];
+    }
+    NSSize activeLabelSize = [activeLabel fittingSize];
+    NSSize pausedLabelSize = [pausedLabel fittingSize];
+
+    CGFloat pausedPreviewX = contentWidth - FlycutAppearanceRowInset - previewSide;
+    CGFloat pausedColorWellX = pausedPreviewX - 4.0 - wellSize.width;
+    CGFloat pausedLabelX = pausedColorWellX - 4.0 - ceil(pausedLabelSize.width);
+    CGFloat activePreviewX = pausedLabelX - 14.0 - previewSide;
+    CGFloat activeColorWellX = activePreviewX - 4.0 - wellSize.width;
+    CGFloat activeLabelX = activeColorWellX - 4.0 - ceil(activeLabelSize.width);
+
+    CGFloat checkboxHeight = [menuIconCustomColorsCheckbox fittingSize].height;
+    [menuIconCustomColorsCheckbox setFrame:NSMakeRect(rowLabelX, lineMidY - checkboxHeight / 2.0,
+                                                      activeLabelX - rowLabelX - 8.0, checkboxHeight)];
+    [menuIconCustomColorsCheckbox setIdentifier:@"menuIconCustomColorsCheckbox"];
+    [menuIconCustomColorsCheckbox setTarget:self];
+    [menuIconCustomColorsCheckbox setAction:@selector(toggleMenuIconCustomColors:)];
+    [row addSubview:menuIconCustomColorsCheckbox];
+
+    [activeLabel setFrame:NSMakeRect(activeLabelX, lineMidY - ceil(activeLabelSize.height) / 2.0,
+                                     ceil(activeLabelSize.width), ceil(activeLabelSize.height))];
+    [row addSubview:activeLabel];
+    menuIconActiveColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(activeColorWellX, lineMidY - wellSize.height / 2.0,
+                                                                           wellSize.width, wellSize.height)];
+    [menuIconActiveColorWell setColorWellStyle:NSColorWellStyleMinimal];
+    [menuIconActiveColorWell setControlSize:NSControlSizeMini];
+    [menuIconActiveColorWell setContinuous:YES];
+    [menuIconActiveColorWell setIdentifier:@"menuIconActiveColorWell"];
+    [menuIconActiveColorWell setAccessibilityLabel:@"Active menu bar icon color"];
+    [menuIconActiveColorWell setTarget:self];
+    [menuIconActiveColorWell setAction:@selector(setActiveMenuIconColor:)];
+    [row addSubview:menuIconActiveColorWell];
+
+    [pausedLabel setFrame:NSMakeRect(pausedLabelX, lineMidY - ceil(pausedLabelSize.height) / 2.0,
+                                     ceil(pausedLabelSize.width), ceil(pausedLabelSize.height))];
+    [row addSubview:pausedLabel];
+    menuIconPausedColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(pausedColorWellX, lineMidY - wellSize.height / 2.0,
+                                                                           wellSize.width, wellSize.height)];
+    [menuIconPausedColorWell setColorWellStyle:NSColorWellStyleMinimal];
+    [menuIconPausedColorWell setControlSize:NSControlSizeMini];
+    [menuIconPausedColorWell setContinuous:YES];
+    [menuIconPausedColorWell setIdentifier:@"menuIconPausedColorWell"];
+    [menuIconPausedColorWell setAccessibilityLabel:@"Paused menu bar icon color"];
+    [menuIconPausedColorWell setTarget:self];
+    [menuIconPausedColorWell setAction:@selector(setPausedMenuIconColor:)];
+    [row addSubview:menuIconPausedColorWell];
+
+    menuIconActivePreview = [[NSImageView alloc] initWithFrame:NSMakeRect(activePreviewX, lineMidY - previewSide / 2.0,
+                                                                         previewSide, previewSide)];
+    [menuIconActivePreview setImage:[FlycutMenuIcon imageForPaused:NO]];
+    [menuIconActivePreview setImageScaling:NSImageScaleProportionallyUpOrDown];
+    [menuIconActivePreview setIdentifier:@"menuIconActivePreview"];
+    [menuIconActivePreview setAccessibilityLabel:@"Active menu bar icon preview"];
+    [row addSubview:menuIconActivePreview];
+
+    menuIconPausedPreview = [[NSImageView alloc] initWithFrame:NSMakeRect(pausedPreviewX, lineMidY - previewSide / 2.0,
+                                                                         previewSide, previewSide)];
+    [menuIconPausedPreview setImage:[FlycutMenuIcon imageForPaused:YES]];
+    [menuIconPausedPreview setImageScaling:NSImageScaleProportionallyUpOrDown];
+    [menuIconPausedPreview setIdentifier:@"menuIconPausedPreview"];
+    [menuIconPausedPreview setAccessibilityLabel:@"Paused menu bar icon preview"];
+    [row addSubview:menuIconPausedPreview];
+
+    NSTextField *automaticLabel = [self preferencePanelSliderLabelForText:@"Off uses the automatic macOS color."
+                                                                  aligned:NSTextAlignmentNatural
+                                                                 andFrame:NSZeroRect];
+    NSSize automaticSize = [[automaticLabel cell] cellSizeForBounds:NSMakeRect(0, 0, CGFLOAT_MAX, CGFLOAT_MAX)];
+    [automaticLabel setFrame:NSMakeRect(rowLabelX, 4, MIN(ceil(automaticSize.width), contentWidth - rowLabelX - FlycutAppearanceRowInset),
+                                        ceil(automaticSize.height))];
+    [row addSubview:automaticLabel];
+    [automaticLabel release];
+
+    [self refreshMenuIconColorControls];
+    return row;
+}
+
+// Makes the General pane taller by grow points at its bottom. The tab view is
+// as tall as the tallest pane, and the General box is tied to it on every
+// side; the other panes keep their height at its bottom. UKPrefsPanel fits the
+// window to the box when the pane changes; if it already fitted the window to
+// this pane, the window follows now.
+-(void)growGeneralPaneBy:(CGFloat)grow
+{
+	NSView *pane = [savingSectionLabel superview];
+	NSBox *box = (NSBox *)[pane superview];
+	NSView *item = [box superview];
+	NSTabView *tabs = (NSTabView *)[item superview];
+	if (![tabs isKindOfClass:[NSTabView class]]) {
+		tabs = nil;
+		for (NSView *view in [[prefsPanel contentView] subviews])
+			if ([view isKindOfClass:[NSTabView class]])
+				for (NSTabViewItem *tab in [(NSTabView *)view tabViewItems])
+					if ([tab view] == item)
+						tabs = (NSTabView *)view;
+	}
+	if (grow <= 0 || ![box isKindOfClass:[NSBox class]] || item == nil || tabs == nil)
+		return;
+	CGFloat boxHeight = NSHeight([box frame]);
+	[tabs setFrameSize:NSMakeSize(NSWidth([tabs frame]), NSHeight([tabs frame]) + grow)];
+	// A pane that is not shown gets the tab view's size when it is selected.
+	if ([item superview] != tabs)
+		[item setFrameSize:NSMakeSize(NSWidth([item frame]), NSHeight([item frame]) + grow)];
+	[item layoutSubtreeIfNeeded];
+	NSWindow *window = [pane window];
+	if (window != nil && NSHeight([[window contentView] frame]) == boxHeight) {
+		NSRect windowFrame = [window frame];
+		windowFrame.origin.y -= grow;
+		windowFrame.size.height += grow;
+		[window setFrame:windowFrame display:NO];
+	}
+}
+
+// The row ends the General pane, below everything the NIB and the builders
+// before it put there; -awakeFromNib builds it after them. It is placed from
+// the pane as laid out, so rows that a newer XIB adds above it cannot run
+// into it, and the pane grows when it would not fit.
+-(void)buildGeneralPermissionsPreferenceRow
+{
+    // The existing General outlet anchors this row without changing the NIB.
+    NSView *generalContent = [savingSectionLabel superview];
+    if (generalContent == nil)
+        return;
+    for (NSView *view in [generalContent subviews]) {
+        if ([[view identifier] isEqualToString:@"accessibilityPermissionsRow"])
+            return;
+    }
+
+    // The XIB holds the pane's controls 16 pt from its left and right edges
+    // (leading and trailing constraints, which place alignment rects); the
+    // button's bezel and the separator line up with them.
+    const CGFloat margin = 16;
+    NSView *row = [[[NSView alloc] initWithFrame:NSMakeRect(
+        margin, 8, NSWidth([generalContent bounds]) - 2 * margin, 38)] autorelease];
+    [row setIdentifier:@"accessibilityPermissionsRow"];
+    [row setAutoresizingMask:NSViewWidthSizable | NSViewMaxYMargin];
+
+    NSBox *separator = [[[NSBox alloc] initWithFrame:NSMakeRect(
+        0, 34, NSWidth([row bounds]), 4)] autorelease];
+    [separator setBoxType:NSBoxSeparator];
+    [separator setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
+    [row addSubview:separator];
+
+    NSButton *button = [[[NSButton alloc] initWithFrame:NSMakeRect(0, 0, 250, 32)] autorelease];
+    [button setTitle:@"Check Accessibility Permissions"];
+    [button setButtonType:NSButtonTypeMomentaryPushIn];
+    [button setBezelStyle:NSBezelStyleRounded];
+    [button setFrameOrigin:NSMakePoint(NSMinX([button frame]) - NSMinX([button alignmentRectForFrame:[button frame]]), 0)];
+    [button setTarget:self];
+    [button setAction:@selector(recheckAccessibility:)];
+    [row addSubview:button];
+    [generalContent addSubview:row];
+
+    // The separator one section gap (16 pt) below the lowest control shown,
+    // read once the pane is laid out: views placed by constraints sit at the
+    // pane's origin until then. The row's bottom stays 8 pt above the pane's;
+    // the pane grows by what is missing.
+    [generalContent layoutSubtreeIfNeeded];
+    CGFloat lowest = NSHeight([generalContent bounds]);
+    for (NSView *view in [generalContent subviews])
+        if (view != row && ![view isHidden])
+            lowest = MIN(lowest, NSMinY([view alignmentRectForFrame:[view frame]]));
+    CGFloat y = lowest - 16 - NSMaxY([separator alignmentRectForFrame:[separator frame]]);
+    if (y < 8) {
+        [self growGeneralPaneBy:8 - y];
+        y = 8;
+    }
+    [row setFrameOrigin:NSMakePoint(NSMinX([row frame]), y)];
 }
 
 - (void)reopenMenu
@@ -485,16 +1085,9 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     menuOpenEvent = nil;
 }
 
-- (void)activateSearchBox
-{
-    menuFirstResponder = [[searchBox window] firstResponder]; // So we can return control to normal menu function if the user presses an arrow key.
-    [[searchBox window] makeFirstResponder:searchBox]; // So the search box works.
-}
-
 -(IBAction) activateAndOrderFrontStandardAboutPanel:(id)sender
 {
-    [currentRunningApplication release];
-    currentRunningApplication = nil; // So it doesn't get pulled foreground atop the about panel.
+    [self cancelPendingPasteCompletion];
     [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
     [[NSApplication sharedApplication] orderFrontStandardAboutPanel:sender];
 }
@@ -550,37 +1143,9 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     [bezel setDelegate:self];
 }
 
--(IBAction) switchMenuIcon:(id)sender
-{
-    [self switchMenuIconTo: [sender indexOfSelectedItem]];
-}
 
--(void) switchMenuIconTo:(int)number
-{
-    if (number == 1 ) {
-        statusItem.button.title = @"";
-        statusItem.button.image = [NSImage imageNamed:@"com.generalarcade.flycut.black.16.png"];
-    } else if (number == 2 ) {
-        statusItem.button.image = nil;
-        statusItem.button.title = [NSString stringWithFormat:@"%C",0x2704];
-    } else if ( number == 3 ) {
-        statusItem.button.image = nil;
-        statusItem.button.title = [NSString stringWithFormat:@"%C",0x2702];
-    } else {
-        statusItem.button.title = @"";
-        statusItem.button.image = [NSImage imageNamed:@"com.generalarcade.flycut.16.png"];
-    }
-}
 
--(NSDictionary*) checkPreferencesChanges:(NSDictionary*)changes
-{
-	if ( [changes valueForKey:@"rememberNum"] )
-		[self checkRememberNumPref:[[NSUserDefaults standardUserDefaults] integerForKey:@"rememberNum"]
-				   forPrimaryStore:YES];
-	if ( [changes valueForKey:@"favoritesRememberNum"] )
-		[self checkFavoritesRememberNumPref:[[NSUserDefaults standardUserDefaults] integerForKey:@"favoritesRememberNum"]];
-	return nil;
-}
+
 
 -(IBAction) setRememberNumPref:(id)sender
 {
@@ -590,15 +1155,11 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 -(int) checkRememberNumPref:(int)newRemember forPrimaryStore:(BOOL) isPrimaryStore
 {
 	int oldRemember = [flycutOperator rememberNum];
-	int setRemember = [flycutOperator setRememberNum:newRemember forPrimaryStore:YES];
+	int setRemember = [flycutOperator setRememberNum:newRemember forPrimaryStore:isPrimaryStore];
 
 	if ( isPrimaryStore )
 	{
-		if ( setRemember == oldRemember )
-		{
-			[self updateMenu];
-		}
-		else if ( setRemember < oldRemember )
+		if ( setRemember < oldRemember )
 		{
 			// Trim down the number displayed in the menu if it is greater than the new
 			// number to remember.
@@ -606,11 +1167,12 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 				if ( setRemember < [[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] ) {
 					[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithInt:setRemember]
 															 forKey:@"displayNum"];
-					[self updateMenu];
 				}
 			}
 		}
 	}
+
+	return setRemember;
 }
 
 -(IBAction) setFavoritesRememberNumPref:(id)sender
@@ -620,14 +1182,20 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 
 -(void) checkFavoritesRememberNumPref:(int)newRemember
 {
-	[flycutOperator switchToFavoritesStore];
+	BOOL temporarilySwitched = ![flycutOperator favoritesStoreIsSelected];
+	if ( temporarilySwitched )
+		[flycutOperator switchToFavoritesStore];
+
 	[self checkRememberNumPref:newRemember forPrimaryStore:NO];
-	[flycutOperator restoreStashedStore];
+
+	if ( temporarilySwitched )
+		[flycutOperator restoreStashedStore];
 }
 
 -(IBAction) setDisplayNumPref:(id)sender
 {
-	[self updateMenu];
+	// Nothing to rebuild: the menu-bar list reads "Display in menu" each time it opens.
+	(void)sender;
 }
 
 -(NSTextField*) preferencePanelSliderLabelForText:(NSString*)text aligned:(NSTextAlignment)alignment andFrame:(NSRect)frame
@@ -670,6 +1238,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	newControl.numberOfTickMarks=ticks;
 	[newControl setMinValue:min];
 	[newControl setMaxValue:max];
+	FlycutSetAccessibilityLabel(newControl, title);
 
 	[self setBinding:@"value" forKey:keyPath andOrAction:action on:newControl];
 
@@ -828,7 +1397,7 @@ static NSString *FlycutGeneralRestoreLabel(NSString *key)
 {
 	NSDictionary *labels = @{
 		@"rememberNum": @"Restore default number of clippings to remember",
-		@"displayNum": @"Restore default number of clippings in the menu",
+		@"displayNum": @"Restore default number of rows in the menu",
 		@"favoritesRememberNum": @"Restore default number of favorites to remember",
 		@"skipPboardTypesList": @"Restore default pasteboard types",
 		@"skipPasswordLengthsList": @"Restore default password lengths",
@@ -979,14 +1548,41 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 	[pane addSubview:button];
 }
 
+// The NIB gives these controls no accessibility label, so VoiceOver said only
+// "pop up button" or the field's text. Each gets the label shown next to it,
+// in code, so that it also works with an already compiled NIB. The three
+// numbers are fields to type into (-buildGeneralNumberFields), so VoiceOver
+// says "Remember, 40, text field".
+-(void)buildGeneralAccessibilityLabels
+{
+	NSView *pane = [savingSectionLabel superview];
+	NSDictionary *numbers = @{@"rememberNum": @"Remember",
+	                          @"displayNum": @"Display in menu",
+	                          @"favoritesRememberNum": @"Favorites"};
+	for (NSString *key in numbers)
+		FlycutSetAccessibilityLabel(FlycutBoundControl(pane, key, [NSTextField class]), numbers[key]);
+	// The two list fields get names of their own. The checkbox in front of each
+	// is a sub-option of "Don't save passwords" in MainMenu.xib ("by data type:",
+	// "by length & complexity:"), which alone does not say what the field holds.
+	NSDictionary *fields = @{@"skipPboardTypesList": @"Password data types",
+	                         @"skipPasswordLengthsList": @"Password lengths"};
+	for (NSString *key in fields)
+		FlycutSetAccessibilityLabel(FlycutBoundControl(pane, key, [NSTextField class]), fields[key]);
+	for (NSView *view in [pane subviews]) {
+		NSString *keyPath = [[view infoForBinding:NSSelectedIndexBinding] objectForKey:NSObservedKeyPathKey];
+		if ([view isKindOfClass:[NSPopUpButton class]] && [keyPath isEqualToString:@"values.savePreference"])
+			FlycutSetAccessibilityLabel((NSPopUpButton *)view, @"Save");
+	}
+}
+
 // The General pane comes from the NIB and is laid out with constraints. Each
-// arrow is tied to the right edge of its field, or of the stepper or folder
-// button next to it. The constraint that held the next control at that edge,
-// or the field at the pane's right margin, makes room for it; the arrow keeps
-// that room while hidden, so nothing moves when it appears.
+// arrow is tied to the right edge of its field or folder button. The
+// constraint that held the next control at that edge, or the field at the
+// pane's right margin, makes room for it; the arrow keeps that room while
+// hidden, so nothing moves when it appears.
 // Arrows that end a line stand in one column: a field that reaches the right
-// margin ends where the right-most stepper ends, so its arrow stands under
-// that stepper's arrow. The two folder buttons share their left edge and
+// margin ends where the right-most number field ends, so its arrow stands
+// under that field's arrow. The two folder buttons share their left edge and
 // width, so their arrows share a column as well.
 -(void)buildGeneralRestoreDefaultButtons
 {
@@ -1011,8 +1607,7 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		NSControl *field = folder ? [self saveLocationButtonForKey:key] : FlycutBoundControl(pane, key, [NSTextField class]);
 		if (field == nil || [field superview] != pane)
 			continue;
-		NSView *stepper = folder ? nil : FlycutBoundControl(pane, key, [NSStepper class]);
-		NSView *anchor = (stepper != nil && NSMinX([stepper frame]) >= NSMinX([field frame])) ? stepper : field;
+		NSView *anchor = field;
 		NSButton *button = [self restoreDefaultButtonWithIdentifier:FlycutRestoreDefaultsIdentifier(key)
 		                                        accessibilityLabel:FlycutGeneralRestoreLabel(key)];
 		[pane addSubview:button];
@@ -1069,7 +1664,7 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 			}
 			if (margined != nil)
 				[heldAtMargin addObject:@[button, margined]];
-			else if (!followed && !folder && anchor == stepper && NSMaxX([anchor frame]) > columnAnchorMaxX) {
+			else if (!followed && !folder && NSMaxX([anchor frame]) > columnAnchorMaxX) {
 				columnArrow = button;
 				columnAnchorMaxX = NSMaxX([anchor frame]);
 			}
@@ -1092,15 +1687,15 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		[[NSNotificationCenter defaultCenter] addObserver:observer selector:@selector(valuesChanged:)
 		                                             name:NSControlTextDidChangeNotification object:field];
 		// The defaults controller the NIB binds this setting to (not necessarily
-		// the shared one) reports stepper clicks, committed typing and direct
-		// changes of the stored value.
+		// the shared one) reports committed typing and direct changes of the
+		// stored value.
 		NSDictionary *binding = [field infoForBinding:NSValueBinding];
 		[[binding objectForKey:NSObservedObjectKey] addObserver:observer
 		                                              forKeyPath:[binding objectForKey:NSObservedKeyPathKey]
 		                                                 options:0 context:NULL];
 	}
-	// A field at the margin ends under the right-most stepper instead (only
-	// ever shorter), so its arrow stands in that stepper's arrow column.
+	// A field at the margin ends under the right-most number field instead
+	// (only ever shorter), so its arrow stands in that field's arrow column.
 	if (columnArrow != nil && columnAnchorMaxX + gap + side + margin <= NSWidth([pane bounds])) {
 		for (NSArray *entry in heldAtMargin) {
 			[(NSLayoutConstraint *)[entry objectAtIndex:1] setActive:NO];
@@ -1117,6 +1712,117 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		                                             name:NSWindowDidBecomeKeyNotification object:prefsPanel];
 	// Values stored before the pane is built show their arrows right away.
 	[self updateRestoreDefaultButtons];
+}
+
+// What the NIB held at the stepper's right edge (the next label, or the pane's
+// right margin) is held at the field's right edge instead, with the same gap,
+// so the row closes up where the stepper stood. Both MainMenu.xib and master's
+// compiled NIB lay this pane out with constraints.
+static void FlycutRemoveStepper(NSView *pane, NSStepper *stepper, NSTextField *field)
+{
+	NSMutableArray *moved = [NSMutableArray array];
+	for (NSLayoutConstraint *constraint in [pane constraints]) {
+		BOOL first = [constraint firstItem] == stepper && [constraint firstAttribute] == NSLayoutAttributeTrailing;
+		BOOL second = [constraint secondItem] == stepper && [constraint secondAttribute] == NSLayoutAttributeTrailing;
+		if (!first && !second)
+			continue;
+		NSLayoutConstraint *held = [NSLayoutConstraint constraintWithItem:first ? field : [constraint firstItem]
+		                                                        attribute:[constraint firstAttribute] relatedBy:[constraint relation]
+		                                                           toItem:second ? field : [constraint secondItem]
+		                                                        attribute:[constraint secondAttribute] multiplier:[constraint multiplier]
+		                                                         constant:[constraint constant]];
+		[held setPriority:[constraint priority]];
+		[moved addObject:held];
+	}
+	// Bound to the setting it would still follow it, out of sight.
+	for (NSString *binding in [stepper exposedBindings])
+		if ([stepper infoForBinding:binding] != nil)
+			[stepper unbind:binding];
+	[stepper removeFromSuperview];   // takes its constraints along
+	[pane addConstraints:moved];
+}
+
+// The numbers next to the General pane's steppers are display-only text in the
+// NIB. Here, in code, so that this also works with an already compiled NIB,
+// they become fields to type into, made like Flycut's search fields (plain
+// NSSearchFields): AppKit's rounded text field with the search field's
+// capsule shape (macOS 26 and later draw a search field as a capsule, a
+// plain text field as a rounded rectangle), the NIB's system font, which is
+// the search field's, and the height AppKit gives both. The digits stand in
+// the middle, away from the round ends. All three fields are as wide as three
+// digits. The steppers go (no other field of the app has them); each field
+// takes its stepper's action and tooltip, and is checked by
+// FlycutNumberFieldEditing. This runs before the Restore Default arrows are
+// placed, so they stand next to the fields.
+-(void)buildGeneralNumberFields
+{
+	NSView *pane = [savingSectionLabel superview];
+	static FlycutNumberFieldEditing *editing = nil;
+	if (pane == nil || editing != nil)
+		return;
+	editing = [[FlycutNumberFieldEditing alloc] initWithController:self];
+	NSMutableArray *built = [NSMutableArray array];
+	CGFloat width = 0.0;
+	for (NSString *key in @[@"rememberNum", @"displayNum", @"favoritesRememberNum"]) {
+		NSTextField *field = (NSTextField *)FlycutBoundControl(pane, key, [NSTextField class]);
+		if (field == nil)
+			continue;
+		FlycutNumberFieldFormatter *formatter = [[[FlycutNumberFieldFormatter alloc] init] autorelease];
+		[formatter setFormatterBehavior:NSNumberFormatterBehavior10_4];
+		[formatter setNumberStyle:NSNumberFormatterNoStyle];
+		[formatter setLocale:[NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"]];
+		[formatter setAllowsFloats:NO];
+		[field setFormatter:formatter];
+		[field setEditable:YES];
+		[field setSelectable:YES];
+		[field setBezeled:YES];
+		[field setBezelStyle:NSTextFieldRoundedBezel];
+		if (@available(macOS 26.0, *))
+			[field setBorderShape:NSControlBorderShapeCapsule];
+		[field setAlignment:NSTextAlignmentCenter];
+		[field setDelegate:editing];
+		NSStepper *stepper = (NSStepper *)FlycutBoundControl(pane, key, [NSStepper class]);
+		if (stepper != nil) {
+			// A typed value goes the way a stepper click went.
+			[field setTarget:[stepper target]];
+			[field setAction:[stepper action]];
+			if ([[field toolTip] length] == 0)
+				[field setToolTip:[stepper toolTip]];
+			FlycutRemoveStepper(pane, stepper, field);
+		}
+		[editing addField:field forKey:key];
+		[built addObject:field];
+		for (char digit = '0'; digit <= '9'; digit++) {
+			NSTextFieldCell *cell = [[[field cell] copy] autorelease];
+			[cell setFormatter:nil];
+			[cell setStringValue:[NSString stringWithFormat:@"%c%c%c", digit, digit, digit]];
+			width = MAX(width, ceil([cell cellSize].width));
+		}
+	}
+	// The NIB gives each field a fixed width (25 or 30 pt, too narrow for three
+	// digits in a bezel). Before the first layout pass AppKit's own size
+	// constraints (subclasses) are there as well.
+	[pane layoutSubtreeIfNeeded];
+	for (NSTextField *field in built) {
+		NSLayoutConstraint *fixed = nil;
+		for (NSLayoutConstraint *constraint in [field constraints])
+			if ([constraint isMemberOfClass:[NSLayoutConstraint class]] && [constraint firstItem] == field &&
+			    [constraint secondItem] == nil && [constraint firstAttribute] == NSLayoutAttributeWidth &&
+			    [constraint relation] == NSLayoutRelationEqual)
+				fixed = constraint;
+		if (fixed != nil)
+			[fixed setConstant:width];
+		else if ([field translatesAutoresizingMaskIntoConstraints])
+			[field setFrameSize:NSMakeSize(width, NSHeight([field frame]))];
+		else
+			[field addConstraint:[NSLayoutConstraint constraintWithItem:field attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationEqual
+			                                                     toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1 constant:width]];
+	}
+	[pane layoutSubtreeIfNeeded];
+	NSWindow *window = prefsPanel != nil ? prefsPanel : [pane window];
+	if (window != nil)
+		[[NSNotificationCenter defaultCenter] addObserver:editing selector:@selector(windowWillClose:)
+		                                             name:NSWindowWillCloseNotification object:window];
 }
 
 // We no longer get autosave from ShortcutRecorder, so let's set the recorders by hand.
@@ -1273,12 +1979,12 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 	} else if (field != nil) {
 		// Unfinished typing is dropped. Dropping the stored value through the
 		// defaults controller the field is bound to brings back the registered
-		// default, and the bound field and stepper show it at once.
+		// default, and the bound field shows it at once.
 		if ([field currentEditor] != nil)
 			[field abortEditing];
 		NSDictionary *binding = [field infoForBinding:NSValueBinding];
 		[[binding objectForKey:NSObservedObjectKey] setValue:nil forKeyPath:[binding objectForKey:NSObservedKeyPathKey]];
-		// The limits go the way a stepper click goes: shrinking below the
+		// The limits go the way a typed value goes: shrinking below the
 		// stored clippings asks first (Resize Stack), and Cancel keeps the
 		// old limit.
 		if ([key isEqualToString:@"rememberNum"])
@@ -1307,6 +2013,13 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 
 -(void) buildAppearancesPreferencePanel
 {
+	if (menuIconCustomColorsCheckbox != nil)
+		return;
+
+	NSRect expandedPanelFrame = [appearancePanel frame];
+	expandedPanelFrame.size.height += 70;
+	[appearancePanel setFrame:expandedPanelFrame];
+
 	NSRect screenFrame = [[NSScreen mainScreen] frame];
 
 	int nextYMax = -1;
@@ -1346,18 +2059,6 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 	[appearancePanel addSubview:row];
 	nextYMax = row.frame.origin.y;
 
-	row = [self preferencePanelPopUpRowForText:@"Menu item icon"
-										 items:[NSArray arrayWithObjects:
-												@"Flycut icon",
-												@"Black Flycut icon",
-												@"White scissors",
-												@"Black scissors",nil]
-									 frameMaxY:nextYMax
-									   binding:@"menuIcon"
-										action:@selector(switchMenuIcon:)];
-	[appearancePanel addSubview:row];
-	nextYMax = row.frame.origin.y;
-
 	// Add search hotkey recorder - moved up for better visibility
 	row = [self preferencePanelHotkeyRowForText:@"Search clipboard hotkey:" recorder:&searchRecorder frameMaxY:nextYMax];
 	[appearancePanel addSubview:row];
@@ -1391,48 +2092,131 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
     [appearancePanel addSubview:row];
     nextYMax = row.frame.origin.y;
 
-    // Add Accessibility Check button
-    NSRect panelFrame = [appearancePanel frame];
-    int height = 40;
-    NSBox *accessibilityRow = [[NSBox alloc] initWithFrame:NSMakeRect(0, nextYMax - height + 5, panelFrame.size.width - 10, height)];
-    [accessibilityRow setTitlePosition:NSNoTitle];
-    [accessibilityRow setTransparent:YES];
+    row = [self preferencePanelMenuIconColorRowWithFrameMaxY:nextYMax];
+    [appearancePanel addSubview:row];
+    nextYMax = row.frame.origin.y;
     
-    NSButton *accessibilityButton = [[NSButton alloc] initWithFrame:NSMakeRect(8, 4, 250, 25)];
-    [accessibilityButton setTitle:@"Check Accessibility Permissions"];
-    [accessibilityButton setButtonType:NSButtonTypeMomentaryPushIn];
-    [accessibilityButton setBezelStyle:NSBezelStyleRounded];
-    [accessibilityButton setTarget:self];
-    [accessibilityButton setAction:@selector(recheckAccessibility:)];
+    // Size against the NSBox content view, not its outer frame. AppKit gives
+    // NSBox a smaller inset content area; using the outer height placed the
+    // final row at a negative y-coordinate and clipped its button.
+    NSView *panelContentView = [appearancePanel contentView];
+    NSArray *appearanceRows = [[panelContentView subviews] copy];
+    NSRect rowUnion = NSZeroRect;
+    BOOL hasRows = NO;
+    for (NSView *appearanceRow in appearanceRows) {
+        rowUnion = hasRows ? NSUnionRect(rowUnion, [appearanceRow frame]) : [appearanceRow frame];
+        hasRows = YES;
+    }
+    if (hasRows) {
+        const CGFloat panelVerticalPadding = 8.0;
+        NSRect contentBounds = [panelContentView bounds];
+        CGFloat requiredContentHeight = NSHeight(rowUnion) + (2.0 * panelVerticalPadding);
+        CGFloat heightDelta = requiredContentHeight - NSHeight(contentBounds);
+        if (heightDelta > 0.0) {
+            NSRect resizedPanelFrame = [appearancePanel frame];
+            resizedPanelFrame.size.height += heightDelta;
+            [appearancePanel setFrame:resizedPanelFrame];
+            contentBounds = [panelContentView bounds];
+        }
+
+        CGFloat rowOffset = NSMaxY(contentBounds) - panelVerticalPadding - NSMaxY(rowUnion);
+        for (NSView *appearanceRow in appearanceRows) {
+            NSRect rowFrame = [appearanceRow frame];
+            rowFrame.origin.y += rowOffset;
+            [appearanceRow setFrame:rowFrame];
+        }
+    }
+    [appearanceRows release];
+
+    (void)nextYMax;
     
-    [accessibilityRow addSubview:accessibilityButton];
-    [appearancePanel addSubview:accessibilityRow];
-    nextYMax = accessibilityRow.frame.origin.y;
-    
+}
+
+// The right edge of what a pane shows, and its left inset, in the pane's own
+// coordinates: every visible control and every Restore Default arrow, shown
+// or not (an arrow that appears with a changed value must not be cut off),
+// looking through plain views and boxes.
+static void FlycutCollectPaneContentEdges(NSView *container, NSView *pane, CGFloat *leftmost, CGFloat *rightmost)
+{
+	for (NSView *view in [container subviews]) {
+		BOOL restoreArrow = [view isKindOfClass:[NSButton class]] && [[view identifier] hasPrefix:@"restoreDefault"];
+		if ([view isHidden] && !restoreArrow)
+			continue;
+		BOOL isBox = [view isKindOfClass:[NSBox class]];
+		BOOL holdsViews = isBox ? [(NSBox *)view boxType] != NSBoxSeparator
+		                        : ([view isMemberOfClass:[NSView class]] && [[view subviews] count] > 0);
+		if (holdsViews) {
+			FlycutCollectPaneContentEdges(isBox ? [(NSBox *)view contentView] : view, pane, leftmost, rightmost);
+		} else {
+			NSRect frame = [pane convertRect:[view bounds] fromView:view];
+			*leftmost = MIN(*leftmost, NSMinX(frame));
+			*rightmost = MAX(*rightmost, NSMaxX(frame));
+		}
+	}
+}
+
+static NSTabView *FlycutPreferencesTabView(NSView *view)
+{
+	if ([view isKindOfClass:[NSTabView class]])
+		return (NSTabView *)view;
+	for (NSView *child in [view subviews]) {
+		NSTabView *found = FlycutPreferencesTabView(child);
+		if (found != nil)
+			return found;
+	}
+	return nil;
+}
+
+// Preferences is as wide as its panes need: every pane's content with the
+// pane's own left inset as its right margin, never narrower than the NIB,
+// around the centre the window has. In the Preference style UKPrefsPanel
+// gives the toolbar, its items need less than that.
+-(void)fitPreferencesWindowWidth
+{
+	NSTabView *tabView = FlycutPreferencesTabView([prefsPanel contentView]);
+	if (tabView == nil)
+		return;
+	NSRect original = [prefsPanel frame];
+	[[prefsPanel contentView] layoutSubtreeIfNeeded];
+	CGFloat width = NSWidth([tabView frame]);
+	for (NSTabViewItem *item in [tabView tabViewItems]) {
+		NSView *pane = [item view];
+		CGFloat leftmost = CGFLOAT_MAX, rightmost = 0.0;
+		FlycutCollectPaneContentEdges(pane, pane, &leftmost, &rightmost);
+		if (rightmost > 0.0)
+			width = MAX(width, ceil(rightmost + leftmost));
+	}
+	NSRect content = [prefsPanel contentRectForFrameRect:original];
+	content.size.width = width;
+	NSRect fitted = [prefsPanel frameRectForContentRect:content];
+	fitted.origin.x = NSMidX(original) - NSWidth(fitted) / 2.0;
+	[prefsPanel setFrame:fitted display:NO animate:NO];
 }
 
 -(IBAction) showPreferencePanel:(id)sender
 {
-    [currentRunningApplication release];
-    currentRunningApplication = nil; // So it doesn't get pulled foreground atop the preference panel.
+    [self cancelPendingPasteCompletion];
 	if ([prefsPanel respondsToSelector:@selector(setCollectionBehavior:)])
 		[prefsPanel setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces];
 	[NSApp activateIgnoringOtherApps: YES];
 
-    // Set minimum width but let UKPrefsPanel control the height based on tab content
-    NSRect currentFrame = [prefsPanel frame];
-    if (currentFrame.size.width < 700) {
-        NSRect newFrame = currentFrame;
-        newFrame.size.width = 720;
-        // Adjust position to keep window centered horizontally
-        newFrame.origin.x = currentFrame.origin.x - (newFrame.size.width - currentFrame.size.width) / 2;
-        [prefsPanel setFrame:newFrame display:NO animate:NO];
-    }
+	// UKPrefsPanel controls the height; the width is worked out here, once
+	// the window is opened. A window that is already open keeps its size.
+	if (![prefsPanel isVisible])
+		[self fitPreferencesWindowWidth];
 	// Folder names and Restore Default arrows as they are now, before the
 	// window shows.
 	[self updateSaveLocationButtonTitles];
 	[self updateRestoreDefaultButtons];
+	BOOL alreadyShown = [prefsPanel isVisible];
 	[prefsPanel makeKeyAndOrderFront:self];
+	// A window that becomes visible makes the first field of its key-view loop
+	// the first responder, or keeps the last opening's, and that field shows the
+	// focus ring before the user chose anything. Hand the focus back to the
+	// window; a click or Tab then moves it. A window that is already open keeps
+	// the focus the user gave it.
+	if (!alreadyShown)
+		[prefsPanel makeFirstResponder:nil];
 	NSString *fileRoot = [[NSBundle mainBundle] pathForResource:@"acknowledgements" ofType:@"txt"];
 	NSString *contents = [NSString stringWithContentsOfFile:fileRoot
 												   encoding:NSUTF8StringEncoding
@@ -1457,7 +2241,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 }
 
 -(IBAction)recheckAccessibility:(id)sender {
-    // Re-check accessibility state and offer to trigger system prompt
+    // This explicit user action may request native consent when access is missing.
     NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     NSDictionary* options = @{(id) (kAXTrustedCheckOptionPrompt): @NO};
@@ -1474,20 +2258,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
         [alert runModal];
         [alert release];
     } else {
-        NSAlert *alert = [[NSAlert alloc] init];
-        alert.messageText = @"Accessibility Access Required";
-        alert.informativeText = [NSString stringWithFormat:@"Flycut does not have accessibility permissions.\n\nBundle: %@\nBundle ID: %@\n\nYou can request the system prompt or open Settings to grant access manually.", bundlePath, bundleID];
-        [alert addButtonWithTitle:@"Request System Prompt"];
-        [alert addButtonWithTitle:@"Open Settings"];
-        [alert addButtonWithTitle:@"Cancel"];
-        NSModalResponse response = [alert runModal];
-        [alert release];
-        
-        if (response == NSAlertFirstButtonReturn) {
-            [self requestAccessibilityWithPrompt];
-        } else if (response == NSAlertSecondButtonReturn) {
-            [self openAccessibilitySettings];
-        }
+        [self requestAccessibilityWithPrompt];
     }
 }
 
@@ -1501,59 +2272,328 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
     }
 }
 
+- (NSRunningApplication *)frontmostApplicationForPaste
+{
+	return [[NSWorkspace sharedWorkspace] frontmostApplication];
+}
+
+- (void)rememberFrontmostApplicationForPaste
+{
+	NSRunningApplication *frontmostApplication = [self frontmostApplicationForPaste];
+	pid_t frontmostProcessIdentifier = [frontmostApplication processIdentifier];
+	pid_t flycutProcessIdentifier = [[NSRunningApplication currentApplication] processIdentifier];
+	if ( frontmostApplication == nil || frontmostProcessIdentifier <= 0 ||
+		frontmostProcessIdentifier == flycutProcessIdentifier ) {
+		frontmostApplication = nil;
+		frontmostProcessIdentifier = 0;
+	}
+
+	nextPasteTransactionGeneration += 1;
+	if ( nextPasteTransactionGeneration == 0 )
+		nextPasteTransactionGeneration = 1;
+	FCPasteTransaction *transaction = [[FCPasteTransaction alloc]
+		initWithApplication:frontmostApplication
+		processIdentifier:frontmostProcessIdentifier
+		generation:nextPasteTransactionGeneration];
+	[currentPasteTransaction release];
+	currentPasteTransaction = transaction;
+}
+
+- (BOOL)pasteTransactionIsCurrent:(FCPasteTransaction *)transaction
+{
+	return transaction != nil && transaction == currentPasteTransaction &&
+		[transaction generation] == nextPasteTransactionGeneration;
+}
+
+- (void)clearPasteTransactionIfCurrent:(FCPasteTransaction *)transaction
+{
+	if ( [self pasteTransactionIsCurrent:transaction] )
+		[self clearRememberedPasteTarget];
+}
+
+// Ends a transaction that nobody cancelled although its paste was not delivered (no
+// Accessibility access, no paste key, the target could not be activated or lost focus).
+// The user chose this clipping, so it stays on the clipboard as it would without the
+// transaction; only a cancellation (Escape, a superseding selection) rolls it back.
+- (void)finishPasteTransactionKeepingSelection:(FCPasteTransaction *)transaction
+{
+	if ( ![self pasteTransactionIsCurrent:transaction] )
+		return;
+	[transaction setClipboardCommitted:YES];
+	[self clearRememberedPasteTarget];
+}
+
+- (void)clearRememberedPasteTarget
+{
+	FCPasteTransaction *transaction = currentPasteTransaction;
+	currentPasteTransaction = nil;
+	[self restorePasteboardForCancelledTransaction:transaction];
+	[transaction release];
+}
+
+- (void)hideAppForPasteTransaction:(FCPasteTransaction *)transaction
+{
+	if ( [self pasteTransactionIsCurrent:transaction] )
+		[self hideApp];
+}
+
+- (void)completePasteInRememberedApplication:(FCPasteTransaction *)transaction
+{
+	if ( ![self pasteTransactionIsCurrent:transaction] )
+		return;
+	if (![self pasteboardIsOwnedByTransaction:transaction]) {
+		[self clearPasteTransactionIfCurrent:transaction];
+		return;
+	}
+
+	NSRunningApplication *pasteTarget = [transaction targetApplication];
+	pid_t targetProcessIdentifier = [transaction targetProcessIdentifier];
+	NSRunningApplication *frontmostApplication = [self frontmostApplicationForPaste];
+	pid_t frontmostProcessIdentifier = [frontmostApplication processIdentifier];
+	pid_t flycutProcessIdentifier = [[NSRunningApplication currentApplication] processIdentifier];
+	BOOL targetIsValid = pasteTarget != nil && ![pasteTarget isTerminated] &&
+		targetProcessIdentifier > 0;
+	BOOL focusStillBelongsToTransaction = targetIsValid &&
+		(frontmostProcessIdentifier == targetProcessIdentifier ||
+		 frontmostProcessIdentifier == flycutProcessIdentifier);
+	if ( !focusStillBelongsToTransaction ) {
+		NSLog(@"Paste cancelled because focus left the original transaction before activation");
+		[self finishPasteTransactionKeepingSelection:transaction];
+		return;
+	}
+
+	BOOL targetReady =
+		[pasteTarget activateWithOptions:NSApplicationActivateIgnoringOtherApps];
+	if ( targetReady && [self pasteTransactionIsCurrent:transaction] ) {
+		// Activation is requested synchronously, but AppKit may not finish moving key focus
+		// until the next run-loop turn. Post Cmd-V only after that transition can settle.
+		[self performSelector:@selector(postPasteAndClearRememberedApplication:)
+				 withObject:transaction
+				 afterDelay:0.05];
+	} else {
+		NSLog(@"Could not reactivate the application selected for paste");
+		[self finishPasteTransactionKeepingSelection:transaction];
+	}
+}
+
+- (void)postPasteAndClearRememberedApplication:(FCPasteTransaction *)transaction
+{
+	if ( ![self pasteTransactionIsCurrent:transaction] )
+		return;
+	if (![self pasteboardIsOwnedByTransaction:transaction]) {
+		[self clearPasteTransactionIfCurrent:transaction];
+		return;
+	}
+
+	NSRunningApplication *pasteTarget = [transaction targetApplication];
+	pid_t targetProcessIdentifier = [transaction targetProcessIdentifier];
+	NSRunningApplication *frontmostApplication = [self frontmostApplicationForPaste];
+	BOOL targetIsValid = pasteTarget != nil && ![pasteTarget isTerminated] &&
+		targetProcessIdentifier > 0;
+	BOOL targetIsFrontmost = targetIsValid && frontmostApplication != nil &&
+		targetProcessIdentifier == [frontmostApplication processIdentifier];
+	if ( targetIsFrontmost ) {
+		// Use the same immutable local PID for validation and posting.
+		if ( ![self postCommandVToProcessIdentifier:targetProcessIdentifier] )
+			NSLog(@"Paste could not be posted; the selection stays on the clipboard");
+		[self finishPasteTransactionKeepingSelection:transaction];
+		return;
+	}
+
+	NSRunningApplication *flycutApplication = [NSRunningApplication currentApplication];
+	BOOL activationMayStillBeSettling = frontmostApplication == nil ||
+		[frontmostApplication processIdentifier] == [flycutApplication processIdentifier];
+	if ( targetIsValid && activationMayStillBeSettling &&
+		[transaction focusCheckAttempts] < kPasteTargetActivationCheckLimit ) {
+		[transaction setFocusCheckAttempts:[transaction focusCheckAttempts] + 1];
+		[self performSelector:@selector(postPasteAndClearRememberedApplication:)
+				 withObject:transaction
+				 afterDelay:0.05];
+		return;
+	}
+
+	NSLog(@"Paste cancelled because the original target did not become frontmost");
+	[self finishPasteTransactionKeepingSelection:transaction];
+}
+
+- (NSArray *)snapshotPasteboardItems
+{
+	NSMutableArray *snapshot = [NSMutableArray array];
+	for (NSPasteboardItem *item in [jcPasteboard pasteboardItems]) {
+		NSMutableDictionary *representations = [NSMutableDictionary dictionary];
+		for (NSString *type in [item types]) {
+			NSData *data = [item dataForType:type];
+			if (data == nil)
+				return nil; // Never destroy a representation that cannot be restored.
+			[representations setObject:[[data copy] autorelease] forKey:type];
+		}
+		[snapshot addObject:[[representations copy] autorelease]];
+	}
+	return [[snapshot copy] autorelease];
+}
+
+- (void)restorePasteboardForCancelledTransaction:(FCPasteTransaction *)transaction
+{
+	if (transaction == nil || [transaction clipboardCommitted] ||
+		[transaction previousPasteboardItems] == nil || [transaction ownedChangeCount] < 0 ||
+		[jcPasteboard changeCount] != [transaction ownedChangeCount])
+		return;
+	NSMutableArray *items = [NSMutableArray array];
+	for (NSDictionary *representations in [transaction previousPasteboardItems]) {
+		NSPasteboardItem *item = [[[NSPasteboardItem alloc] init] autorelease];
+		for (NSString *type in representations)
+			if (![item setData:[representations objectForKey:type] forType:type])
+				return;
+		[items addObject:item];
+	}
+	// The pasteboard API has no cross-process compare-and-swap. Recheck at the
+	// last possible point, and never restore over an observed external copy.
+	if ([jcPasteboard changeCount] != [transaction ownedChangeCount])
+		return;
+	[jcPasteboard clearContents];
+	if ([items count] > 0 && ![jcPasteboard writeObjects:items])
+		NSLog(@"Could not restore the cancelled paste's clipboard snapshot");
+	[self setPBBlockCount:@([jcPasteboard changeCount])];
+}
+
+- (BOOL)pasteboardIsOwnedByTransaction:(FCPasteTransaction *)transaction
+{
+	if (transaction == nil || ![transaction hasSelectedPayload] ||
+		[transaction ownedChangeCount] < 0 ||
+		[jcPasteboard changeCount] != [transaction ownedChangeCount])
+		return NO;
+	BOOL contentsMatch;
+	if ([transaction selectedPayload] != nil) {
+		NSString *contents = [jcPasteboard stringForType:NSPasteboardTypeString];
+		contentsMatch = [contents isEqualToString:[transaction selectedPayload]];
+	} else {
+		NSData *contents = [jcPasteboard dataForType:[transaction selectedPayloadType]];
+		contentsMatch = [contents isEqualToData:[transaction selectedPayloadData]];
+	}
+	return contentsMatch && [jcPasteboard changeCount] == [transaction ownedChangeCount];
+}
+
+- (void)cancelPendingPasteCompletion
+{
+	FCPasteTransaction *transaction = [currentPasteTransaction retain];
+	if ( transaction != nil ) {
+		[NSObject cancelPreviousPerformRequestsWithTarget:self
+								 selector:@selector(hideAppForPasteTransaction:)
+								   object:transaction];
+		[NSObject cancelPreviousPerformRequestsWithTarget:self
+								 selector:@selector(completePasteInRememberedApplication:)
+								   object:transaction];
+		[NSObject cancelPreviousPerformRequestsWithTarget:self
+								 selector:@selector(postPasteAndClearRememberedApplication:)
+								   object:transaction];
+	}
+	[self clearRememberedPasteTarget];
+	[transaction release];
+}
+
 - (void)pasteFromStack
 {
-    FlycutClipping *clipping = [flycutOperator clippingAtStackPosition];
-    if (clipping) {
-        if ([clipping isImageClipping]) {
-            [self addImageClipToPasteboard:clipping];
-        } else {
-            NSString *content = [flycutOperator getPasteFromStackPosition];
-            if (content) {
-                [self addClipToPasteboard:content];
-            }
-        }
-        [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
-        [self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.5];
-    } else {
-        [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
-    }
+	// A bezel selection is pasted at most once. Releasing the modifier keys and
+	// pressing Return (or double-clicking) all confirm the same selection, so any
+	// further confirmation before the bezel is opened again is a duplicate.
+	if ( bezelSelectionFinished ) {
+		NSLog(@"pasteFromStack ignored - this bezel selection was already pasted or cancelled");
+		return;
+	}
+	bezelSelectionFinished = YES;
+	NSLog(@"pasteFromStack called");
+	FCPasteTransaction *transaction = [currentPasteTransaction retain];
+	if (transaction == nil || [transaction selectionStarted]) {
+		[transaction release];
+		return;
+	}
+	// Completion belongs to the invocation, never to an elapsed-time window.
+	[transaction setSelectionStarted:YES];
+	FlycutClipping *clipping = [flycutOperator clippingAtStackPosition];
+	BOOL selected = NO;
+	if ( [clipping isImageClipping] ) {
+		selected = YES;
+		[self addImageClipToPasteboard:clipping];
+	} else {
+		// Read the rich data before the paste may move the clipping to the top.
+		NSDictionary *richData = [flycutOperator getRichDataFromStackPosition];
+		NSString *content = [flycutOperator getPasteFromStackPosition];
+		if ( nil != content ) {
+			selected = YES;
+			[self addClipToPasteboard:content withRichData:richData];
+		}
+	}
+	if ( selected ) {
+		NSLog(@"Content found; adding it to the pasteboard and preparing to paste");
+		if ( [self pasteTransactionIsCurrent:transaction] ) {
+			[self performSelector:@selector(hideAppForPasteTransaction:)
+					 withObject:transaction
+					 afterDelay:0.2];
+			[self performSelector:@selector(completePasteInRememberedApplication:)
+					 withObject:transaction
+					 afterDelay:0.5];
+		} else if ( currentPasteTransaction == nil &&
+			[transaction generation] == nextPasteTransactionGeneration ) {
+			// Placement cleared this selection. Finish its UI without retrying the paste.
+			// Snapshot/restore callbacks may have opened (and even cleared) a newer
+			// selection, so nil alone does not establish ownership of the visible UI.
+			[self hideApp];
+		}
+	} else {
+		NSLog(@"No content found in stack position");
+		if ( transaction == nil || [self pasteTransactionIsCurrent:transaction] )
+			[self hideApp];
+		[self clearPasteTransactionIfCurrent:transaction];
+	}
+	[transaction release];
     [self restoreStashedStoreAndUpdate];
 }
 
 - (void)moveItemAtStackPositionToTopOfStack
 {
 	if ( [flycutOperator stackPositionIsInBounds] ) {
-		[self pasteIndexAndUpdate: [flycutOperator stackPosition]];
+		// stackPosition already IS a store position. It must never be run through the menu's
+		// search-box mapping, which is what the old -pasteIndexAndUpdate: did.
+		// The copy is final: a later Escape or hotkey press must not roll it back. The
+		// transaction stays open, so a modifier release can still paste this clipping.
+		FCPasteTransaction *transaction = [currentPasteTransaction retain];
+		if ( [self pasteStorePositionAndUpdate: [flycutOperator stackPosition]] &&
+			[self pasteTransactionIsCurrent:transaction] )
+			[transaction setClipboardCommitted:YES];
+		[transaction release];
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
 	} else {
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
 	}
 }
 
-- (void)pasteIndexAndUpdate:(int) position {
-    NSString* search = [searchBox stringValue];
-    if ( nil != search && 0 != search.length )
-    {
-        NSArray *mapping = [flycutOperator previousIndexes:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:search];
-        position = [mapping[position] intValue];
-    }
+// Pastes the clipping at the given STORE position. Unlike the old -pasteIndexAndUpdate:
+// this never reads the menu's search box: every caller resolves its own mapping while it
+// still knows which list the position came from. Returns true when something actually
+// reached the pasteboard, so the caller can skip faking cmd-V - otherwise the previous
+// pasteboard contents (typically the last thing pasted) would be inserted again.
+- (bool)pasteStorePositionAndUpdate:(int) position {
+    if ( position < 0 || position >= [flycutOperator jcListCount] )
+        return false;
 
     FlycutClipping *clipping = [flycutOperator clippingAtIndex:position];
     if (clipping && [clipping isImageClipping]) {
-        [self addImageClipToPasteboard:clipping];
+        if ( ! [self addImageClipToPasteboard:clipping] )
+            return false;
         if ([[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"]) {
             [flycutOperator getPasteFromIndex:position];
         }
-        [self updateMenu];
-    } else {
-        NSString *content = [flycutOperator getPasteFromIndex: position];
-        if ( nil != content )
-        {
-            [self addClipToPasteboard:content];
-            [self updateMenu];
-        }
+        return true;
     }
+
+    // Read the rich data before getPasteFromIndex: may move the clipping to the top.
+    NSDictionary *richData = [flycutOperator getRichDataFromIndex: position];
+    NSString *content = [flycutOperator getPasteFromIndex: position];
+    if ( nil == content )
+        return false;
+
+    [self addClipToPasteboard:content withRichData:richData];
+    return true;
 }
 
 - (void)metaKeysReleased
@@ -1565,7 +2605,28 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 }
 
 - (void)windowDidResignKey:(NSNotification *)notification {
+	if ( [notification object] == searchWindow ) {
+		// -hideApp does not close the search window properly, so isSearchWindowDisplayed
+		// would stay set - and -pollPB: reads that as "a selection is in progress" and
+		// stops capturing altogether, with nothing to show the user why. A successful
+		// selection marks the window hidden before orderOut so its transaction survives.
+		if ( isSearchWindowDisplayed )
+			[self hideSearchWindow];
+		return;
+	}
+
 	[self hideApp];
+}
+
+- (void)windowDidBecomeKey:(NSNotification *)notification {
+	// The search window is opened from a global hotkey while another app is
+	// active, and app activation is asynchronous on modern macOS.  A
+	// makeFirstResponder: call at show time runs before the window can take
+	// focus, so the field accepts keystrokes but never shows its caret.
+	// Focus the field once the window has actually become key.
+	if ( [notification object] == searchWindow ) {
+		[searchWindow makeFirstResponder:searchWindowSearchField];
+	}
 }
 
 -(void)fakeKey:(NSNumber*) keyCode withCommandFlag:(BOOL) setFlag
@@ -1607,8 +2668,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 -(void)fakeCommandV {
     NSLog(@"fakeCommandV called - attempting to paste");
 
-    // Check accessibility without prompting - the startup alert handles prompting.
-    // Using @YES here would trigger a system dialog that steals focus and breaks paste.
+    // Check without prompting; prompting here would steal focus and break paste.
     BOOL accessibilityEnabled = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @NO});
 
     if (!accessibilityEnabled) {
@@ -1617,64 +2677,89 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         NSLog(@"[Accessibility FAILURE] Cannot simulate Cmd-V paste. Bundle: %@, ID: %@, Trusted: NO. User must grant Accessibility permission in System Settings.", bundlePath, bundleID);
         
-        dispatch_async(dispatch_get_main_queue(), ^{
-            NSAlert *alert = [[NSAlert alloc] init];
-            alert.messageText = @"Accessibility Access Required";
-            alert.informativeText = @"Flycut needs accessibility access to paste.\n\nIf you already granted permission, try removing Flycut from the Accessibility list, adding it again, and restarting the app.";
-            [alert addButtonWithTitle:@"Open Settings"];
-            [alert addButtonWithTitle:@"Cancel"];
-            NSModalResponse response = [alert runModal];
-            [alert release];
-            if (response == NSAlertFirstButtonReturn) {
-                [self openAccessibilitySettings];
-            }
-        });
+        if (FlycutShouldShowAccessibilityExplanation(
+                true,
+                accessibilityEnabled,
+                hasShownAccessibilityExplanationThisSession)) {
+            hasShownAccessibilityExplanationThisSession = YES;
+            [self showAccessibilityAlert];
+        }
         return;
     }
 
     [self fakeKey:FlycutPasteKeyCode() withCommandFlag:TRUE];
 }
 
-/*" +fakeDownArrow synthesizes keyboard events for the down-arrow key. "*/
--(void)fakeDownArrow { [self fakeKey:@125 withCommandFlag:FALSE]; }
-
-/*" +fakeUpArrow synthesizes keyboard events for the up-arrow key. "*/
--(void)fakeUpArrow { [self fakeKey:@126 withCommandFlag:FALSE]; }
-
-// Perform the search and display updated results when the user types.
--(void)controlTextDidChange:(NSNotification *)aNotification
+- (BOOL)postCommandVToProcessIdentifier:(pid_t)processIdentifier
 {
-    NSString* search = [searchBox stringValue];
-    [self updateMenuContaining:search];
-}
+    if ( processIdentifier <= 0 ) {
+        DLog(@"No paste target process identifier");
+        return NO;
+    }
 
-// Perform the search and display updated results when the search field performs its action.
--(IBAction)searchItems:(id)sender
-{
-    NSString* search = [searchBox stringValue];
-    [self updateMenuContaining:search];
+    BOOL accessibilityEnabled = AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)@{(__bridge NSString *)kAXTrustedCheckOptionPrompt: @NO});
+    if ( !accessibilityEnabled ) {
+        // An explicit paste may request native consent, never a prerequisite app
+        // dialog, and only once per session (the same gate as -fakeCommandV), so a
+        // repeated paste without access does not bring up the system dialog again.
+        // Do not resume this transaction even if permission changes here.
+        if (FlycutShouldShowAccessibilityExplanation(
+                true,
+                accessibilityEnabled,
+                hasShownAccessibilityExplanationThisSession)) {
+            hasShownAccessibilityExplanationThisSession = YES;
+            [self showAccessibilityAlert];
+        }
+        return NO;
+    }
+
+    // Resolve at the actual post boundary, not when the selection first opened.
+    NSNumber *resolvedKey = FlycutPasteKeyCode();
+    if (resolvedKey == nil)
+        return NO;
+    CGKeyCode pasteKey = (CGKeyCode)[resolvedKey unsignedShortValue];
+
+    CGEventSourceRef sourceRef = CGEventSourceCreate(kCGEventSourceStateCombinedSessionState);
+    if ( !sourceRef ) {
+        DLog(@"No event source");
+        return NO;
+    }
+
+    CGEventRef commandDown = CGEventCreateKeyboardEvent(sourceRef, kVK_Command, true);
+    CGEventRef eventDown = CGEventCreateKeyboardEvent(sourceRef, pasteKey, true);
+    CGEventRef eventUp = CGEventCreateKeyboardEvent(sourceRef, pasteKey, false);
+    CGEventRef commandUp = CGEventCreateKeyboardEvent(sourceRef, kVK_Command, false);
+    if ( !commandDown || !eventDown || !eventUp || !commandUp ) {
+        DLog(@"Could not create targeted synthetic paste events");
+        if ( commandDown ) CFRelease(commandDown);
+        if ( eventDown ) CFRelease(eventDown);
+        if ( eventUp ) CFRelease(eventUp);
+        if ( commandUp ) CFRelease(commandUp);
+        CFRelease(sourceRef);
+        return NO;
+    }
+
+    CGEventSetFlags(commandDown, kCGEventFlagMaskCommand|0x000008);
+    CGEventSetFlags(eventDown, kCGEventFlagMaskCommand|0x000008);
+    CGEventSetFlags(eventUp, kCGEventFlagMaskCommand|0x000008);
+    CGEventPostToPid(processIdentifier, commandDown);
+    CGEventPostToPid(processIdentifier, eventDown);
+    CGEventPostToPid(processIdentifier, eventUp);
+    CGEventPostToPid(processIdentifier, commandUp);
+
+    CFRelease(commandDown);
+    CFRelease(eventDown);
+    CFRelease(eventUp);
+    CFRelease(commandUp);
+    CFRelease(sourceRef);
+    return YES;
 }
 
 // Catch keystrokes in the search field and look for arrows.
 -(BOOL)control:(NSControl *)control textView:(NSTextView *)fieldEditor doCommandBySelector:(SEL)commandSelector
 {
-    // Handle menu search box navigation
-    if (control == searchBox) {
-        if( commandSelector == @selector(moveUp:) )
-        {
-            [[searchBox window] makeFirstResponder:menuFirstResponder];
-            [self fakeUpArrow];
-            return YES;    // We handled this command; don't pass it on
-        }
-        if( commandSelector == @selector(moveDown:) )
-        {
-            [[searchBox window] makeFirstResponder:menuFirstResponder];
-            [self fakeDownArrow];
-            return YES;    // We handled this command; don't pass it on
-        }
-    }
     // Handle search window navigation
-    else if (control == searchWindowSearchField) {
+    if (control == searchWindowSearchField) {
         if( commandSelector == @selector(moveUp:) )
         {
             NSInteger currentRow = [searchWindowTableView selectedRow];
@@ -1713,6 +2798,17 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 
 -(void)pollPB:(NSTimer *)timer
 {
+    // Do not capture new clippings while the user is picking one from the menu or the
+    // search window. Because this timer runs in NSRunLoopCommonModes it fires during menu
+    // tracking, and inserting a new clipping at the top of the store would make every row
+    // jump down by one while the user is aiming at it. Correctness no longer depends on
+    // this freeze - a selection is resolved by clipping identity, see
+    // -pasteClipping:fromList: - but the list should not move under the pointer.
+    // pbCount is left untouched so the change is still detected and captured once the menu
+    // or search window closes (menuDidClose: fires a catch-up poll).
+    if ( isMenuOpen || isSearchWindowDisplayed )
+        return;
+
     NSInteger pasteboardGeneration = [jcPasteboard changeCount];
     if ( [pbCount integerValue] == pasteboardGeneration || [flycutOperator storeDisabled] )
         return;
@@ -1736,12 +2832,35 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
             currRunningApp = currApp;
 
     if ( type != nil ) {
+        // Reading remote clipboard data can block. Keep it off the main thread;
+        // transfer activity must not change the user's explicit paused state.
         dispatch_async(clipboardReadQueue, ^{
             NSString *contents = [jcPasteboard stringForType:type];
-            NSInteger pasteboardGenerationAfterRead = [jcPasteboard changeCount];
             BOOL contentShouldBeSkipped = contents == nil;
             if (!contentShouldBeSkipped)
                 contentShouldBeSkipped = [flycutOperator shouldSkip:contents ofType:type fromAvailableTypes:availableTypes];
+
+            // Capture rich representations of the text so pasting an older clipping
+            // can keep its formatting.  Only done after the skip checks above, and read
+            // before the generation is sampled below, so a clipboard change during these
+            // reads discards the whole capture and rich data of concealed/transient
+            // clippings is never stored.
+            NSMutableDictionary *richData = nil;
+            if ( !contentShouldBeSkipped && [[NSUserDefaults standardUserDefaults] boolForKey:@"preserveTextFormatting"] ) {
+                for ( NSString *richType in [NSArray arrayWithObjects:NSPasteboardTypeRTF, NSPasteboardTypeHTML, nil] ) {
+                    // Types come from the snapshot of the generation detected above.
+                    if ( [availableTypes containsObject:richType] ) {
+                        NSData *data = [jcPasteboard dataForType:richType];
+                        // Cap the size so one giant rich clipping can't bloat the saved store.
+                        if ( nil != data && [data length] > 0 && [data length] <= 1048576 ) {
+                            if ( nil == richData )
+                                richData = [NSMutableDictionary dictionaryWithCapacity:2];
+                            [richData setObject:data forKey:richType];
+                        }
+                    }
+                }
+            }
+            NSInteger pasteboardGenerationAfterRead = [jcPasteboard changeCount];
 
             dispatch_async(dispatch_get_main_queue(), ^{
                 BOOL revealPasteboardTypes = [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
@@ -1763,7 +2882,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
                                         fromApp:@"Flycut"
                                withAppBundleURL:nil
                                          target:self
-                         clippingAddedSelector:@selector(updateMenu)];
+                         clippingAddedSelector:@selector(clippingWasAdded)];
                     return;
                 }
 
@@ -1774,10 +2893,11 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 
                 [flycutOperator addClipping:contents
                                      ofType:type
+                               withRichData:richData
                                     fromApp:[currRunningApp localizedName]
                            withAppBundleURL:currRunningApp.bundleURL.path
                                      target:self
-                     clippingAddedSelector:@selector(updateMenu)];
+                     clippingAddedSelector:@selector(clippingWasAdded)];
             });
         });
     }
@@ -1799,7 +2919,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 
             if ( gifURL != nil ) {
                 // Skip the still entirely; the async download adds the animated GIF on success.
-                [self downloadAndCaptureGIFFromURL:gifURL fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path];
+                [self downloadAndCaptureGIFFromURL:gifURL fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path pasteboardGeneration:pasteboardGeneration];
             } else {
                 NSString *captureType = imageType;
                 BOOL textTypeRecordsDiagnostics = type != nil;
@@ -1822,7 +2942,10 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
                                 captureEpoch,
                                 clipboardCaptureEpoch,
                                 [flycutOperator storeDisabled]
-                            )) {
+                            )
+                            // Also bound to the generation whose types were checked (the
+                            // clipboard must still hold it) and to image capture being on.
+                            && [self isImageCaptureCurrentForGeneration:pasteboardGeneration]) {
                             if (revealPasteboardTypes) {
                                 // Diagnostics record the type instead of the payload, once per copy.
                                 if (!textTypeRecordsDiagnostics)
@@ -1831,9 +2954,9 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
                                                         fromApp:@"Flycut"
                                                withAppBundleURL:nil
                                                          target:self
-                                         clippingAddedSelector:@selector(updateMenu)];
+                                         clippingAddedSelector:@selector(clippingWasAdded)];
                             } else {
-                                [flycutOperator addImageClipping:imageData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path imageType:captureType target:self clippingAddedSelector:@selector(updateMenu)];
+                                [flycutOperator addImageClipping:imageData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path imageType:captureType target:self clippingAddedSelector:@selector(clippingWasAdded)];
                             }
                         } else {
                             DLog(@"Image: Blocked, paused, or changed during read");
@@ -1848,8 +2971,13 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 
 - (void)cancelBezelSelection
 {
-	// A selection made while the bezel is still visible has already queued its
-	// paste and delayed hide (see -pasteFromStack); a cancelled selection must not paste.
+	bezelSelectionFinished = YES;
+	// Escape cancels what the selection already scheduled. The bezel paste is owned by a
+	// transaction, so -cancelPendingPasteCompletion cancels its delayed hide, activation
+	// and Cmd-V and restores the clipboard while the transaction still owns it.
+	[self cancelPendingPasteCompletion];
+	// Delayed requests queued without a transaction (the copy-only action's delayed hide)
+	// must not run after the cancellation either, e.g. into a bezel opened again.
 	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fakeCommandV) object:nil];
 	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideApp) object:nil];
 	[self restoreStashedStoreAndUpdate];
@@ -1925,7 +3053,6 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
             case NSDeleteCharacter:
                 if ( [flycutOperator clearItemAtStackPosition] ) {
                     [self updateBezel];
-                    [self updateMenu];
                 }
                 break;
             case NSDeleteFunctionKey: break;
@@ -1941,24 +3068,32 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
             case 's': case 'S': // Save / Save-and-delete
                 {
                     bool success = [flycutOperator saveFromStack];
+
+                    // Delete while the store that was saved from is still the current one.
+                    // -restoreStashedStore swaps the store AND the stack position back, so
+                    // deleting after it removed an entry from the main list - at whatever
+                    // position the user had been at there - instead of the clipping that had
+                    // just been saved.  Saving a favorite therefore destroyed an unrelated
+                    // clipping.
+                    if ( success && ( modifiers & NSEventModifierFlagShift ) ) {
+                        [flycutOperator clearItemAtStackPosition];
+                        [self updateBezel];
+                    }
+
                     [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
                     [self restoreStashedStoreAndUpdate];
-
-                    if ( success ) {
-                        if ( modifiers & NSEventModifierFlagShift ) {
-                            [flycutOperator clearItemAtStackPosition];
-                            [self updateBezel];
-                            [self updateMenu];
-                        }
-                    }
                 }
                 break;
             case 'f':
+                // Switch lists in the open bezel. It used to be ordered out and in
+                // again for this; as the key window it then resigned key, and
+                // -windowDidResignKey: took that for the bezel closing (-hideApp):
+                // a pinned bezel lost its pin, so releasing the keys pasted, and
+                // Flycut was hidden. The bezel's -update, which AppKit sends after
+                // each event, repaints its background in the list's color.
                 [flycutOperator toggleToFromFavoritesStore];
                 [bezel setColor:[flycutOperator favoritesStoreIsSelected]];
                 [self updateBezel];
-                [self hideBezel];
-                [self showBezel];
                 break;
             case 'F':
                 if ( [flycutOperator saveFromStackToFavorites] )
@@ -1966,15 +3101,13 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
                     [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
                     [self restoreStashedStoreAndUpdate];
                     [self updateBezel];
-                    [self updateMenu];
                 }
 
                 [self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
                 break;
             case ' ':
                 isBezelPinned = YES;
-                [bezel setCharString:[NSString stringWithFormat:@"%d of %d (pinned)",
-                    [flycutOperator stackPosition] + 1, [flycutOperator jcListCount]]];
+                [bezel setCharString:[self bezelCounterString]];
                 break;
             default: // It's not a navigation/application-defined thing, so let's figure out what to do with it.
 				DLog(@"PRESSED %d", pressed);
@@ -1995,39 +3128,15 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
         [self pasteFromStack];
     } else if (theEvent.type == NSEventTypeRightMouseUp) {
         isBezelPinned = YES;
-        [bezel setCharString:[NSString stringWithFormat:@"%d of %d (pinned)",
-            [flycutOperator stackPosition] + 1, [flycutOperator jcListCount]]];
+        [bezel setCharString:[self bezelCounterString]];
     }
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification
 {
-	// CloudKit notifications disabled - uncomment if you need CloudKit sync
-	// [NSApp registerForRemoteNotificationTypes:NSRemoteNotificationTypeNone];// silent push notification!
-
 	//Create our hot keys
 	[self toggleMainHotKey:[NSNull null]];
 	[self toggleSearchHotKey:[NSNull null]];
-}
-
-// Remote Notifications (APN, aka Push Notifications) are only available on apps distributed via the App Store.
-// To support building for both distribution channels, include the following two methods to detect if Remote Notifications are available and inform MJCloudKitUserDefaultsSync.
-- (void)application:(NSApplication *)application
-didRegisterForRemoteNotificationsWithDeviceToken:(NSData *)deviceToken {
-	// Forward the token to your provider, using a custom method.
-	NSLog(@"Registered for remote notifications.");
-//	[[MJCloudKitUserDefaultsSync sharedSync] setRemoteNotificationsEnabled:YES];
-}
-
-- (void)application:(NSApplication *)application
-didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
-	NSLog(@"Remote notification support is unavailable due to error: %@", error);
-//	[[MJCloudKitUserDefaultsSync sharedSync] setRemoteNotificationsEnabled:NO];
-}
-
-- (void)application:(NSApplication *)application didReceiveRemoteNotification:(NSDictionary *)userInfo
-{
-	//[flycutOperator checkCloudKitUpdates];
 }
 
 - (void) updateBezel
@@ -2035,7 +3144,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	[flycutOperator adjustStackPositionIfOutOfBounds];
 	if ([flycutOperator jcListCount] == 0) { // empty
 		[bezel setText:@""];
-		[bezel setCharString:@"Empty"];
+		[bezel setCharString:[self bezelCounterString]];
         [bezel setSource:@""];
         [bezel setDate:@""];
         [bezel setSourceIcon:nil];
@@ -2073,13 +3182,37 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(void)hideApp
 {
+	// The bezel's Favorites view ends with the bezel, however it closes: focus moved
+	// elsewhere (Cmd-, opening Preferences, a click while it is pinned) or the delayed
+	// hide after Shift-F or the copy-only key. Escape and a paste restore the history
+	// themselves. Left swapped in, the favorites stayed the current list: the search
+	// window and the next bezel showed them in place of the history.
+	if ( isBezelDisplayed )
+		[self restoreStashedStoreAndUpdate];
 	isBezelPinned = NO;
+	// A click on the status item while the bezel is shown opens the list, whose panel
+	// takes key focus from the bezel, and that ends up here (-windowDidResignKey:).
+	// Hiding Flycut would close the list again, and the list keeps capture frozen until
+	// it closes (-listControllerDidClose:), so both stay while it is open.
+	BOOL listIsOpen = [listController isOpen];
+	// Hiding the app tears down any open menu and the search window anyway, so clear both
+	// freeze flags here as a backstop.  Neither is meant to outlive its surface, and a
+	// stale one silently stops -pollPB: from capturing anything at all.
+	if ( ! listIsOpen )
+		isMenuOpen = NO;
+	isSearchWindowDisplayed = NO;
 	[self hideBezel];
-	[NSApp hide:self];
+	if ( ! listIsOpen )
+		[NSApp hide:self];
 }
 
 - (void) applicationWillResignActive:(NSApplication *)app; {
 	// This should be hidden anyway, but just in case it's not.
+	// Only the bezel's Favorites view ends here: the Favorites number swaps the
+	// favorites in for its check and may be waiting in its "Resize Stack" alert, and
+	// restoring under it would apply the favorites limit to the history.
+	if ( isBezelDisplayed )
+		[self restoreStashedStoreAndUpdate];
 	[self hideBezel];
 }
 
@@ -2087,12 +3220,25 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 - (void)hitMainHotKey:(SGHotKey *)hotKey
 {
 	if ( ! isBezelDisplayed ) {
+		// Opening the bezel starts a new selection, which may be pasted once.
+		bezelSelectionFinished = NO;
+		// A newly opened selection owns its own eventual paste.  It must never inherit a
+		// delayed activation or Cmd-V callback from the selection that just closed.
+		[self cancelPendingPasteCompletion];
+		[self rememberFrontmostApplicationForPaste];
 		//Do NOT activate the app so focus stays on app the user is interacting with
 		//https://github.com/TermiT/Flycut/issues/45
 		//[NSApp activateIgnoringOtherApps:YES];
 		if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"stickyBezel"] ) {
 			isBezelPinned = YES;
 		}
+		// The stack position is bezel state, so a new selection starts at the newest clipping.
+		// This used to happen as a side effect of -addClipping: resetting it, which meant a
+		// clipping arriving mid-selection moved the selection instead of the list moving under
+		// a selection that stays put.  Note this is deliberately not in -showBezel or -updateBezel:
+		// the favourites toggle ("f") refills the bezel after -toggleToFromFavoritesStore has
+		// swapped in that store's own remembered position, which must stay.
+		[flycutOperator setStackPositionToFirstItem];
 		[self showBezel];
 	} else {
 		[self stackDown];
@@ -2114,73 +3260,6 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	[mainHotKey setTarget: self];
 	[mainHotKey setAction: @selector(hitMainHotKey:)];
 	[[SGHotKeyCenter sharedCenter] registerHotKey:mainHotKey];
-}
-
-- (IBAction)toggleICloudSyncSettings:(id)sender
-{
-	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"syncSettingsViaICloud"] ) {
-		NSAlert *alert = [[NSAlert alloc] init];
-		[alert setMessageText:@"Warning"];
-		[alert addButtonWithTitle:@"Ok"];
-		[alert addButtonWithTitle:@"Cancel"];
-		[alert setInformativeText:@"Enabling iCloud Settings Sync will overwrite local settings if your iCloud account already has Flycut settings.  If you have never enabled this in Flycut on any computer, your current settings will be retained and loaded into iCloud."];
-		if ( [alert runModal] != NSAlertFirstButtonReturn )
-		{
-			[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:NO]
-													 forKey:@"syncSettingsViaICloud"];
-		}
-		[alert release];
-		// Add option to overwrite iCloud.
-	}
-}
-
-- (IBAction)toggleICloudSyncClippings:(id)sender
-{
-	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"syncClippingsViaICloud"] ) {
-		if ( [[NSUserDefaults standardUserDefaults] integerForKey:@"savePreference"] < 2 ) {
-			// Must set syncClippingsViaICloud = 2
-			NSAlert *alert = [[NSAlert alloc] init];
-			[alert setMessageText:@"Settings Change"];
-			[alert addButtonWithTitle:@"Ok"];
-			[alert addButtonWithTitle:@"Cancel"];
-			[alert setInformativeText:@"iCloud Clippings Sync will set 'Save: After each clip'."];
-			if ( [alert runModal] == NSAlertFirstButtonReturn )
-			{
-				[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithInt:2]
-														 forKey:@"savePreference"];
-			} else {
-				[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:NO]
-														 forKey:@"syncClippingsViaICloud"];
-			}
-			[alert release];
-		}
-	}
-
-	//[self registerOrDeregisterICloudSync];
-}
-
-- (IBAction)setSavePreference:(id)sender
-{
-	if ( [[NSUserDefaults standardUserDefaults] integerForKey:@"savePreference"] < 2 ) {
-		if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"syncClippingsViaICloud"] ) {
-			// Must disable syncClippingsViaICloud
-			NSAlert *alert = [[NSAlert alloc] init];
-			[alert setMessageText:@"Settings Change"];
-			[alert addButtonWithTitle:@"Ok"];
-			[alert addButtonWithTitle:@"Cancel"];
-			[alert setInformativeText:@"Disabling 'Save: After each clip' will disable iCloud Clippings Sync."];
-
-			if ( [alert runModal] == NSAlertFirstButtonReturn )
-			{
-				[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithBool:NO]];
-			}
-			else
-			{
-				[[NSUserDefaults standardUserDefaults] setValue:[NSNumber numberWithInt:2]];
-			}
-			[alert release];
-		}
-	}
 }
 
 - (IBAction)selectSaveLocation:(id)sender {
@@ -2222,7 +3301,6 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     if ( choice == NSAlertFirstButtonReturn ) {
         [self restoreStashedStoreAndUpdate]; // Only clear the clipping store.  Never the favorites.
         [flycutOperator clearList];
-        [self updateMenu];
 		if ( [[NSUserDefaults standardUserDefaults] integerForKey:@"savePreference"] >= 1 ) {
 			[flycutOperator saveEngine];
 		}
@@ -2232,69 +3310,53 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 -(IBAction)mergeClippingList:(id)sender {
     [flycutOperator mergeList];
-    [self updateMenu];
 }
 
-- (void)updateMenu {
-    dispatch_async(dispatch_get_main_queue(), ^{
-    if ( !statusItem || !statusItem.isEnabled )
-        return;
-
-        [self updateMenuContaining:nil];
-        // Clear the search box whenever the is reason for updateMenu to be called, since the nil call will produce non-searched results.
-        [searchBox setStringValue:@""];
-        [[[searchBox cell] cancelButtonCell] performClick:self];
-    });
-}
-
-- (void)updateMenuContaining:(NSString*)search {
-	// Use GDC to prevent concurrent modification of the menu, since that would be messy.
-	dispatch_async(dispatch_get_main_queue(), ^{
-		[jcMenu setMenuChangedMessagesEnabled:NO];
-
-		NSArray *returnedDisplayStrings = [flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:search];
-
-		NSArray *menuItems = [[[jcMenu itemArray] reverseObjectEnumerator] allObjects];
-
-		NSArray *clipStrings = [[returnedDisplayStrings reverseObjectEnumerator] allObjects];
-
-		// Figure out if the number of menu items is changing and add or remove entries as necessary.
-		// If we remove all of them and add all new ones, the menu won't redraw if the count is unchanged, so just reuse them by changing their title.
-		int oldItems = [menuItems count]-jcMenuBaseItemsCount;
-		int newItems = [clipStrings count];
-        DLog(@"list=%@, oldItems=%d, newItems=%d", returnedDisplayStrings, oldItems, newItems);
-        
-        for ( int i = 0; i < oldItems; i++ )
-            [jcMenu removeItemAtIndex:0];
-        
-        for ( int i = 0; i < newItems; i++ )
-        {
-            NSMenuItem *item;
-            item = [[NSMenuItem alloc] initWithTitle:[clipStrings objectAtIndex:i]
-                                              action:@selector(processMenuClippingSelection:)
-                                       keyEquivalent:@""];
-            [item setTarget:self];
-            [item setEnabled:YES];
-            if ([[clipStrings objectAtIndex:i] hasPrefix:@"[Image"]) {
-                NSImage *imgIcon = [NSImage imageNamed:NSImageNameQuickLookTemplate];
-                [imgIcon setSize:NSMakeSize(16, 16)];
-                [item setImage:imgIcon];
-            }
-            [jcMenu insertItem:item atIndex:0];
-            [item release];
-        }
-    });
-}
-
--(IBAction)processMenuClippingSelection:(id)sender
+// Cap a menu-item title to a consistent rendered width.
+//
+// FlycutClipping truncates display strings by character count (displayLen), not
+// by rendered width. In a proportional font a run of wide glyphs -- a pasted
+// horizontal rule of em dashes or box-drawing characters, or CJK text -- reaches
+// the character limit while taking up far more horizontal space than the same
+// number of average Latin characters. Because NSMenu sizes itself to its widest
+// item, one such clipping balloons the whole menu and leaves every other row
+// padded with trailing space. Bound the rendered width here so the menu width
+// stays consistent regardless of glyph width, using the same measure-and-trim
+// approach the bezel already applies to its source-app label in
+// -[BezelWindow setSource:]. The rows of the menu-bar list use it too
+// (-listController:titleForClipping:), so such a title ends where others do.
+- (NSString *)menuTitleFittingWidth:(NSString *)title
 {
-	int index=[[sender menu] indexOfItem:sender];
-	[self pasteIndexAndUpdate:index];
+	// Headroom above the nominal displayLen-character width, so normal clippings
+	// (already capped at displayLen characters) are not trimmed further here;
+	// only rows of unusually wide glyphs are.
+	const CGFloat kMenuTitleWidthHeadroom = 1.2;
 
-	if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"menuSelectionPastes"] ) {
-		[self performSelector:@selector(hideApp) withObject:nil];
-		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
+	NSDictionary *attributes = @{NSFontAttributeName: [NSFont menuFontOfSize:0.0]};
+
+	NSInteger displayLen = [[NSUserDefaults standardUserDefaults] integerForKey:@"displayLen"];
+	if ( displayLen <= 0 )
+		displayLen = 40;
+
+	// Estimate the width of displayLen characters of ordinary text from a pangram.
+	NSString *reference = @"The quick brown fox jumps over the lazy dog ";
+	CGFloat averageCharWidth = [reference sizeWithAttributes:attributes].width / (CGFloat)[reference length];
+	CGFloat maxWidth = averageCharWidth * displayLen * kMenuTitleWidthHeadroom;
+
+	if ( [title sizeWithAttributes:attributes].width <= maxWidth )
+		return title;
+
+	// Trim whole composed-character sequences (not UTF-16 units) so we never
+	// split a surrogate pair or a base+combining-mark cluster before the ellipsis.
+	NSString *fitted = title;
+	while ( [fitted length] > 0
+			&& [[fitted stringByAppendingString:@"…"] sizeWithAttributes:attributes].width > maxWidth )
+	{
+		NSRange lastChar = [fitted rangeOfComposedCharacterSequenceAtIndex:[fitted length] - 1];
+		fitted = [fitted substringToIndex:lastChar.location];
 	}
+
+	return [fitted stringByAppendingString:@"…"];
 }
 
 -(void) setPBBlockCount:(NSNumber *)newPBBlockCount
@@ -2304,14 +3366,207 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     pbBlockCount = newPBBlockCount;
 }
 
--(void)addClipToPasteboard:(NSString*)pbFullText
+#pragma mark - Menu-bar list
+
+// The commands below the list are the status menu's own command items from the nib
+// (everything after its first separator), so titles, actions and key equivalents stay
+// in one place, including the Pause/Resume item that -setupClipboardTrackingMenuItem
+// inserts.
+-(NSArray *)listCommandItems
 {
-    [jcPasteboard declareTypes:@[NSPasteboardTypeString] owner:nil];
-    [jcPasteboard setString:pbFullText forType:NSPasteboardTypeString];
-    [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
+	NSMutableArray *items = [NSMutableArray array];
+	BOOL afterFirstSeparator = NO;
+	for ( NSMenuItem *item in [jcMenu itemArray] ) {
+		if ( !afterFirstSeparator ) {
+			afterFirstSeparator = [item isSeparatorItem];
+			continue;
+		}
+		if ( ![item isHidden] )
+			[items addObject:item];
+	}
+	return items;
 }
 
--(void)addImageClipToPasteboard:(FlycutClipping *)clipping
+// Places the clipping of a list row on the pasteboard. The row carries the clipping
+// itself, so its position is looked up now (a capture may have moved it). The row's own
+// store is made the current one for the paste, whichever store the bezel shows (the same
+// temporary switch as -checkFavoritesRememberNumPref:), so both lists are ordered exactly
+// as the bezel orders them:
+// - a history row through #7's store-position path, as the status menu pasted, so with
+//   pasteMovesToTop it moves to the top of the history;
+// - a favorite as the bezel pastes the selected favorite (-pasteFavoriteAtPosition:); it
+//   keeps its place, as every favorite does on a paste.
+-(bool)pasteClipping:(FlycutClipping *)clipping fromList:(FlycutList)list
+{
+	int position = [flycutOperator indexOfClipping:clipping inList:list];
+	if ( position < 0 )
+		return false;
+	BOOL favorites = ( list == FlycutListFavorites );
+	BOOL switched = ( favorites != (BOOL)[flycutOperator favoritesStoreIsSelected] );
+	if ( switched )
+		[flycutOperator toggleToFromFavoritesStore];
+	bool pasted = favorites ? [self pasteFavoriteAtPosition:position] : [self pasteStorePositionAndUpdate:position];
+	if ( switched ) {
+		// Back to the store the bezel shows, with its own selection.
+		[flycutOperator toggleToFromFavoritesStore];
+		if ( isBezelDisplayed )
+			[self updateBezel];
+	}
+	return pasted;
+}
+
+// A favorite at a position of the current store (the favorites), pasted as
+// -pasteFromStack pastes the bezel's selected favorite: text through -getPasteFromIndex:,
+// which leaves the favorites in their order (pasteMovesToTop reorders the history only);
+// an image as pasteFromStack's image branch does.
+-(bool)pasteFavoriteAtPosition:(int)position
+{
+	FlycutClipping *clipping = [flycutOperator clippingAtIndex:position];
+	if ( clipping == nil )
+		return false;
+	if ( [clipping isImageClipping] )
+		return [self addImageClipToPasteboard:clipping];
+	NSDictionary *richData = [flycutOperator getRichDataFromIndex:position];
+	NSString *content = [flycutOperator getPasteFromIndex:position];
+	if ( content == nil )
+		return false;
+	[self addClipToPasteboard:content withRichData:richData];
+	return true;
+}
+
+- (NSString *)listController:(FlycutListController *)controller titleForClipping:(FlycutClipping *)clipping
+{
+	return [self menuTitleFittingWidth:[clipping displayString]];
+}
+
+// A list row was chosen. It replaces the click handler of the old status menu's
+// clipping rows and works the same way: copy the clipping, or with "menuSelectionPastes"
+// paste it into the application that is frontmost now, through #7's paste transaction.
+- (void)listController:(FlycutListController *)controller didChooseClipping:(FlycutClipping *)clipping inList:(FlycutList)list
+{
+	BOOL shouldPasteImmediately = [[NSUserDefaults standardUserDefaults] boolForKey:@"menuSelectionPastes"];
+	FCPasteTransaction *transaction = nil;
+
+	// A new selection changes the pasteboard and invalidates older delayed paste callbacks.
+	[self cancelPendingPasteCompletion];
+	if ( shouldPasteImmediately ) {
+		// The list never activates Flycut, so the frontmost application is still the one
+		// the user works in. Bind the paste to it now.
+		[self rememberFrontmostApplicationForPaste];
+		transaction = [currentPasteTransaction retain];
+	}
+
+	bool pasted = [self pasteClipping:clipping fromList:list];
+	if ( ! pasted ) {
+		NSLog(@"List selection: the clipping is no longer listed - nothing pasted");
+		NSBeep(); // Pasting some other clipping would be worse than pasting nothing at all.
+	}
+
+	if ( shouldPasteImmediately ) {
+		if ( pasted && transaction != nil ) {
+			[self performSelector:@selector(hideAppForPasteTransaction:)
+					   withObject:transaction
+					   afterDelay:0.2];
+			[self performSelector:@selector(completePasteInRememberedApplication:)
+					   withObject:transaction
+					   afterDelay:0.5];
+		} else {
+			[self performSelector:@selector(hideApp) withObject:nil];
+			[self clearPasteTransactionIfCurrent:transaction];
+		}
+	}
+	[transaction release];
+}
+
+- (void)listController:(FlycutListController *)controller didChooseCommand:(NSMenuItem *)item
+{
+	SEL action = [item action];
+	if ( action == NULL )
+		return;
+	id target = [item target];
+	if ( target != nil ) {
+		if ( [target respondsToSelector:action] )
+			[target performSelector:action withObject:item];
+	} else {
+		[NSApp sendAction:action to:nil from:item];
+	}
+}
+
+- (void)listControllerDidOpen:(FlycutListController *)controller
+{
+	// The status menu's freeze: no capture while the list is open (see -pollPB:).
+	[self menuWillOpen:jcMenu];
+	[[statusItem button] setHighlighted:YES];
+}
+
+- (void)listControllerDidClose:(FlycutListController *)controller
+{
+	[[statusItem button] setHighlighted:NO];
+	// Resumes capture and picks up what was copied while the list was open.
+	[self menuDidClose:jcMenu];
+}
+
+// The status item's frame on screen, up to the top edge of its screen: a press at the very
+// top of the screen above the button hits the status item too.
+- (NSRect)statusItemFrameForListController:(FlycutListController *)controller
+{
+	NSStatusBarButton *button = [statusItem button];
+	NSWindow *window = [button window];
+	if ( button == nil || window == nil )
+		return NSZeroRect;
+	NSRect frame = [window convertRectToScreen:[button convertRect:[button bounds] toView:nil]];
+	NSScreen *screen = [window screen];
+	if ( screen != nil && NSMaxY([screen frame]) > NSMaxY(frame) )
+		frame.size.height = NSMaxY([screen frame]) - NSMinY(frame);
+	return frame;
+}
+
+-(void)addClipToPasteboard:(NSString*)pbFullText
+{
+    [self addClipToPasteboard:pbFullText withRichData:nil];
+}
+
+// Writes the text (plus its RTF/HTML representations, when given) to the pasteboard.
+// Inside a paste transaction the placement is owned: the previous clipboard is
+// snapshotted first, and the written text becomes the transaction's payload.
+-(void)addClipToPasteboard:(NSString*)pbFullText withRichData:(NSDictionary *)richData
+{
+    FCPasteTransaction *transaction = [currentPasteTransaction retain];
+    if (transaction != nil) {
+        if ([transaction hasSelectedPayload]) {
+            [transaction release];
+            return;
+        }
+        NSInteger originalCount = [jcPasteboard changeCount];
+        NSArray *snapshot = [self snapshotPasteboardItems];
+        if (snapshot == nil || [jcPasteboard changeCount] != originalCount ||
+            ![self pasteTransactionIsCurrent:transaction]) {
+            [self clearPasteTransactionIfCurrent:transaction];
+            [transaction release];
+            return;
+        }
+        [transaction setPreviousPasteboardItems:snapshot];
+        [transaction setSelectedPayload:pbFullText];
+        pbFullText = [transaction selectedPayload];
+    }
+    NSMutableArray *pbTypes = [NSMutableArray arrayWithObject:NSPasteboardTypeString];
+    if ( nil != richData )
+        [pbTypes addObjectsFromArray:[richData allKeys]];
+    NSInteger declaredCount = [jcPasteboard declareTypes:pbTypes owner:nil];
+    [transaction setOwnedChangeCount:declaredCount];
+    BOOL written = [jcPasteboard setString:pbFullText forType:NSPasteboardTypeString];
+    for ( NSString *richType in richData )
+        [jcPasteboard setData:[richData objectForKey:richType] forType:richType];
+    [self setPBBlockCount:@(declaredCount)];
+    if (!written || [jcPasteboard changeCount] != declaredCount)
+        [self clearPasteTransactionIfCurrent:transaction];
+    [transaction release];
+}
+
+// Returns YES when the image (or the GIF's file reference) was placed on the pasteboard.
+// Inside a paste transaction the placement is owned exactly like text: the previous
+// clipboard is snapshotted first and the written representation becomes the payload.
+-(BOOL)addImageClipToPasteboard:(FlycutClipping *)clipping
 {
     NSString *type = [clipping type];
     if (!type || [type length] == 0)
@@ -2320,23 +3575,67 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     // Animated GIFs must be offered as a FILE reference ONLY. Apps like Slack/Discord
     // upload the actual .gif file (preserving animation); if raw image data is also on
     // the pasteboard they grab that instead and flatten it to a single frame. Pointing
-    // at the persistent store file is safe — it lives as long as the clipping does.
+    // at the store file (with Save: Never, its temporary copy) is safe — it lives as
+    // long as the clipping does.
+    NSURL *fileURL = nil;
+    NSData *imageData = nil;
     if ([type isEqualToString:@"com.compuserve.gif"]) {
         NSString *path = [[FlycutImageStore sharedStore] imageFilePathForHash:[clipping imageHash]];
-        if (path) {
-            [jcPasteboard clearContents];
-            [jcPasteboard writeObjects:@[[NSURL fileURLWithPath:path]]];
-            [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
-            return;
+        if (path)
+            fileURL = [NSURL fileURLWithPath:path];
+    }
+    if (fileURL == nil)
+        imageData = [[FlycutImageStore sharedStore] imageDataForHash:[clipping imageHash]];
+
+    FCPasteTransaction *transaction = [currentPasteTransaction retain];
+    if (transaction != nil && [transaction hasSelectedPayload]) {
+        // The transaction's first placement stays its payload, as for text.
+        [transaction release];
+        return YES;
+    }
+    if (fileURL == nil && imageData == nil) {
+        // Nothing can be placed, so this selection must not paste whatever is there now.
+        [self clearPasteTransactionIfCurrent:transaction];
+        [transaction release];
+        return NO;
+    }
+    if (transaction != nil) {
+        NSInteger originalCount = [jcPasteboard changeCount];
+        NSArray *snapshot = [self snapshotPasteboardItems];
+        if (snapshot == nil || [jcPasteboard changeCount] != originalCount ||
+            ![self pasteTransactionIsCurrent:transaction]) {
+            [self clearPasteTransactionIfCurrent:transaction];
+            [transaction release];
+            return NO;
+        }
+        [transaction setPreviousPasteboardItems:snapshot];
+        if (fileURL != nil) {
+            [transaction setSelectedPayloadType:NSPasteboardTypeFileURL];
+            [transaction setSelectedPayloadData:[[fileURL absoluteString] dataUsingEncoding:NSUTF8StringEncoding]];
+        } else {
+            [transaction setSelectedPayloadType:type];
+            [transaction setSelectedPayloadData:imageData];
         }
     }
 
-    NSData *imageData = [[FlycutImageStore sharedStore] imageDataForHash:[clipping imageHash]];
-    if (imageData) {
-        [jcPasteboard declareTypes:@[type] owner:nil];
-        [jcPasteboard setData:imageData forType:type];
-        [self setPBBlockCount:[NSNumber numberWithInt:[jcPasteboard changeCount]]];
+    NSInteger declaredCount;
+    BOOL written;
+    if (fileURL != nil) {
+        declaredCount = [jcPasteboard clearContents];
+        [transaction setOwnedChangeCount:declaredCount];
+        written = [jcPasteboard writeObjects:@[fileURL]];
+    } else {
+        declaredCount = [jcPasteboard declareTypes:@[type] owner:nil];
+        [transaction setOwnedChangeCount:declaredCount];
+        written = [jcPasteboard setData:imageData forType:type];
     }
+    [self setPBBlockCount:@(declaredCount)];
+    if (!written || [jcPasteboard changeCount] != declaredCount) {
+        [self clearPasteTransactionIfCurrent:transaction];
+        written = NO;
+    }
+    [transaction release];
+    return written;
 }
 
 -(NSURL *)animatedGifURLFromPasteboard
@@ -2373,7 +3672,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     return url;
 }
 
--(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL
+-(void)downloadAndCaptureGIFFromURL:(NSURL *)url fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL pasteboardGeneration:(NSInteger)generation
 {
     // Pausing capture while the download runs discards it, as for clipboard reads.
     NSUInteger captureEpoch = clipboardCaptureEpoch;
@@ -2409,16 +3708,28 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
         NSData *gifData = [data retain];
         dispatch_async(dispatch_get_main_queue(), ^{
+            // The download can finish after the user copied something else, paused
+            // capture, turned diagnostics on, or turned image capture or GIF downloads off.
             // Diagnostics turned on during the download: save no payload.
             BOOL revealPasteboardTypes = [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
-            if ( captureEpoch == clipboardCaptureEpoch && ! [pbCount isEqualTo:pbBlockCount] && !revealPasteboardTypes ) {
-                [flycutOperator addImageClipping:gifData fromApp:appName withAppBundleURL:bundleURL imageType:@"com.compuserve.gif" target:self clippingAddedSelector:@selector(updateMenu)];
+            if ( captureEpoch == clipboardCaptureEpoch && ! [pbCount isEqualTo:pbBlockCount] && !revealPasteboardTypes
+                 && [self isImageCaptureCurrentForGeneration:generation]
+                 && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"] ) {
+                [flycutOperator addImageClipping:gifData fromApp:appName withAppBundleURL:bundleURL imageType:@"com.compuserve.gif" target:self clippingAddedSelector:@selector(clippingWasAdded)];
             }
             [gifData release];
         });
     }];
     [task resume];
     [session finishTasksAndInvalidate];
+}
+
+-(BOOL)isImageCaptureCurrentForGeneration:(NSInteger)generation
+{
+    return [jcPasteboard changeCount] == generation
+        && [pbBlockCount integerValue] != generation
+        && ![flycutOperator storeDisabled]
+        && [[NSUserDefaults standardUserDefaults] boolForKey:@"captureImages"];
 }
 
 -(void) stackDown
@@ -2449,9 +3760,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
         [bezel setText:[NSString stringWithFormat:@"%@", [clipping contents]]];
     }
 
-    int currentPos = [flycutOperator stackPosition] + 1;
-    int totalCount = [flycutOperator jcListCount];
-    [bezel setCharString:[NSString stringWithFormat:@"%d of %d", currentPos, totalCount]];
+    [bezel setCharString:[self bezelCounterString]];
 
     NSString *localizedName = [clipping appLocalizedName];
     if ( nil == localizedName )
@@ -2465,6 +3774,22 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
     [bezel setSource:localizedName];
     [bezel setDate:dateString];
     [bezel setSourceIcon:icon];
+}
+
+// The counter below the bezel's text: "2 of 12", or "Empty". The Favorites view adds a
+// star (U+2605, a text glyph in the counter's grey, not the colour emoji U+2B50), so "f"
+// visibly switches lists; the history gets no mark. A pinned bezel adds "(pinned)" after
+// every key, not only after the Space or right click that pinned it.
+-(NSString *)bezelCounterString
+{
+	int count = [flycutOperator jcListCount];
+	NSString *counter = count == 0 ? @"Empty" :
+		[NSString stringWithFormat:@"%d of %d", [flycutOperator stackPosition] + 1, count];
+	if ( [flycutOperator favoritesStoreIsSelected] )
+		counter = [counter stringByAppendingString:@" \u2605"];
+	if ( isBezelPinned )
+		counter = [counter stringByAppendingString:@" (pinned)"];
+	return counter;
 }
 
 -(void) stackUp
@@ -2528,25 +3853,29 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	return buttons[result - NSAlertFirstButtonReturn];
 }
 
+// Called by -[FlycutOperator addClipping:...] once the store has been changed AND the stack
+// position has been moved to follow the user's selection across that change.
+- (void)clippingWasAdded
+{
+	// The store redraws the bezel from inside its own insert, by way of -endUpdates, which is
+	// before the stack position has been settled.  Left at that, the bezel would show the
+	// neighbour of the clipping a paste would actually deliver.  Redraw now that it is settled.
+	if ( isBezelDisplayed )
+		[self updateBezel];
+	// A capture that was already being read when the menu-bar list opened lands while it is
+	// open (capture is frozen otherwise): show it there too.
+	[listController storesDidChange];
+}
+
 - (void)beginUpdates {
 	needBezelUpdate = NO;
-	needMenuUpdate = NO;
 }
 
 - (void)endUpdates {
 	DLog(@"ending updates");
 	if ( needBezelUpdate && isBezelDisplayed )
 		[self updateBezel];
-	if ( needMenuUpdate )
-	{
-		DLog(@"launching updateMenu");
-		// Timers attach to the run loop of the process, which isn't present on all processes, so we must dispatch to the main queue to ensure we have a run loop for the timer.
-		dispatch_async(dispatch_get_main_queue(), ^{
-			// Menu updates need to be in NSRunLoopCommonModes to reliably happen.
-			[[NSRunLoop currentRunLoop] performSelector:@selector(updateMenu) target:self argument:nil order:0 modes:[NSArray arrayWithObject:NSRunLoopCommonModes]];
-		});
-	}
-	needBezelUpdate = needMenuUpdate = NO;
+	needBezelUpdate = NO;
 }
 
 - (void)insertClippingAtIndex:(int)index {
@@ -2569,11 +3898,11 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 - (void)noteChangeAtIndex:(int)index {
 	// Always give bezel update, since the count may need updating and the possibility of concurrent user bezel navigation and store changes make need detection risky.
 	needBezelUpdate = YES;
-	if ( index < [[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] )
-		needMenuUpdate = YES;
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
+	// Closing the list ends its session: image files of rows deleted there go now.
+	[listController close];
 	[flycutOperator applicationWillTerminate];
 	//Unregister our hot keys (not required)
 	[[SGHotKeyCenter sharedCenter] unregisterHotKey: mainHotKey];
@@ -2659,6 +3988,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	[searchWindowSearchField setAction:@selector(searchWindowSearchFieldChanged:)];
 	[searchWindowSearchField setFont:[NSFont systemFontOfSize:13]];
 	[searchWindowSearchField setDelegate:self];  // Set delegate for keyboard handling
+	FlycutSetAccessibilityLabel(searchWindowSearchField, [searchWindow title]);
 	[[searchWindow contentView] addSubview:searchWindowSearchField];
 
 	// Create the table view
@@ -2681,6 +4011,7 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 	[column setTitle:@"Clipboard Content"];
 	[column setWidth:windowWidth - 60];
 	[searchWindowTableView addTableColumn:column];
+	[searchWindowTableView setAccessibilityLabel:[column title]];
 	[column release];
 
 	[scrollView setDocumentView:searchWindowTableView];
@@ -2696,6 +4027,12 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 - (void)showSearchWindow
 {
+	// Capture the user's current application before Flycut activates its search window.
+	// A search selection must use the same immutable PID/focus transaction as the bezel
+	// and menu paste paths rather than posting a delayed global Cmd-V.
+	[self cancelPendingPasteCompletion];
+	[self rememberFrontmostApplicationForPaste];
+
 	if (!searchWindow) {
 		[self buildSearchWindow];
 	}
@@ -2714,6 +4051,17 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 - (void)hideSearchWindow
 {
+	[self cancelPendingPasteCompletion];
+	[self hideSearchWindowPreservingPasteTransaction];
+}
+
+- (void)hideSearchWindowPreservingPasteTransaction
+{
+	[searchResultClippings release];
+	searchResultClippings = nil;
+	// Set this before orderOut: its resign-key notification must not cancel the
+	// successful selection's still-pending PID-bound transaction.
+	isSearchWindowDisplayed = NO;
 	if (searchWindow) {
 		[searchWindow orderOut:nil];
 		// Clear the search field for next time
@@ -2725,8 +4073,6 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 		[searchResults release];
 		searchResults = nil;
 	}
-
-	isSearchWindowDisplayed = NO;
 }
 
 - (IBAction)searchWindowSearchFieldChanged:(id)sender
@@ -2738,19 +4084,23 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 {
 	NSString *searchText = [searchWindowSearchField stringValue];
 
-	// Release previous results if they exist
-	if (searchResults) {
-		[searchResults release];
-		searchResults = nil;
+	// Publish titles and retained identities from the same main-thread snapshot.
+	// An in-flight capture may insert into the store after this method returns.
+	NSMutableArray *titles = [NSMutableArray array];
+	NSMutableArray *clippings = [NSMutableArray array];
+	// Every match: "Display in menu" is the menu-bar list's height, not a result limit.
+	NSArray *indexes = [flycutOperator previousIndexes:[flycutOperator jcListCount] containing:searchText];
+	for (NSNumber *index in indexes) {
+		FlycutClipping *clipping = [flycutOperator clippingAtPosition:[index intValue]];
+		if (clipping != nil) {
+			[titles addObject:[clipping displayString]];
+			[clippings addObject:clipping];
+		}
 	}
-
-	if (!searchText || [searchText length] == 0) {
-		// Show all items
-		searchResults = [[flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:nil] retain];
-	} else {
-		// Search for matching items
-		searchResults = [[flycutOperator previousDisplayStrings:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:searchText] retain];
-	}
+	[searchResults release];
+	searchResults = [titles copy];
+	[searchResultClippings release];
+	searchResultClippings = [clippings copy];
 
 	[searchWindowTableView reloadData];
 
@@ -2762,36 +4112,54 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 
 - (IBAction)searchWindowItemSelected:(id)sender
 {
-	NSInteger selectedRow = [searchWindowTableView selectedRow];
-	if (selectedRow < 0) {
-		selectedRow = 0;
+	NSInteger selectedRow;
+	if ( sender == searchWindowTableView ) {
+		// A double click below the last row still fires the table's double action, but with
+		// clickedRow == -1 and the selection cleared. Falling back to row 0 would paste the
+		// newest clipping instead of doing nothing.
+		selectedRow = [searchWindowTableView clickedRow];
+		if (selectedRow < 0) {
+			return;
+		}
+	} else {
+		selectedRow = [searchWindowTableView selectedRow];
+		if (selectedRow < 0) {
+			selectedRow = 0; // Default to first item if none selected
+		}
 	}
 
 	if (selectedRow < [searchResults count]) {
-		NSString* searchText = [searchWindowSearchField stringValue];
-		NSArray *mapping = nil;
-		int position = (int)selectedRow;
-
-		if (searchText && [searchText length] > 0) {
-			mapping = [flycutOperator previousIndexes:[[NSUserDefaults standardUserDefaults] integerForKey:@"displayNum"] containing:searchText];
-			position = [mapping[selectedRow] intValue];
-		}
-
-		FlycutClipping *clipping = [flycutOperator clippingAtIndex:position];
-		if (clipping && [clipping isImageClipping]) {
-			[self addImageClipToPasteboard:clipping];
-			if ([[NSUserDefaults standardUserDefaults] boolForKey:@"pasteMovesToTop"]) {
-				[flycutOperator getPasteFromIndex:position];
-			}
-		} else {
-			NSString *content = [flycutOperator getPasteFromIndex:position];
-			if (content) {
-				[self addClipToPasteboard:content];
+		if (selectedRow >= (NSInteger)[searchResultClippings count])
+			return;
+		FlycutClipping *selectedClipping = [searchResultClippings objectAtIndex:selectedRow];
+		int position = -1;
+		for (int index = 0; index < [flycutOperator jcListCount]; index++) {
+			if ([flycutOperator clippingAtPosition:index] == selectedClipping) {
+				position = index;
+				break;
 			}
 		}
-		[self updateMenu];
-		[self hideSearchWindow];
-		[self performSelector:@selector(fakeCommandV) withObject:nil afterDelay:0.3];
+		// Evicted/reloaded identities must never redirect to another visible row.
+		if (position < 0) {
+			[self cancelPendingPasteCompletion];
+			return;
+		}
+
+		FCPasteTransaction *transaction = [currentPasteTransaction retain];
+		if ( [self pasteStorePositionAndUpdate:position] ) {
+			[self hideSearchWindowPreservingPasteTransaction];
+
+			// Search selection always pastes, independent of menuSelectionPastes, but only
+			// through the transaction captured before this window took focus.
+			if ( [self pasteTransactionIsCurrent:transaction] ) {
+				[self performSelector:@selector(completePasteInRememberedApplication:)
+						 withObject:transaction
+						 afterDelay:0.3];
+			} else {
+				NSLog(@"Search-window paste cancelled because no current target transaction exists");
+			}
+		}
+		[transaction release];
 	}
 }
 
@@ -2870,11 +4238,26 @@ didFailToRegisterForRemoteNotificationsWithError:(NSError *)error {
 }
 
 - (void) dealloc {
+	[searchResultClippings release];
+	[self cancelPendingPasteCompletion];
+	if (statusItemMouseDownMonitor != nil) {
+		[NSEvent removeMonitor:statusItemMouseDownMonitor];
+		[statusItemMouseDownMonitor release];
+		statusItemMouseDownMonitor = nil;
+	}
+	[clipboardTrackingMenuItem release];
+	[menuIconCustomColorsCheckbox release];
+	[menuIconActiveColorWell release];
+	[menuIconPausedColorWell release];
+	[menuIconActivePreview release];
+	[menuIconPausedPreview release];
+
 	[bezel release];
 	[srTransformer release];
 	[searchRecorder release];
 	[searchWindow release]; // This will release its subviews automatically
 	[searchResults release];
+	[listController release];
 	[super dealloc];
 }
 
