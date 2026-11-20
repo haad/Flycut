@@ -32,6 +32,17 @@
 	SGHotKey					*searchHotKey;
 	// "Paste as plain text" (-updatePlainPasteHotKeyRegistration).
 	SGHotKey					*plainPasteHotKey;
+	// The key equivalents of the apps' menus, read for the plain-text hotkey
+	// (-frontmostApplicationDidChange:), and the app in front (nil: Flycut or none).
+	dispatch_queue_t			menuScanQueue;
+	NSMutableDictionary			*menuShortcutCache;
+	NSString					*frontmostMenuShortcutKey;
+	NSUInteger					menuScanGeneration;
+	NSRunningApplication		*frontmostMenuApplication;
+	// The menus of the app in front were asked for since its activation.
+	BOOL						frontmostMenusRequested;
+	// Accessibility granted, as asked at the last activation.
+	BOOL						plainPasteAccessibilityTrusted;
 	SRRecorderControl			*searchRecorder;
 	IBOutlet NSPanel			*prefsPanel;
 	IBOutlet NSTextView			*acknowledgementsView;

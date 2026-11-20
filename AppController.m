@@ -28,6 +28,7 @@
 #import "FlycutPasteKey.h"
 #import "FlycutHotkeyDefaults.h"
 #import "FlycutPlainPaste.h"
+#import "FlycutMenuShortcuts.h"
 #import "FlycutListPanel.h"
 #import <Carbon/Carbon.h>
 
@@ -510,6 +511,12 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 - (void)restoreClipboardAfterPlainTextPaste:(FCPasteTransaction *)transaction;
 - (void)finishPlainTextPaste:(FCPasteTransaction *)transaction;
 - (NSEventModifierFlags)liveModifierFlags;
+- (BOOL)plainPasteHotkeyYieldsToFrontmostApplication:(KeyCombo)plain;
+- (void)watchFrontmostApplicationMenus;
+- (void)frontmostApplicationDidChange:(NSRunningApplication *)application;
+- (void)readFrontmostApplicationMenus;
+- (NSDictionary *)scanMenuShortcutsOfProcess:(pid_t)pid;
+- (void)menuShortcutScan:(NSDictionary *)scan finishedForKey:(NSString *)key bundle:(NSString *)bundle;
 - (void)cancelPendingPasteCompletion;
 - (NSArray *)snapshotPasteboardItems;
 - (void)restorePasteboardForCancelledTransaction:(FCPasteTransaction *)transaction;
@@ -4231,6 +4238,7 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	[self toggleMainHotKey:[NSNull null]];
 	[self toggleSearchHotKey:[NSNull null]];
 	[self updatePlainPasteHotKeyRegistration];
+	[self watchFrontmostApplicationMenus];
 }
 
 - (void) updateBezel
@@ -4519,14 +4527,207 @@ static const NSTimeInterval kPlainPasteReadTimeout = 3.0;
 	[self finishPasteTransactionKeepingSelection:transaction];
 }
 
+#pragma mark - Plain-text hotkey and the apps' own menus
+
+// The longest one read of an app's menus may take, and the most menu elements it reads. Reads
+// of running apps (Finder, TextEdit, Terminal, Firefox, an Electron app) took 8 to 230 ms for
+// 198 to 532 menu elements, the first read of an app the longest. A read cut short keeps what
+// it found.
+static const NSTimeInterval kFlycutMenuScanBudget = 0.5;
+static const NSUInteger kFlycutMenuScanElementLimit = 4000;
+// How many apps' key equivalents are kept; past that, the list starts over.
+static const NSUInteger kFlycutMenuShortcutCacheLimit = 64;
+
+// One running app: its process, bundle and version (a new version is a new process anyway,
+// but a process number can come back).
+static NSString *FlycutMenuShortcutCacheKey(NSRunningApplication *application)
+{
+	NSURL *bundleURL = [application bundleURL];
+	NSString *version = bundleURL != nil ? [[NSBundle bundleWithURL:bundleURL] objectForInfoDictionaryKey:@"CFBundleVersion"] : nil;
+	return [NSString stringWithFormat:@"%d %@ %@", (int)[application processIdentifier],
+	        [application bundleIdentifier] ?: @"-", [version isKindOfClass:[NSString class]] ? version : @"-"];
+}
+
+- (NSNotificationCenter *)workspaceNotificationCenter
+{
+	return [[NSWorkspace sharedWorkspace] notificationCenter];
+}
+
+- (NSNotificationCenter *)keyboardLayoutNotificationCenter
+{
+	return [NSDistributedNotificationCenter defaultCenter];
+}
+
+// Never asks: the permission is requested where pasting needs it.
+- (BOOL)accessibilityIsTrusted
+{
+	return AXIsProcessTrustedWithOptions((CFDictionaryRef)@{(NSString *)kAXTrustedCheckOptionPrompt: @NO});
+}
+
+// From launch on, the plain-text hotkey follows the app in front: Flycut releases it while
+// that app's own menus use its keys (FlycutMenuShortcuts.h) and takes it back afterwards.
+- (void)watchFrontmostApplicationMenus
+{
+	if ( menuScanQueue == NULL ) {
+		menuScanQueue = dispatch_queue_create("com.Flycut.menuShortcutScan",
+			dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0));
+		menuShortcutCache = [[NSMutableDictionary alloc] init];
+		NSNotificationCenter *center = [self workspaceNotificationCenter];
+		[center addObserver:self selector:@selector(frontmostApplicationActivated:)
+		               name:NSWorkspaceDidActivateApplicationNotification object:nil];
+		[center addObserver:self selector:@selector(applicationTerminated:)
+		               name:NSWorkspaceDidTerminateApplicationNotification object:nil];
+		[[self keyboardLayoutNotificationCenter] addObserver:self selector:@selector(keyboardLayoutDidChange:)
+		    name:(NSString *)kTISNotifySelectedKeyboardInputSourceChanged object:nil];
+	}
+	[self frontmostApplicationDidChange:[self frontmostApplicationForPaste]];
+}
+
+- (void)frontmostApplicationActivated:(NSNotification *)notification
+{
+	[self frontmostApplicationDidChange:[[notification userInfo] objectForKey:NSWorkspaceApplicationKey]];
+}
+
+- (void)applicationTerminated:(NSNotification *)notification
+{
+	NSRunningApplication *application = [[notification userInfo] objectForKey:NSWorkspaceApplicationKey];
+	NSString *process = [NSString stringWithFormat:@"%d ", (int)[application processIdentifier]];
+	for ( NSString *key in [menuShortcutCache allKeys] )
+		if ( [key hasPrefix:process] )
+			[menuShortcutCache removeObjectForKey:key];
+}
+
+// The hotkey's key is matched by what it types in the current keyboard layout
+// (FlycutMenuCharacterForKeyCode), so another layout decides again, on the main thread.
+- (void)keyboardLayoutDidChange:(NSNotification *)notification
+{
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[self updatePlainPasteHotKeyRegistration];
+	});
+}
+
+// What was read at the app's last activation applies at once; an app not read yet keeps
+// Flycut's hotkey until its menus are read. They are read again at each activation (menus
+// change), while the plain-text hotkey can be registered at all
+// (-updatePlainPasteHotKeyRegistration).
+- (void)frontmostApplicationDidChange:(NSRunningApplication *)application
+{
+	BOOL isFlycut = application == nil || [application processIdentifier] == [[NSProcessInfo processInfo] processIdentifier];
+	NSString *key = isFlycut ? nil : FlycutMenuShortcutCacheKey(application);
+	[frontmostMenuShortcutKey release];
+	frontmostMenuShortcutKey = [key retain];
+	[frontmostMenuApplication release];
+	frontmostMenuApplication = isFlycut ? nil : [application retain];
+	frontmostMenusRequested = NO;
+	// Accessibility is asked here, at each activation, and not at each recorder change.
+	plainPasteAccessibilityTrusted = [self accessibilityIsTrusted];
+	// A read not begun yet for the app before is dropped (-readFrontmostApplicationMenus).
+	__atomic_add_fetch(&menuScanGeneration, 1, __ATOMIC_SEQ_CST);
+	[self updatePlainPasteHotKeyRegistration];
+}
+
+// Reads the menus of the app in front, once per activation, off the main thread.
+- (void)readFrontmostApplicationMenus
+{
+	if ( frontmostMenuApplication == nil || menuScanQueue == NULL )
+		return;
+	frontmostMenusRequested = YES;
+	NSString *key = [[frontmostMenuShortcutKey copy] autorelease];
+	pid_t pid = [frontmostMenuApplication processIdentifier];
+	NSString *bundle = [frontmostMenuApplication bundleIdentifier] ?: @"an app without bundle identifier";
+	NSUInteger generation = __atomic_load_n(&menuScanGeneration, __ATOMIC_SEQ_CST);
+	dispatch_async(menuScanQueue, ^{
+		// Another app came forward before this read began; its own read follows.
+		if ( __atomic_load_n(&menuScanGeneration, __ATOMIC_SEQ_CST) != generation )
+			return;
+		NSDictionary *scan = nil;
+		@autoreleasepool {
+			scan = [[self scanMenuShortcutsOfProcess:pid] retain];
+		}
+		dispatch_async(dispatch_get_main_queue(), ^{
+			[self menuShortcutScan:scan finishedForKey:key bundle:bundle];
+		});
+		[scan release];
+	});
+}
+
+// Runs on the menu scan queue. The application element is the process's; the attributes
+// asked for are the menu bar and, per element, FlycutMenuScanAttributes() only.
+- (NSDictionary *)scanMenuShortcutsOfProcess:(pid_t)pid
+{
+	AXUIElementRef application = AXUIElementCreateApplication(pid);
+	if ( application == NULL )
+		return nil;
+	AXUIElementSetMessagingTimeout(application, FlycutMenuScanMessagingTimeout);
+	NSDictionary *scan = FlycutScanMenuShortcuts((id)application, ^NSArray *(id element, NSArray *attributes) {
+		return FlycutAXReadMenuValues(element, attributes);
+	}, kFlycutMenuScanBudget, kFlycutMenuScanElementLimit);
+	CFRelease(application);
+	return scan;
+}
+
+- (void)menuShortcutScan:(NSDictionary *)scan finishedForKey:(NSString *)key bundle:(NSString *)bundle
+{
+	BOOL read = [[scan objectForKey:@"read"] boolValue];
+	BOOL complete = read && [[scan objectForKey:@"complete"] boolValue];
+	// A read that failed or was cut short keeps the last complete read of the same process,
+	// bundle and version (the key): it found every key equivalent then.
+	BOOL keepsEarlier = !complete && [[[menuShortcutCache objectForKey:key] objectForKey:@"complete"] boolValue];
+	if ( read && !keepsEarlier ) {
+		if ( [menuShortcutCache count] >= kFlycutMenuShortcutCacheLimit && [menuShortcutCache objectForKey:key] == nil )
+			[menuShortcutCache removeAllObjects];
+		[menuShortcutCache setObject:@{@"shortcuts": [scan objectForKey:@"shortcuts"] ?: @[], @"complete": @(complete)} forKey:key];
+	} else if ( !read && !keepsEarlier ) {
+		// No evidence now: Flycut keeps its hotkey for this app.
+		[menuShortcutCache removeObjectForKey:key];
+	}
+	BOOL front = [key isEqualToString:frontmostMenuShortcutKey];
+	if ( front )
+		[self updatePlainPasteHotKeyRegistration];
+	if ( !complete ) {
+		// The bundle identifier, time and size only: menus name windows and documents.
+		KeyCombo plain = FlycutKeyComboForDefaultsKey(FlycutPlainPasteHotkeyKey);
+		BOOL yields = FlycutMenuShortcutsContainHotkey([[menuShortcutCache objectForKey:key] objectForKey:@"shortcuts"], plain.code,
+			FlycutMenuCharacterForKeyCode(plain.code), plain.flags);
+		NSLog(@"Menu shortcut check for %@: %@ (%.0f ms, %lu menu elements)%@; %@", bundle,
+		      read ? @"cut short" : @"menus not read", [[scan objectForKey:@"seconds"] doubleValue] * 1000.0,
+		      (unsigned long)[[scan objectForKey:@"elements"] unsignedIntegerValue],
+		      keepsEarlier ? @", the last complete read stays" : @"",
+		      yields ? @"the app's own command gets the key" : @"Flycut keeps its hotkey");
+	}
+}
+
+// Whether the app in front has a menu command on the plain-text hotkey's keys, from what
+// was read of its menus (nothing read: no).
+- (BOOL)plainPasteHotkeyYieldsToFrontmostApplication:(KeyCombo)plain
+{
+	NSArray *shortcuts = frontmostMenuShortcutKey != nil ?
+		[[menuShortcutCache objectForKey:frontmostMenuShortcutKey] objectForKey:@"shortcuts"] : nil;
+	// The keyboard layout is asked only when there is something to match.
+	NSString *character = shortcuts != nil ? FlycutMenuCharacterForKeyCode(plain.code) : nil;
+	return FlycutPlainPasteYieldsToApp(frontmostMenuShortcutKey == nil, shortcuts, plain.code, character, plain.flags);
+}
+
+#pragma mark - Plain-text hotkey registration
+
 // The one place that decides whether the plain-text hotkey is registered. Its combination
-// is the stored or the factory one; the bezel's and the search window's hotkeys win.
+// is the stored or the factory one; the bezel's and the search window's hotkeys win, and so
+// does a menu command of the app in front on the same keys. Without Accessibility Flycut
+// cannot paste, so the keys stay the apps'; the permission is asked at each activation
+// (-frontmostApplicationDidChange:, at launch for the app in front). The menus of the app
+// in front are read only while the hotkey can be registered: once per activation, and at
+// once when it becomes possible.
 - (void)updatePlainPasteHotKeyRegistration
 {
 	KeyCombo plain = FlycutKeyComboForDefaultsKey(FlycutPlainPasteHotkeyKey);
 	KeyCombo main = mainRecorder != nil ? [mainRecorder keyCombo] : FlycutKeyComboForDefaultsKey(FlycutMainHotkeyKey);
 	KeyCombo search = searchRecorder != nil ? [searchRecorder keyCombo] : FlycutKeyComboForDefaultsKey(@"ShortcutRecorder searchHotkey");
-	BOOL wanted = FlycutPlainPasteHotkeyIsWanted(plain.code, plain.flags, main.code, main.flags, search.code, search.flags);
+	BOOL usable = FlycutPlainPasteHotkeyIsWanted(plain.code, plain.flags, main.code, main.flags, search.code, search.flags) &&
+		plainPasteAccessibilityTrusted;
+	if ( usable && !frontmostMenusRequested )
+		[self readFrontmostApplicationMenus];
+	// The app in front keeps its own command on the same keys (-frontmostApplicationDidChange:).
+	BOOL wanted = usable && ![self plainPasteHotkeyYieldsToFrontmostApplication:plain];
 	NSInteger modifiers = (NSInteger)SRCocoaToCarbonFlags(plain.flags);
 	if ( plainPasteHotKey != nil ) {
 		if ( wanted && [[plainPasteHotKey keyCombo] keyCode] == plain.code && [[plainPasteHotKey keyCombo] modifiers] == modifiers )
@@ -5290,6 +5491,8 @@ static const NSTimeInterval kPlainPasteReadTimeout = 3.0;
 		removeObserver:self
 				  name:@"AppleSelectedInputSourcesChangedNotification"
 				object:nil];
+	[[self keyboardLayoutNotificationCenter] removeObserver:self
+		name:(NSString *)kTISNotifySelectedKeyboardInputSourceChanged object:nil];
 }
 
 #pragma mark - Search Hotkey Methods

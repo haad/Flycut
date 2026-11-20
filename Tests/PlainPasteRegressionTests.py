@@ -111,6 +111,9 @@ FIXTURE = r'''
 - (void)updatePlainPasteHotKeyRegistration;
 - (NSEventModifierFlags)liveModifierFlags;
 - (void)pollPB:(NSTimer *)timer;
+- (BOOL)accessibilityIsTrusted;
+- (NSDictionary *)scanMenuShortcutsOfProcess:(pid_t)pid;
+- (NSNotificationCenter *)workspaceNotificationCenter;
 @end
 
 static int beeps;
@@ -192,6 +195,7 @@ static NSString *const Concealed = @"org.nspasteboard.ConcealedType";
 - (BOOL)isTerminated { return NO; }
 - (BOOL)activateWithOptions:(NSApplicationActivationOptions)options { (void)options; return YES; }
 - (NSString *)localizedName { return @"Target"; }
+- (NSString *)bundleIdentifier { return @"org.example.target"; }
 - (NSURL *)bundleURL { return nil; }
 @end
 
@@ -257,6 +261,9 @@ static NSString *const Concealed = @"org.nspasteboard.ConcealedType";
     // instance variable still builds and fails on an assertion).
     Ivar decided = class_getInstanceVariable([AppController class], "pbDecidedGeneration");
     if (decided) *(NSInteger *)((char *)self + ivar_getOffset(decided)) = seen ? board.changeCount : -1;
+    // Accessibility counts as granted, as if asked at an activation (this fixture has none).
+    Ivar trusted = class_getInstanceVariable([AppController class], "plainPasteAccessibilityTrusted");
+    if (trusted) *(BOOL *)((char *)self + ivar_getOffset(trusted)) = YES;
 }
 // Mode launch-clipboard: the lines with which -awakeFromNib takes the clipboard it finds at
 // launch, copied from AppController.m by the test (the pasteboard being this board).
@@ -267,6 +274,20 @@ static NSString *const Concealed = @"org.nspasteboard.ConcealedType";
 - (BOOL)ownsTransaction { return currentPasteTransaction != nil; }
 - (NSInteger)blockedGeneration { return [pbBlockCount integerValue]; }
 - (NSRunningApplication *)frontmostApplicationForPaste { return (id)self.target; }
+// Launch watches the app in front's menus (MenuShortcutYieldRegressionTests): no real
+// workspace or keyboard layout notifications and no Accessibility reads here; Accessibility
+// counts as granted.
+- (BOOL)accessibilityIsTrusted { return YES; }
+- (NSDictionary *)scanMenuShortcutsOfProcess:(pid_t)pid {
+    (void)pid;
+    return @{@"read": @NO, @"complete": @NO, @"elements": @0, @"seconds": @0, @"shortcuts": @[]};
+}
+- (NSNotificationCenter *)workspaceNotificationCenter {
+    static NSNotificationCenter *center;
+    if (center == nil) center = [NSNotificationCenter new];
+    return center;
+}
+- (NSNotificationCenter *)keyboardLayoutNotificationCenter { return [self workspaceNotificationCenter]; }
 - (void)showBezel { isBezelDisplayed = YES; }
 - (void)hideApp { isBezelDisplayed = NO; }
 - (void)updateMenu {}
@@ -832,17 +853,27 @@ class PlainPasteRegressionTests(unittest.TestCase):
                          'a copy from a private window in Safari or Chrome no longer expires, another clipboard manager may '
                          'record it once more, and the app you copied from is no longer the owner of the clipboard.')
         self.assertEqual(paragraphs[3],
-                         'While Flycut holds this hotkey, the app in front does not get it: in TextEdit, Mail, Notes and Safari '
-                         '("Paste and Match Style") and in the Finder ("Paste Exactly"), Flycut\'s paste runs instead of the '
-                         'app\'s own command.')
+                         'Flycut leaves this hotkey to the app in front when one of that app\'s menu commands uses the same '
+                         'keys: in TextEdit, Mail, Notes and Safari, Option-Shift-Command-V stays their own "Paste and Match '
+                         'Style", and in the Finder its "Paste Exactly". In apps without such a command, such as Terminal, '
+                         'Firefox and VS Code, Flycut\'s paste runs. To know, Flycut reads the keyboard shortcuts in the menus '
+                         'of the app in front each time an app comes to the front, never the menu titles; this needs the '
+                         'Accessibility permission. Without it Flycut cannot paste, so it leaves this hotkey to the apps; '
+                         'once you allow it, Flycut takes the hotkey the next time you switch to another app.')
         self.assertEqual(paragraphs[4],
+                         'Shortcuts that are not in an app\'s menus are invisible to Flycut, such as those of web pages (Google '
+                         'Docs) or VS Code\'s own keybindings; there, Flycut\'s hotkey wins while it is set. The first time an '
+                         'app comes to the front after it or Flycut started, reading its menus takes a moment (up to a quarter '
+                         'of a second in the apps tried), and a key press in that moment still goes to Flycut. If an app '
+                         'changes its menus while it is in front, Flycut notices the next time the app comes to the front.')
+        self.assertEqual(paragraphs[5],
                          'On a new install Flycut no longer uses Shift-Command-V, so it does what each app makes of it again: '
                          'the paste without formatting of Google Docs, Chrome and Firefox, "Paste as Quotation" in Mail, '
                          '"Paste Selection" in Terminal and the Markdown preview in VS Code. If you used Flycut before and '
                          'Shift-Command-V opens your Bezel, it stays that way, and Paste as Plain Text is on '
                          'Option-Shift-Command-V for you too. If your Main Hotkey or Search Hotkey already was '
                          'Option-Shift-Command-V, it stays there, and Paste as Plain Text starts without a hotkey.')
-        self.assertEqual(len(paragraphs), 5)
+        self.assertEqual(len(paragraphs), 6)
         readme = (ROOT / 'readme.md').read_text()
         self.assertRegex(readme, r"\|\s*Option\+Shift\+Command\+V\s*\|\s*Paste the clipboard as plain text\s*\|")
         # "three seconds" is the restore timeout.
