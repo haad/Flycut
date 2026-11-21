@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Native tests for FlycutAccountShareService, which runs the account-share
-engine for the app: inbox for every other account, folder watch, safety pickup,
+engine for the app: inbox for every other account it receives from, copies to every
+account it sends to, folder watch, safety pickup,
 session handling (clippings that arrive while the session is not on the console
 go to the pasteboard when it comes back), sending and turning off.
 
@@ -36,7 +37,7 @@ CLANG = ["/usr/bin/xcrun", "clang", "-fno-objc-arc", "-fobjc-weak", "-fblocks", 
 MODES = ["start", "folder-watch", "safety-timer", "away-then-active", "launch-pickup",
          "sender-conditions", "wipe", "off-wipe-retried", "leftover-wipe",
          "account-rule", "launch-age", "pause-pickup", "withdraw-on-off",
-         "chosen-accounts", "account-names", "setup-failure", "lookup-failure", "restart-logs-again",
+         "chosen-accounts", "one-way", "account-names", "setup-failure", "lookup-failure", "restart-logs-again",
          "stale-failure-ignored"]
 
 
@@ -135,6 +136,9 @@ class AccountShareServiceTests(unittest.TestCase):
     def test_only_accounts_that_chose_each_other_share(self) -> None:
         self.run_case("chosen-accounts")
 
+    def test_a_copy_goes_one_way_only_where_one_sends_and_the_other_receives(self) -> None:
+        self.run_case("one-way")
+
     def test_a_failed_setup_is_reported_logged_once_and_retried_with_backoff(self) -> None:
         self.run_case("setup-failure")
 
@@ -144,7 +148,7 @@ class AccountShareServiceTests(unittest.TestCase):
     def test_a_stale_setup_failure_is_not_published(self) -> None:
         self.run_case("stale-failure-ignored")
 
-    def test_a_failed_account_lookup_wipes_and_withdraws_nothing(self) -> None:
+    def test_a_failed_account_lookup_adds_nothing_but_applies_removals(self) -> None:
         self.run_case("lookup-failure")
 
     def test_a_passwd_record_larger_than_the_first_buffer_is_read(self) -> None:
@@ -152,6 +156,18 @@ class AccountShareServiceTests(unittest.TestCase):
 
     def test_a_failed_account_lookup_is_logged_once(self) -> None:
         self.run_case("lookup-logged-once")
+
+    def test_unchecking_send_while_receiving_from_nobody_withdraws(self) -> None:
+        self.run_case("send-only-withdraw")
+
+    def test_a_change_of_both_lists_is_one_refresh(self) -> None:
+        self.run_case("one-refresh")
+
+    def test_an_inbox_that_cannot_be_deleted_is_deleted_at_the_next_tick(self) -> None:
+        self.run_case("wipe-retried")
+
+    def test_a_copy_from_an_account_no_longer_received_from_is_not_added(self) -> None:
+        self.run_case("deliver-only-received")
 
     def test_account_list_with_names(self) -> None:
         self.run_case("account-names")

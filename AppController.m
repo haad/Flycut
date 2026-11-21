@@ -42,6 +42,11 @@
 @interface FlycutOperator (AccountShareFilter) <FlycutAccountShareFilter>
 @end
 
+// The accounts this one sends its copies to and receives copies from (General
+// pane, "Send" and "Receive"), by GeneratedUID.
+static NSString *const FlycutShareSendKey = @"shareClippingsSendAccountIDs";
+static NSString *const FlycutShareReceiveKey = @"shareClippingsReceiveAccountIDs";
+
 @interface AppController () <FlycutAccountShareServiceDelegate>
 -(void)setUpAccountSharing;
 -(void)accountSessionDidBecomeActive:(NSNotification *)notification;
@@ -51,11 +56,15 @@
 -(void)updateAccountSharePickupPause;
 -(void)accountSharingDefaultsDidChange:(NSNotification *)notification;
 -(IBAction)toggleShareClippingsAcrossAccounts:(id)sender;
--(IBAction)toggleShareAccount:(id)sender;
+-(IBAction)toggleSendToAccount:(id)sender;
+-(IBAction)toggleReceiveFromAccount:(id)sender;
+-(void)toggleShareAccount:(id)sender forKey:(NSString *)key;
 -(NSArray *)accountShareLoginAccounts;
--(NSArray *)accountShareChosenUIDs;
--(NSArray *)accountShareStoredIDs;
+-(NSArray *)accountShareChosenUIDsForKey:(NSString *)key;
+-(NSArray *)accountShareStoredIDsForKey:(NSString *)key;
 -(void)passAccountShareChoice;
+-(void)passAccountShareChoiceForAccounts:(NSArray *)accounts;
+-(NSArray *)accountShareChosenUIDsForKey:(NSString *)key accounts:(NSArray *)accounts;
 -(void)updateAccountSharingRows;
 -(NSString *)accountSharingStatusText;
 -(void)updateAccountSharingStatus;
@@ -552,10 +561,13 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
         // this on.
         [NSNumber numberWithBool:NO],
         @"shareClippingsAcrossAccounts",
-        // The accounts (UIDs) this one shares with, chosen in the list below
-        // that checkbox; none by default.
+        // The accounts this one sends its copies to and receives copies from,
+        // chosen in the list below that checkbox (by GeneratedUID); none by
+        // default.
         [NSArray array],
-        @"shareClippingsAccountIDs",
+        @"shareClippingsSendAccountIDs",
+        [NSArray array],
+        @"shareClippingsReceiveAccountIDs",
         nil]];
 
 	clipboardReadQueue = dispatch_queue_create("com.Flycut.clipboardReadQueue", DISPATCH_QUEUE_SERIAL);
@@ -1277,6 +1289,31 @@ static CGFloat FlycutAccountSharingRightEdge(NSView *pane, NSControl *reference)
 	return rightmost > 0.0 ? rightmost : NSMaxX([reference alignmentRectForFrame:[reference frame]]);
 }
 
+// Where the fields above the sharing section end: the right edge (alignment
+// rect) of the controls General's Restore Default arrows stand beside, the
+// text fields, folder buttons and number fields, the rightmost of them. Each
+// arrow counts, shown or not, with the control nearest to its left on its
+// line; 0 without arrows.
+static CGFloat FlycutRestoreArrowFieldsMaxX(NSView *pane)
+{
+	CGFloat leftmost = CGFLOAT_MAX, rightmost = 0.0, maxX = 0.0;
+	NSMutableArray *leaves = [NSMutableArray array];
+	FlycutCollectPaneLeaves(pane, pane, NO, &leftmost, &rightmost, leaves);
+	for (NSView *arrow in leaves) {
+		if (![[arrow identifier] hasPrefix:@"restoreDefault"])
+			continue;
+		NSRect frame = [pane convertRect:[arrow frame] fromView:[arrow superview]];
+		for (NSView *view in leaves) {
+			if ([[view identifier] hasPrefix:@"restoreDefault"])
+				continue;
+			NSRect edges = [pane convertRect:[view alignmentRectForFrame:[view frame]] fromView:[view superview]];
+			if (NSMaxX(edges) <= NSMinX(frame) && NSMinY(edges) < NSMidY(frame) && NSMidY(frame) < NSMaxY(edges))
+				maxX = MAX(maxX, NSMaxX(edges));
+		}
+	}
+	return maxX;
+}
+
 // Runs once at launch, after the pasteboard state exists. The service is made
 // whether sharing is on or not, so the checkbox can start it; it runs only
 // while the setting is on.
@@ -1316,17 +1353,24 @@ static CGFloat FlycutAccountSharingRightEdge(NSView *pane, NSControl *reference)
 	[self passAccountShareChoice];
 }
 
-// Passes the chosen accounts on to the service and, if sharing is on and was
-// waiting for them since launch, starts it. Does nothing while they cannot be
-// told (-accountShareChosenUIDs is nil): the service keeps what it has, so a
-// failed account lookup wipes and withdraws nothing, and sharing that waits
-// runs neither with no account nor with every account.
+// Passes the accounts to send to and to receive from on to the service and, if
+// sharing is on and was waiting for them since launch, starts it. Does nothing
+// while they cannot be told (the account lookup fails): the service keeps what
+// it has, so a failed account lookup wipes and withdraws nothing, and sharing
+// that waits runs neither with no account nor with every account.
 -(void)passAccountShareChoice
 {
-	NSArray *uids = [self accountShareChosenUIDs];
-	if (uids == nil)
+	[self passAccountShareChoiceForAccounts:[self accountShareLoginAccounts]];
+}
+
+// The same for one account lookup (nil: it failed, nothing is passed on): both
+// lists come from it, so a click and what it passes on cannot disagree.
+-(void)passAccountShareChoiceForAccounts:(NSArray *)accounts
+{
+	if (accounts == nil)
 		return;
-	[accountShareService setChosenAccountUIDs:uids];
+	[accountShareService setSendAccountUIDs:[self accountShareChosenUIDsForKey:FlycutShareSendKey accounts:accounts]
+						 receiveAccountUIDs:[self accountShareChosenUIDsForKey:FlycutShareReceiveKey accounts:accounts]];
 	if (accountShareChoicePending) {
 		accountShareChoicePending = NO;
 		if ([[NSUserDefaults standardUserDefaults] boolForKey:@"shareClippingsAcrossAccounts"])
@@ -1379,12 +1423,13 @@ static CGFloat FlycutAccountSharingRightEdge(NSView *pane, NSControl *reference)
 	return others;
 }
 
-// The accounts checked in that list, stored by GeneratedUID (only on this Mac):
-// an account that later gets a deleted account's UID is not chosen with it.
--(NSArray *)accountShareStoredIDs
+// The accounts checked in one column of that list (Send or Receive), stored by
+// GeneratedUID (only on this Mac): an account that later gets a deleted
+// account's UID is not chosen with it.
+-(NSArray *)accountShareStoredIDsForKey:(NSString *)key
 {
 	NSMutableArray *chosen = [NSMutableArray array];
-	id stored = [[NSUserDefaults standardUserDefaults] objectForKey:@"shareClippingsAccountIDs"];
+	id stored = [[NSUserDefaults standardUserDefaults] objectForKey:key];
 	if ([stored isKindOfClass:[NSArray class]])
 		for (id guid in stored)
 			if ([guid isKindOfClass:[NSString class]] && [guid length] > 0 && ![chosen containsObject:guid])
@@ -1392,14 +1437,19 @@ static CGFloat FlycutAccountSharingRightEdge(NSView *pane, NSControl *reference)
 	return chosen;
 }
 
-// The UIDs of the login accounts that are chosen now, for the service; nil
-// while that cannot be told (the account lookup fails).
--(NSArray *)accountShareChosenUIDs
+// The UIDs of the login accounts that are checked in one column now, for the
+// service; nil while that cannot be told (the account lookup fails).
+-(NSArray *)accountShareChosenUIDsForKey:(NSString *)key
 {
-	NSArray *ids = [self accountShareStoredIDs];
-	NSArray *accounts = [self accountShareLoginAccounts];
+	return [self accountShareChosenUIDsForKey:key accounts:[self accountShareLoginAccounts]];
+}
+
+// The same from one account lookup (nil: it failed).
+-(NSArray *)accountShareChosenUIDsForKey:(NSString *)key accounts:(NSArray *)accounts
+{
 	if (accounts == nil)
 		return nil;
+	NSArray *ids = [self accountShareStoredIDsForKey:key];
 	NSMutableArray *chosen = [NSMutableArray array];
 	for (NSDictionary *account in accounts) {
 		NSString *guid = [account objectForKey:@"guid"];
@@ -1410,44 +1460,74 @@ static CGFloat FlycutAccountSharingRightEdge(NSView *pane, NSControl *reference)
 	return chosen;
 }
 
-// An account's checkbox: its tag is the account's UID, which finds the
-// account; its GeneratedUID is what is stored.
--(IBAction)toggleShareAccount:(id)sender
+// A Send or Receive checkbox of an account: its tag is the account's UID,
+// which finds the account; its GeneratedUID is what is stored, in that
+// column's list. One account lookup serves the click: the GeneratedUID and
+// both lists passed on come from it, so once the account is found the click
+// always reaches the service; a later lookup that fails cannot leave the
+// checkbox and the stored list saying what the service does not do.
+-(void)toggleShareAccount:(id)sender forKey:(NSString *)key
 {
 	uid_t uid = (uid_t)[sender tag];
+	NSArray *accounts = [self accountShareLoginAccounts];
 	NSString *guid = nil;
-	for (NSDictionary *account in [self accountShareLoginAccounts])
+	for (NSDictionary *account in accounts)
 		if ([[account objectForKey:@"uid"] unsignedIntValue] == uid && [[account objectForKey:@"guid"] length] > 0)
 			guid = [account objectForKey:@"guid"];
 	if (guid == nil) {
-		// Nothing can be stored for this row (its account is gone, has no
-		// GeneratedUID or cannot be looked up now): the click is undone and
-		// the rows show the stored choice again.
+		// Nothing can be stored for this checkbox (its account is gone, has
+		// no GeneratedUID or cannot be looked up now): the click is undone
+		// and the list shows the stored choice again.
 		[sender setState:[sender state] == NSControlStateValueOn ? NSControlStateValueOff : NSControlStateValueOn];
 		[self updateAccountSharingRows];
 		return;
 	}
-	NSMutableArray *ids = [NSMutableArray arrayWithArray:[self accountShareStoredIDs]];
+	NSMutableArray *ids = [NSMutableArray arrayWithArray:[self accountShareStoredIDsForKey:key]];
 	[ids removeObject:guid];
 	if ([sender state] == NSControlStateValueOn)
 		[ids addObject:guid];
 	[ids sortUsingSelector:@selector(compare:)];
-	[[NSUserDefaults standardUserDefaults] setObject:ids forKey:@"shareClippingsAccountIDs"];
-	[self passAccountShareChoice];
+	[[NSUserDefaults standardUserDefaults] setObject:ids forKey:key];
+	[self passAccountShareChoiceForAccounts:accounts];
 }
 
-// The account checkboxes show the stored choice and only work while sharing is
-// on. While the choice cannot be told (the account lookup fails), each keeps
-// what it shows.
+// "Send": the text copied here goes to that account (once it receives from
+// this one).
+-(IBAction)toggleSendToAccount:(id)sender
+{
+	[self toggleShareAccount:sender forKey:FlycutShareSendKey];
+}
+
+// "Receive": the text copied in that account comes here (once it sends to
+// this one).
+-(IBAction)toggleReceiveFromAccount:(id)sender
+{
+	[self toggleShareAccount:sender forKey:FlycutShareReceiveKey];
+}
+
+// The Send and Receive checkboxes show the stored lists and only work while
+// sharing is on; the names and the column headers are greyed while it is off.
+// While the lists cannot be told (the account lookup fails), each checkbox
+// keeps what it shows.
 -(void)updateAccountSharingRows
 {
 	BOOL on = [[NSUserDefaults standardUserDefaults] boolForKey:@"shareClippingsAcrossAccounts"];
-	NSArray *chosen = [self accountShareChosenUIDs];
-	for (NSButton *row in accountSharingRows) {
-		[row setEnabled:on];
-		if (chosen != nil)
-			[row setState:[chosen containsObject:[NSNumber numberWithUnsignedInt:(uid_t)[row tag]]]
-				? NSControlStateValueOn : NSControlStateValueOff];
+	NSArray *accounts = [self accountShareLoginAccounts];
+	NSArray *send = [self accountShareChosenUIDsForKey:FlycutShareSendKey accounts:accounts];
+	NSArray *receive = [self accountShareChosenUIDsForKey:FlycutShareReceiveKey accounts:accounts];
+	for (NSView *view in accountSharingRows) {
+		NSString *identifier = [view identifier];
+		NSArray *chosen = [identifier isEqualToString:@"accountSharingSend"] ? send
+			: ([identifier isEqualToString:@"accountSharingReceive"] ? receive : nil);
+		if ([view isKindOfClass:[NSButton class]]) {
+			NSButton *box = (NSButton *)view;
+			[box setEnabled:on];
+			if (chosen != nil)
+				[box setState:[chosen containsObject:[NSNumber numberWithUnsignedInt:(uid_t)[box tag]]]
+					? NSControlStateValueOn : NSControlStateValueOff];
+		} else if ([view isKindOfClass:[NSTextField class]]) {
+			[(NSTextField *)view setTextColor:on ? [savingSectionLabel textColor] : [NSColor disabledControlTextColor]];
+		}
 	}
 }
 
@@ -1471,7 +1551,8 @@ static CGFloat FlycutAccountSharingRightEdge(NSView *pane, NSControl *reference)
 	// An account may have been deleted meanwhile and its UID given to a new
 	// one: the choice is looked up again by GeneratedUID before the refresh
 	// (and sharing that waited since launch for the lookup starts).
-	if (accountShareChoicePending || [accountShareService chosenAccountUIDs] != nil)
+	if (accountShareChoicePending || [accountShareService sendAccountUIDs] != nil
+		|| [accountShareService receiveAccountUIDs] != nil)
 		[self passAccountShareChoice];
 	[accountShareService sessionDidBecomeActive];
 }
@@ -2259,13 +2340,52 @@ static NSRect FlycutAccountListLabelFrame(NSTextField *label, NSControl *checkbo
 	return rowFrame;
 }
 
+// A label of the account list (a column header, an account's name): the
+// checkboxes' font and the pane's label colour (greyed while sharing is off,
+// -updateAccountSharingRows).
+static NSTextField *FlycutAccountListLabel(NSString *text, NSString *identifier, NSControl *reference)
+{
+	NSTextField *label = [NSTextField labelWithString:text];
+	[label setIdentifier:identifier];
+	[label setFont:[reference font]];
+	return label;
+}
+
+// The frame that centres a view's alignment rect (a checkbox's box, a label's
+// text) in a column, on whole points.
+static NSRect FlycutCentredInColumn(NSView *view, NSRect frame, NSRect column)
+{
+	NSRect edges = [view alignmentRectForFrame:frame];
+	frame.origin.x = round(NSMidX(column) - NSWidth(edges) / 2.0 - (NSMinX(edges) - NSMinX(frame)));
+	return frame;
+}
+
+// A Send or Receive checkbox of an account's line, centred in its column
+// (alignment rect). It has no title (the name and the column header say it);
+// VoiceOver reads what it does (control and cell), the tooltip when it works.
+static NSButton *FlycutAccountListCheckbox(id target, SEL action, NSString *identifier, uid_t uid, NSControl *reference,
+										   NSRect column, NSString *accessibilityLabel, NSString *toolTip)
+{
+	NSButton *box = [NSButton checkboxWithTitle:@"" target:target action:action];
+	[box setIdentifier:identifier];
+	[box setTag:uid];
+	[box setFont:[reference font]];
+	[box setFrame:FlycutCentredInColumn(box, NSMakeRect(0, NSMinY(column), [box intrinsicContentSize].width, NSHeight(column)), column)];
+	[box setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
+	[box setAccessibilityLabel:accessibilityLabel];
+	[[box cell] setAccessibilityLabel:accessibilityLabel];
+	[box setToolTip:toolTip];
+	return box;
+}
+
 // "Other accounts on this Mac:", a section like "Saving:" with one checkbox
-// and below it one checkbox per other login account of this Mac, indented like
-// the sub-options under "Passwords:", built here so the NIB stays as it is. It
-// goes below the Saving section; the pane grows by the section, so every NIB
-// control keeps its distance from the top and the "Check Accessibility
-// Permissions" row its place at the bottom. Font, colour, left edges, widths
-// and the row pitch come from the neighbours.
+// and below it a line with the column headers "Send" and "Receive" and one line
+// per other login account of this Mac: its name, indented like the sub-options
+// under "Passwords:", and a checkbox in each column. Built here so the NIB
+// stays as it is. It goes below the Saving section; the pane grows by the
+// section, so every NIB control keeps its distance from the top and the "Check
+// Accessibility Permissions" row its place at the bottom. Font, colour, left
+// and right edges and the row pitch come from the neighbours.
 -(void)buildGeneralAccountSharingSection
 {
 	NSView *pane = [savingSectionLabel superview];
@@ -2296,9 +2416,9 @@ static NSRect FlycutAccountListLabelFrame(NSTextField *label, NSControl *checkbo
 	CGFloat indent = suboption != nil ? NSMinX([suboption frame]) : NSMinX([reference frame]) + 20;
 	CGFloat pitch = below != nil ? NSMinY([reference frame]) - NSMinY([below frame]) : checkboxHeight + 4;
 	NSArray *accounts = [self accountShareLoginAccounts];
-	// The accounts (or the "no other accounts" line). The note below them gets
-	// its line only while it shows (-updateAccountSharingStatus).
-	NSUInteger lines = MAX([accounts count], (NSUInteger)1);
+	// The headers and the accounts (or the "no other accounts" line). The note
+	// below them gets its line only while it shows (-updateAccountSharingStatus).
+	NSUInteger lines = [accounts count] > 0 ? [accounts count] + 1 : 1;
 	// Spaced like the XIB's sections: the label 16 pt below the lowest
 	// control above it, the checkbox 8 pt below the label.
 	CGFloat above = 16, between = 8, grow = above + labelHeight + between + checkboxHeight + pitch * lines;
@@ -2331,33 +2451,80 @@ static NSRect FlycutAccountListLabelFrame(NSTextField *label, NSControl *checkbo
 	[checkbox setFont:[reference font]];
 	[checkbox setFrame:checkboxFrame];
 	[checkbox setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-	[checkbox setToolTip:@"Text you copy also goes to Flycut in the accounts you check below, once they check this account too. "
-						  "Passwords Flycut recognizes and copies marked as private or temporary are never shared."];
+	[checkbox setToolTip:@"Text you copy goes to the accounts checked under Send; text copied in the accounts checked under "
+						  "Receive comes here. Each of those accounts must turn this on too: to send to one, check Send here "
+						  "and Receive for this account there; to receive from one, check Receive here and Send for this "
+						  "account there. Passwords Flycut recognizes and copies marked as private or temporary are never shared."];
 	[checkbox bind:NSValueBinding toObject:[NSUserDefaultsController sharedUserDefaultsController]
 	   withKeyPath:@"values.shareClippingsAcrossAccounts" options:nil];
 	[pane addSubview:checkbox];
 	accountSharingCheckbox = checkbox;
 
-	// The accounts by name; VoiceOver reads the name (control and cell), the
-	// tooltip says what checking it does.
+	// The list: the column headers, then per account its name and the two
+	// checkboxes. The columns are as wide as the wider header (whole points),
+	// 8 pt apart; "Receive" ends where the fields above end (left of the
+	// Restore Default arrows), Send stands left of it. Each header fills its
+	// column with its text centred, each checkbox is centred in its column.
+	// Each name ends 8 pt before the Send column and is shortened there with
+	// an ellipsis, its full text in the tooltip: a long name never widens the
+	// window.
 	accountSharingRows = [[NSMutableArray alloc] init];
 	NSRect rowFrame = NSMakeRect(indent, NSMinY(checkboxFrame), NSMaxX(checkboxFrame) - indent, checkboxHeight);
-	for (NSDictionary *account in accounts) {
-		uid_t uid = [[account objectForKey:@"uid"] unsignedIntValue];
-		NSString *name = [account objectForKey:@"name"];
-		if ([name length] == 0)
-			name = [NSString stringWithFormat:@"Account %u", uid];
+	if ([accounts count] > 0) {
 		rowFrame.origin.y -= pitch;
-		NSButton *row = [NSButton checkboxWithTitle:name target:self action:@selector(toggleShareAccount:)];
-		[row setIdentifier:@"accountSharingAccount"];
-		[row setTag:uid];
-		[row setFont:[reference font]];
-		[row setFrame:rowFrame];
-		[row setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
-		[row setToolTip:[NSString stringWithFormat:@"Share copied text with %@. Nothing is shared until %@ also turns this on "
-												   "and checks this account.", name, name]];
-		[pane addSubview:row];
-		[accountSharingRows addObject:row];
+		NSRect edges = [reference alignmentRectForFrame:rowFrame];
+		NSTextField *sendHeader = FlycutAccountListLabel(@"Send", @"accountSharingSendHeader", reference);
+		NSTextField *receiveHeader = FlycutAccountListLabel(@"Receive", @"accountSharingReceiveHeader", reference);
+		CGFloat gap = 8, column = 0;
+		// Centred over their checkboxes. Centred, a label's intrinsic width also
+		// holds the 2 pt it keeps free on each side; left-aligned it does not, and
+		// a label made that wide cuts off the end of its text.
+		for (NSTextField *header in @[sendHeader, receiveHeader]) {
+			[header setAlignment:NSTextAlignmentCenter];
+			column = MAX(column, ceil(NSWidth([header alignmentRectForFrame:
+				NSMakeRect(0, 0, [header intrinsicContentSize].width, checkboxHeight)])));
+		}
+		CGFloat fieldsMaxX = FlycutRestoreArrowFieldsMaxX(pane);
+		CGFloat right = fieldsMaxX > 0 ? MIN(fieldsMaxX, NSMaxX(edges)) : NSMaxX(edges);
+		NSRect receiveColumn = NSMakeRect(right - column, NSMinY(edges), column, NSHeight(edges));
+		NSRect sendColumn = NSOffsetRect(receiveColumn, -(column + gap), 0);
+		NSRect nameColumn = NSMakeRect(NSMinX(edges), NSMinY(edges), NSMinX(sendColumn) - gap - NSMinX(edges), NSHeight(edges));
+		for (NSTextField *header in @[sendHeader, receiveHeader]) {
+			[header setFrame:[header frameForAlignmentRect:header == sendHeader ? sendColumn : receiveColumn]];
+			[header setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
+			[pane addSubview:header];
+			[accountSharingRows addObject:header];
+		}
+		for (NSDictionary *account in accounts) {
+			uid_t uid = [[account objectForKey:@"uid"] unsignedIntValue];
+			NSString *name = [account objectForKey:@"name"];
+			if ([name length] == 0)
+				name = [NSString stringWithFormat:@"Account %u", uid];
+			rowFrame.origin.y -= pitch;
+			nameColumn = NSOffsetRect(nameColumn, 0, -pitch);
+			sendColumn = NSOffsetRect(sendColumn, 0, -pitch);
+			receiveColumn = NSOffsetRect(receiveColumn, 0, -pitch);
+			NSTextField *nameLabel = FlycutAccountListLabel(name, @"accountSharingAccountName", reference);
+			[nameLabel setTag:uid];
+			[nameLabel setLineBreakMode:NSLineBreakByTruncatingTail];
+			[nameLabel setToolTip:name];
+			[nameLabel setFrame:[nameLabel frameForAlignmentRect:nameColumn]];
+			[nameLabel setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
+			[pane addSubview:nameLabel];
+			[accountSharingRows addObject:nameLabel];
+			NSButton *send = FlycutAccountListCheckbox(self, @selector(toggleSendToAccount:), @"accountSharingSend", uid,
+				reference, sendColumn, [NSString stringWithFormat:@"Send to %@", name],
+				[NSString stringWithFormat:@"Send copied text to %@. It gets there once %@ turns sharing on too "
+										   "and checks Receive for this account.", name, name]);
+			NSButton *receive = FlycutAccountListCheckbox(self, @selector(toggleReceiveFromAccount:), @"accountSharingReceive", uid,
+				reference, receiveColumn, [NSString stringWithFormat:@"Receive from %@", name],
+				[NSString stringWithFormat:@"Receive copied text from %@. It comes here once %@ turns sharing on too "
+										   "and checks Send for this account.", name, name]);
+			for (NSButton *box in @[send, receive]) {
+				[pane addSubview:box];
+				[accountSharingRows addObject:box];
+			}
+		}
 	}
 	if ([accounts count] == 0) {
 		rowFrame.origin.y -= pitch;

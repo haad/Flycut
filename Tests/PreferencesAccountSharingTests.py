@@ -2,9 +2,13 @@
 """The General pane's "Other accounts on this Mac:" section (account sharing).
 
 The section is built in code (no XIB change): a section label like "Saving:", one
-checkbox like "Remove duplicates" and below it one checkbox per other login account
-of this Mac, indented like the sub-options under "Passwords:", below the Saving
-section and above the "Check Accessibility Permissions" row. The fixture loads the
+checkbox like "Remove duplicates" and below it a line with the column headers "Send"
+and "Receive" and one line per other login account of this Mac: its name, indented
+like the sub-options under "Passwords:", and two checkboxes without a title in the
+two columns, each centred under its header; "Receive" ends where the fields above end
+(the text fields, folder buttons and number field beside the Restore Default arrows).
+The section sits below the Saving section and above the "Check Accessibility
+Permissions" row. The fixture loads the
 production NIB (master's compiled MainMenu.nib for trees that carry only
 MainMenu.xib, see Tests/Fixtures/PreferencesNibFixture.py) and sends the builders
 that -awakeFromNib sends; a baseline run sends them without the new builder, so the
@@ -12,9 +16,11 @@ geometry can be compared: every NIB control keeps its distance from the top, the
 pane grows by exactly the section, the gap above the permissions row stays, the
 other panes keep their height. Also checked: fonts and left edges taken from the
 neighbours, the titles fit, the binding, the actions, the tooltips, the VoiceOver
-labels (control and cell), the key-view order, the account rows' state (stored
-choice, disabled while sharing is off), that clicking them stores the choice, and
-that the window follows the taller pane when UKPrefsPanel has already sized it.
+labels (control and cell: "Send to <name>", "Receive from <name>"), the key-view
+order, the checkboxes' state (the two stored lists, disabled and the names greyed
+while sharing is off), that clicking them stores each list by GeneratedUID, that a
+click that cannot be stored is undone in both columns, and that the window follows
+the taller pane when UKPrefsPanel has already sized it.
 
 Where the section ends up once the window shows: with 0, 1, 2, 3 or 6 other accounts,
 in both orders the NIB loader may wake AppController and UKPrefsPanel in, and with
@@ -31,8 +37,8 @@ read. Defaults stay in memory; the window is never shown.
 
 With the tree's MainMenu.xib laid onto that NIB (Tests/Fixtures/GeneralPaneXib.py) the
 section follows the XIB's spacing: 16 pt below the Saving section, the checkbox 8 pt
-below the label, the rows of the list 6 pt apart, and the permissions row 16 pt below
-the section.
+below the label, the lines of the list (headers, accounts) 6 pt apart, and the
+permissions row 16 pt below the section.
 
 The note line under the list ("Sharing is unavailable: ...") takes room only while it
 shows: hidden, the permissions row is 16 pt below the last line of the list; shown
@@ -43,6 +49,7 @@ row 16 pt below the note; hidden again, the pane is as before.
 from __future__ import annotations
 
 import json
+import math
 import os
 import pathlib
 import subprocess
@@ -54,8 +61,12 @@ from PreferencesNibFixture import PreferencesNibCase, ROOT  # noqa: E402
 import GeneralPaneXib  # noqa: E402
 
 TITLE = "Share copied text with these accounts:"
-TOOLTIP = ("Text you copy also goes to Flycut in the accounts you check below, once they check this account too. "
+TOOLTIP = ("Text you copy goes to the accounts checked under Send; text copied in the accounts checked under Receive "
+           "comes here. Each of those accounts must turn this on too: to send to one, check Send here and Receive for "
+           "this account there; to receive from one, check Receive here and Send for this account there. "
            "Passwords Flycut recognizes and copies marked as private or temporary are never shared.")
+# A dummy account name longer than the name column.
+LONG_NAME = "Example Account With A Rather Long Full Name That Goes On And On"
 NONE = "No other accounts on this Mac"
 STEPS = ["opened", "back from Hotkeys", "back from Appearance", "back from Acknowledgements", "reopened"]
 UNREAD = "The accounts on this Mac cannot be read right now"
@@ -63,8 +74,17 @@ READ_STEPS = ["reopened", "read, back from Hotkeys", "read, reopened"]
 NOTE_STEPS = ["note shown", "note shown, back from Hotkeys", "note hidden again"]
 
 
-def row_tooltip(name: str) -> str:
-    return f"Share copied text with {name}. Nothing is shared until {name} also turns this on and checks this account."
+def send_tooltip(name: str) -> str:
+    return f"Send copied text to {name}. It gets there once {name} turns sharing on too and checks Receive for this account."
+
+
+def receive_tooltip(name: str) -> str:
+    return (f"Receive copied text from {name}. It comes here once {name} turns sharing on too "
+            f"and checks Send for this account.")
+
+
+SEND_KEY = "shareClippingsSendAccountIDs"
+RECEIVE_KEY = "shareClippingsReceiveAccountIDs"
 
 
 FIXTURE = r'''
@@ -84,12 +104,21 @@ static NSView *FindByIdentifier(NSView *pane, NSString *identifier)
     return nil;
 }
 
-static NSArray *AccountRows(NSView *pane)
+static NSArray *Views(NSView *pane, NSString *identifier)
 {
-    NSMutableArray *rows = [NSMutableArray array];
-    for (NSView *v in [pane subviews]) if ([[v identifier] isEqualToString:@"accountSharingAccount"]) [rows addObject:v];
-    return rows;
+    NSMutableArray *views = [NSMutableArray array];
+    for (NSView *v in [pane subviews]) if ([[v identifier] isEqualToString:identifier]) [views addObject:v];
+    [views sortUsingComparator:^NSComparisonResult(NSView *a, NSView *b) {
+        return NSMinY([a frame]) > NSMinY([b frame]) ? NSOrderedAscending : (NSMinY([a frame]) < NSMinY([b frame]) ? NSOrderedDescending
+               : NSOrderedSame);
+    }];
+    return views;
 }
+
+// The account lines: the names (labels), top down.
+static NSArray *AccountRows(NSView *pane) { return Views(pane, @"accountSharingAccountName"); }
+static NSArray *SendBoxes(NSView *pane) { return Views(pane, @"accountSharingSend"); }
+static NSArray *ReceiveBoxes(NSView *pane) { return Views(pane, @"accountSharingReceive"); }
 
 static NSView *BoundTo(NSView *pane, NSString *keyPath)
 {
@@ -137,24 +166,146 @@ static void FitGeneralFirst(void)
     [prefs changePanes:sender];
 }
 
-// The stored choice (GeneratedUIDs) as the fixture accounts' UIDs.
-static NSArray *Chosen(void)
+// A stored list (GeneratedUIDs) as the fixture accounts' UIDs.
+static NSArray *ChosenIn(NSString *key)
 {
     NSMutableArray *uids = [NSMutableArray array];
-    for (NSString *guid in [[NSUserDefaults standardUserDefaults] objectForKey:@"shareClippingsAccountIDs"] ?: @[])
+    for (NSString *guid in [[NSUserDefaults standardUserDefaults] objectForKey:key] ?: @[])
         for (NSDictionary *account in FixtureLoginAccounts)
             if ([account[@"guid"] isEqualToString:guid]) [uids addObject:account[@"uid"]];
     return [uids sortedArrayUsingSelector:@selector(compare:)];
 }
 
-static NSDictionary *RowReport(NSButton *row, NSButton *reference)
+// The two stored lists as they are (GeneratedUIDs).
+static NSDictionary *StoredLists(void)
 {
-    return @{@"title": [row title], @"frame": FrameOf([row frame]), @"state": @([row state]), @"enabled": @([row isEnabled]),
-             @"tag": @([row tag]), @"axControl": [row accessibilityLabel] ?: @"", @"axCell": [[row cell] accessibilityLabel] ?: @"",
-             @"tooltip": [row toolTip] ?: @"", @"action": NSStringFromSelector([row action]) ?: @"",
-             @"targetIsController": @([row target] == controller), @"fontSame": @([[row font] isEqual:[reference font]]),
-             @"fits": @([row intrinsicContentSize].width <= NSWidth([row frame]) + 0.5)};
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    return @{@"send": [defaults objectForKey:@"shareClippingsSendAccountIDs"] ?: [NSNull null],
+             @"receive": [defaults objectForKey:@"shareClippingsReceiveAccountIDs"] ?: [NSNull null]};
 }
+
+static NSDictionary *Chosen(void)
+{
+    return @{@"send": ChosenIn(@"shareClippingsSendAccountIDs"), @"receive": ChosenIn(@"shareClippingsReceiveAccountIDs")};
+}
+
+// The text colour of a label: the pane's label colour, the disabled one, or something else.
+static NSString *ColorName(NSTextField *field)
+{
+    NSColor *color = [field textColor];
+    if ([color isEqual:[[controller valueForKey:@"savingSectionLabel"] textColor]]) return @"label";
+    if ([color isEqual:[NSColor disabledControlTextColor]]) return @"disabled";
+    return [color description] ?: @"none";
+}
+
+static NSDictionary *BoxReport(NSButton *box, NSButton *reference)
+{
+    NSRect a = [box alignmentRectForFrame:[box frame]];
+    return @{@"title": [box title], @"frame": FrameOf([box frame]), @"midX": @(NSMidX(a)), @"state": @([box state]),
+             @"enabled": @([box isEnabled]), @"tag": @([box tag]), @"axControl": [box accessibilityLabel] ?: @"",
+             @"axCell": [[box cell] accessibilityLabel] ?: @"", @"tooltip": [box toolTip] ?: @"",
+             @"action": NSStringFromSelector([box action]) ?: @"", @"targetIsController": @([box target] == controller),
+             @"fontSame": @([[box font] isEqual:[reference font]]),
+             @"fits": @([box intrinsicContentSize].width <= NSWidth([box frame]) + 0.5)};
+}
+
+static NSDictionary *LabelReport(NSTextField *label, NSButton *reference)
+{
+    NSRect a = [label alignmentRectForFrame:[label frame]];
+    return @{@"text": [label stringValue], @"frame": FrameOf([label frame]), @"align": FrameOf(a), @"midX": @(NSMidX(a)),
+             @"tag": @([label tag]), @"color": ColorName(label), @"fontSame": @([[label font] isEqual:[reference font]]),
+             @"tooltip": [label toolTip] ?: @"", @"lineBreak": @([label lineBreakMode]),
+             @"axValue": [[label accessibilityValue] description] ?: @"",
+             @"intrinsicW": @([label intrinsicContentSize].width),
+             // A label draws its text inside its alignment rect (2 pt in from each side).
+             // The text must fit there, not only the intrinsic width in the frame: a
+             // left-aligned label's intrinsic width leaves those 2 pt out, so a label made
+             // exactly that wide cuts off the end of its text.
+             @"textW": @([[label stringValue] sizeWithAttributes:@{NSFontAttributeName: [label font]}].width),
+             @"fits": @([label intrinsicContentSize].width <= NSWidth([label frame]) + 0.5
+                        && [[label stringValue] sizeWithAttributes:@{NSFontAttributeName: [label font]}].width <= NSWidth(a) + 0.5)};
+}
+
+static NSDictionary *RowReport(NSView *pane, NSUInteger i, NSButton *reference)
+{
+    return @{@"title": [AccountRows(pane)[i] stringValue], @"name": LabelReport(AccountRows(pane)[i], reference),
+             @"send": BoxReport(SendBoxes(pane)[i], reference), @"receive": BoxReport(ReceiveBoxes(pane)[i], reference)};
+}
+
+// Where General's Restore Default arrows end as drawn: each arrow is shown and enabled for
+// a moment and cached on its own (offscreen, twice the resolution); the rightmost column with
+// ink (alpha above 0.1) counts, in the pane's coordinates.
+static CGFloat ArrowInkRight(NSView *pane)
+{
+    CGFloat right = 0;
+    for (NSView *v in [pane subviews]) {
+        if (![v isKindOfClass:[NSButton class]] || ![[v identifier] hasPrefix:@"restoreDefault"]) continue;
+        NSButton *arrow = (NSButton *)v;
+        BOOL hidden = [arrow isHidden], enabled = [arrow isEnabled];
+        [arrow setHidden:NO];
+        [arrow setEnabled:YES];
+        NSRect b = [arrow bounds];
+        NSBitmapImageRep *rep = [[[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:(NSInteger)(NSWidth(b) * 2)
+            pixelsHigh:(NSInteger)(NSHeight(b) * 2) bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
+            colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0] autorelease];
+        [rep setSize:b.size];
+        [arrow cacheDisplayInRect:b toBitmapImageRep:rep];
+        [arrow setEnabled:enabled];
+        [arrow setHidden:hidden];
+        NSInteger inked = -1;
+        for (NSInteger x = [rep pixelsWide] - 1; x >= 0 && inked < 0; x--)
+            for (NSInteger y = 0; y < [rep pixelsHigh] && inked < 0; y++)
+                if ([[rep colorAtX:x y:y] alphaComponent] > 0.1) inked = x;
+        if (inked < 0) continue;
+        NSRect ink = NSMakeRect(NSMinX(b), NSMinY(b), (inked + 1) / 2.0, NSHeight(b));
+        right = MAX(right, NSMaxX([pane convertRect:ink fromView:arrow]));
+    }
+    return right;
+}
+
+static NSDictionary *HeaderReport(NSView *pane, NSButton *reference)
+{
+    NSTextField *send = (NSTextField *)FindByIdentifier(pane, @"accountSharingSendHeader");
+    NSTextField *receive = (NSTextField *)FindByIdentifier(pane, @"accountSharingReceiveHeader");
+    if (send == nil && receive == nil) return nil;
+    return @{@"send": send ? LabelReport(send, reference) : [NSNull null], @"receive": receive ? LabelReport(receive, reference) : [NSNull null]};
+}
+
+// The right edges (alignment rects) of the fields the Restore Default arrows stand beside
+// above the section: the two password fields, the Favorites number field and both folder
+// buttons, found by binding and outlet.
+static NSDictionary *FieldsRight(NSView *pane)
+{
+    NSMutableDictionary *edges = [NSMutableDictionary dictionary];
+    for (NSString *key in @[@"skipPboardTypesList", @"skipPasswordLengthsList", @"favoritesRememberNum"])
+        for (NSView *v in [pane subviews])
+            if ([v isKindOfClass:[NSTextField class]] && [BoundKeyPath(v) isEqualToString:[@"values." stringByAppendingString:key]])
+                edges[key] = @(NSMaxX([v alignmentRectForFrame:[v frame]]));
+    for (NSString *outlet in @[@"saveToLocationButton", @"autoSaveToLocationButton"]) {
+        NSView *v = [controller valueForKey:outlet];
+        if ([v superview] == pane) edges[outlet] = @(NSMaxX([v alignmentRectForFrame:[v frame]]));
+    }
+    return edges;
+}
+
+// A step a case puts into the builder list before the sharing section: every Restore
+// Default arrow of General gets 4 pt wider. Each starts where it did, beside its field, so
+// the fields stay where they are while the arrows' frames and the symbols drawn in them
+// end further right.
+@interface AppController (FixtureWiderArrows)
+- (void)fixtureWidenRestoreArrows;
+@end
+@implementation AppController (FixtureWiderArrows)
+- (void)fixtureWidenRestoreArrows
+{
+    NSView *pane = [[self valueForKey:@"savingSectionLabel"] superview];
+    for (NSLayoutConstraint *c in [pane constraints])
+        if ([c firstAttribute] == NSLayoutAttributeWidth && [c secondItem] == nil &&
+            [[(NSView *)[c firstItem] identifier] hasPrefix:@"restoreDefault"])
+            [c setConstant:[c constant] + 4];
+    [pane layoutSubtreeIfNeeded];
+}
+@end
 
 // ---- "placed": where the section is once the window shows, with Restore Default arrows shown.
 
@@ -239,7 +390,9 @@ static NSDictionary *ListEdges(NSView *pane)
     for (NSView *v in [pane subviews]) {
         if (![[v identifier] hasPrefix:@"accountSharing"] || v == checkbox) continue;
         NSRect a = [v alignmentRectForFrame:[v frame]];
-        [lines addObject:@{@"view": [v identifier], @"x": @(NSMinX(a)), @"maxX": @(NSMaxX(a)), @"frameX": @(NSMinX([v frame]))}];
+        [lines addObject:@{@"view": [v identifier], @"x": @(NSMinX(a)), @"maxX": @(NSMaxX(a)), @"midX": @(NSMidX(a)),
+                           @"frameX": @(NSMinX([v frame])), @"frameMaxX": @(NSMaxX([v frame])), @"y": @(NSMinY([v frame])),
+                           @"hidden": @([v isHidden])}];
     }
     return @{@"column": @(NSMinX([column alignmentRectForFrame:[column frame]])),
              @"maxX": @(NSMaxX([checkbox alignmentRectForFrame:[checkbox frame]])), @"lines": lines};
@@ -267,8 +420,10 @@ static NSDictionary *Placement(NSString *step)
     NSView *note = FindByIdentifier(pane, @"accountSharingStatus");
     BOOL inContent = YES, inBox = YES;
     NSUInteger arrows = 0;
+    CGFloat arrowsRight = 0;     // the right edge of the arrow column: the arrows' frames, shown or not
     for (NSView *v in [pane subviews]) {
         if ([[v identifier] hasPrefix:@"restoreDefault"] && ![v isHidden]) arrows++;
+        if ([[v identifier] hasPrefix:@"restoreDefault"]) arrowsRight = MAX(arrowsRight, NSMaxX([v frame]));
         if (v == permissions) continue;
         if (!InSection(v)) {
             if (![v isHidden]) lowest = MIN(lowest, NSMinY([v frame]));
@@ -296,7 +451,9 @@ static NSDictionary *Placement(NSString *step)
              @"edges": ListEdges(pane),
              @"unread": @(FindByIdentifier(pane, @"accountSharingAccountsUnread") != nil),
              @"unreadText": [(NSTextField *)FindByIdentifier(pane, @"accountSharingAccountsUnread") stringValue] ?: @"",
-             @"arrowsShown": @(arrows), @"paneHeight": @(NSHeight([pane bounds])),
+             @"arrowsShown": @(arrows), @"arrowsRight": @(arrowsRight), @"arrowsInkRight": @(ArrowInkRight(pane)), @"paneHeight": @(NSHeight([pane bounds])), @"windowWidth": @(NSWidth([window frame])),
+             @"fieldsRight": FieldsRight(pane),
+             @"savingMaxX": @(NSMaxX([[controller valueForKey:@"savingSectionLabel"] frame])),
              @"contentHeight": @(NSHeight([content frame])), @"lastLine": @(lastLine),
              @"note": note ? @{@"frame": FrameOf([note frame]), @"hidden": @([note isHidden]), @"text": [(NSTextField *)note stringValue]}
                            : [NSNull null]};
@@ -402,11 +559,13 @@ int main(int argc, const char **argv)
         NSString *mode = argc > 2 ? [NSString stringWithUTF8String:argv[2]] : @"";
         if ([mode isEqualToString:@"placed"]) return Placed(argc, argv);
         if (![mode isEqualToString:@"none"])
-            FixtureLoginAccounts = [@[@{@"uid": @7001, @"name": @"Account A", @"guid": @"0F0F0F0F-0000-4000-8000-000000007001"},
+            FixtureLoginAccounts = [@[@{@"uid": @7001, @"name": [mode isEqualToString:@"long-name"] ? @"Example Account With A Rather Long Full Name That Goes On And On" : @"Account A",
+                                        @"guid": @"0F0F0F0F-0000-4000-8000-000000007001"},
                                       @{@"uid": @(getuid()), @"name": @"Account Self", @"guid": @"0F0F0F0F-0000-4000-8000-0000000000FF"},
                                       @{@"uid": @7002, @"name": @"Account B", @"guid": @"0F0F0F0F-0000-4000-8000-000000007002"}] retain];
-        // Account B is stored as chosen.
-        [[NSUserDefaults standardUserDefaults] setObject:@[@"0F0F0F0F-0000-4000-8000-000000007002"] forKey:@"shareClippingsAccountIDs"];
+        // Account B is stored in the send list only.
+        [[NSUserDefaults standardUserDefaults] setObject:@[@"0F0F0F0F-0000-4000-8000-000000007002"] forKey:@"shareClippingsSendAccountIDs"];
+        [[NSUserDefaults standardUserDefaults] setObject:@[] forKey:@"shareClippingsReceiveAccountIDs"];
         if ([mode isEqualToString:@"on"]) BeforeBuilders = ShareOn;
         if ([mode isEqualToString:@"fitted-first"]) BeforeBuilders = FitGeneralFirst;
         if ([mode isEqualToString:@"click-unread"]) BeforeBuilders = InstallSwitchableLookup;
@@ -415,6 +574,23 @@ int main(int argc, const char **argv)
         NSView *pane = PaneView(generalPane);
         NSBox *box = (NSBox *)[pane superview];
         NSMutableDictionary *report = [NSMutableDictionary dictionary];
+        if ([mode isEqualToString:@"narrower"]) {
+            // The pane gets 40 pt narrower (a window fitted to narrower content): the
+            // section keeps its place and its width, as the arrows and the NIB's controls do.
+            NSMutableArray *views = [NSMutableArray arrayWithObject:[controller valueForKey:@"accountSharingLabel"]];
+            for (NSView *v in [pane subviews])
+                if ([[v identifier] hasPrefix:@"accountSharing"]) [views addObject:v];
+            NSMutableArray *before = [NSMutableArray array], *after = [NSMutableArray array];
+            for (NSView *v in views) [before addObject:@{@"view": [v identifier] ?: @"label", @"frame": FrameOf([v frame])}];
+            [box setFrameSize:NSMakeSize(NSWidth([box frame]) - 40, NSHeight([box frame]))];
+            for (NSView *v in views) [after addObject:@{@"view": [v identifier] ?: @"label", @"frame": FrameOf([v frame])}];
+            report[@"before"] = before;
+            report[@"after"] = after;
+            report[@"paneWidths"] = @[@(NSWidth([pane frame]) + 40), @(NSWidth([pane frame]))];
+            report[@"section"] = @(FindByIdentifier(pane, @"accountSharingCheckbox") != nil);
+            Emit(report);
+            return 0;
+        }
         if ([mode isEqualToString:@"fitted-first"]) {
             // No further pane change: the builder itself must have fitted the window.
             report[@"contentHeight"] = @(NSHeight([[window contentView] frame]));
@@ -437,14 +613,23 @@ int main(int argc, const char **argv)
         NSButton *checkbox = (NSButton *)FindByIdentifier(pane, @"accountSharingCheckbox");
         NSTextField *none = (NSTextField *)FindByIdentifier(pane, @"accountSharingNoAccounts");
         NSTextField *status = (NSTextField *)FindByIdentifier(pane, @"accountSharingStatus");
-        NSArray *rows = AccountRows(pane);
+        NSArray *rows = AccountRows(pane), *sends = SendBoxes(pane), *receives = ReceiveBoxes(pane);
         NSView *sticky = BoundTo(pane, @"values.stickyBezel");
         CGFloat lowest = CGFLOAT_MAX;
         for (NSView *v in [pane subviews]) {
-            if (v == permissions || v == label || v == checkbox || v == none || v == status || [rows containsObject:v] || [v isHidden]) continue;
+            if (v == permissions || v == label || [[v identifier] hasPrefix:@"accountSharing"] || [v isHidden]) continue;
             lowest = MIN(lowest, NSMinY([v frame]));
         }
         report[@"paneHeight"] = @(NSHeight([pane bounds]));
+        report[@"windowWidth"] = @(NSWidth([window frame]));
+        // The right edge of General's Restore Default arrow column (the arrows' frames, shown or not).
+        CGFloat arrowsRight = 0;
+        for (NSView *v in [pane subviews])
+            if ([v isKindOfClass:[NSButton class]] && [[v identifier] hasPrefix:@"restoreDefault"])
+                arrowsRight = MAX(arrowsRight, NSMaxX([v frame]));
+        report[@"arrowsRight"] = @(arrowsRight);
+        report[@"arrowsInkRight"] = @(ArrowInkRight(pane));
+        report[@"fieldsRight"] = FieldsRight(pane);
         report[@"contentHeight"] = @(NSHeight([[window contentView] frame]));
         report[@"boxHeight"] = @(NSHeight([box frame]));
         report[@"stickyTopDistance"] = @(NSHeight([pane bounds]) - NSMaxY([sticky frame]));
@@ -480,8 +665,11 @@ int main(int argc, const char **argv)
         report[@"action"] = NSStringFromSelector([checkbox action]) ?: @"";
         report[@"targetIsController"] = @([checkbox target] == controller);
         NSMutableArray *rowReports = [NSMutableArray array];
-        for (NSButton *row in rows) [rowReports addObject:RowReport(row, reference)];
+        report[@"lineCounts"] = @[@([rows count]), @([sends count]), @([receives count])];
+        for (NSUInteger i = 0; i < [rows count] && i < [sends count] && i < [receives count]; i++)
+            [rowReports addObject:RowReport(pane, i, reference)];
         report[@"rows"] = rowReports;
+        report[@"headers"] = HeaderReport(pane, reference) ?: [NSNull null];
         if (none != nil)
             report[@"none"] = @{@"text": [none stringValue], @"frame": FrameOf([none frame]),
                                 @"align": FrameOf([none alignmentRectForFrame:[none frame]]),
@@ -512,41 +700,65 @@ int main(int argc, const char **argv)
         NSView *v = [[prefs tabView] nextKeyView];
         for (int steps = 0; v != nil && v != [prefs tabView] && steps < 500; steps++, v = [v nextKeyView]) {
             if ([v window] != window || [v isHiddenOrHasHiddenAncestor] || ![v isKindOfClass:[NSControl class]]) continue;
+            // Tab never stops at a label (a text field that can be neither edited nor selected).
+            if ([v isKindOfClass:[NSTextField class]] && ![(NSTextField *)v isEditable] && ![(NSTextField *)v isSelectable]) continue;
+            NSUInteger i;
             NSString *name = v == checkbox ? @"share"
-                : ([rows containsObject:v] ? [@"row:" stringByAppendingString:[(NSButton *)v title]]
-                : ([v isKindOfClass:[NSButton class]] ? [(NSButton *)v title] : NSStringFromClass([v class])));
+                : ((i = [sends indexOfObject:v]) != NSNotFound ? [@"send:" stringByAppendingString:[rows[i] stringValue]]
+                : ((i = [receives indexOfObject:v]) != NSNotFound ? [@"receive:" stringByAppendingString:[rows[i] stringValue]]
+                : ([rows containsObject:v] ? [@"name:" stringByAppendingString:[(NSTextField *)v stringValue]]
+                : ([[v identifier] hasPrefix:@"accountSharing"] ? [v identifier]
+                : ([v isKindOfClass:[NSButton class]] ? [(NSButton *)v title] : NSStringFromClass([v class]))))));
             if (![order containsObject:name]) [order addObject:name];
         }
         report[@"keyOrder"] = order;
         report[@"favoritesTitle"] = [[controller valueForKey:@"forgottenFavoritesCheckbox"] title] ?: @"";
+        NSString *(^colors)(void) = ^NSString *{
+            NSMutableSet *set = [NSMutableSet set];
+            for (NSTextField *name in rows) [set addObject:ColorName(name)];
+            for (NSString *h in @[@"accountSharingSendHeader", @"accountSharingReceiveHeader"])
+                if (FindByIdentifier(pane, h)) [set addObject:ColorName((NSTextField *)FindByIdentifier(pane, h))];
+            return [[[set allObjects] sortedArrayUsingSelector:@selector(compare:)] componentsJoinedByString:@","];
+        };
+        BOOL (^enabled)(BOOL) = ^BOOL(BOOL all) {
+            BOOL any = NO, every = YES;
+            for (NSButton *b in [sends arrayByAddingObjectsFromArray:receives]) { any = any || [b isEnabled]; every = every && [b isEnabled]; }
+            return all ? every : any;
+        };
+        report[@"textColors"] = colors();
         if ([mode isEqualToString:@"click"] && [rows count] == 2) {
-            // Clicks as a user makes them: sharing on, then Account A on, then Account B off, then sharing off.
+            // Clicks as a user makes them: sharing on, then Send and Receive for Account A on, then
+            // Send for Account B off, then sharing off.
             NSMutableArray *steps = [NSMutableArray array];
             [checkbox performClick:nil];
             [steps addObject:@{@"share": @([[NSUserDefaults standardUserDefaults] boolForKey:@"shareClippingsAcrossAccounts"]),
-                               @"enabled": @([rows[0] isEnabled] && [rows[1] isEnabled]), @"chosen": Chosen()}];
-            [rows[0] performClick:nil];
-            [steps addObject:@{@"stateA": @([rows[0] state]), @"chosen": Chosen()}];
-            [rows[1] performClick:nil];
-            [steps addObject:@{@"stateB": @([rows[1] state]), @"chosen": Chosen()}];
+                               @"enabled": @(enabled(YES)), @"colors": colors(), @"chosen": Chosen()}];
+            [sends[0] performClick:nil];
+            [steps addObject:@{@"sendA": @([sends[0] state]), @"receiveA": @([receives[0] state]), @"chosen": Chosen()}];
+            [receives[0] performClick:nil];
+            [steps addObject:@{@"sendA": @([sends[0] state]), @"receiveA": @([receives[0] state]), @"chosen": Chosen()}];
+            [sends[1] performClick:nil];
+            [steps addObject:@{@"sendB": @([sends[1] state]), @"receiveB": @([receives[1] state]), @"chosen": Chosen()}];
             [checkbox performClick:nil];
             [steps addObject:@{@"share": @([[NSUserDefaults standardUserDefaults] boolForKey:@"shareClippingsAcrossAccounts"]),
-                               @"enabled": @([rows[0] isEnabled] || [rows[1] isEnabled]), @"chosen": Chosen()}];
+                               @"enabled": @(enabled(NO)), @"colors": colors(), @"chosen": Chosen(),
+                               @"states": @[@([sends[0] state]), @([receives[0] state]), @([sends[1] state]), @([receives[1] state])]}];
             report[@"clicks"] = steps;
         }
         if ([mode isEqualToString:@"click-unread"] && [rows count] == 2) {
             // The account lookup fails while the window is open: a click on a row cannot be
             // stored; the rows keep showing the choice, also when sharing goes off and on.
             [checkbox performClick:nil];
-            NSArray *stored = [[[NSUserDefaults standardUserDefaults] objectForKey:@"shareClippingsAccountIDs"] copy];
+            NSDictionary *stored = [StoredLists() retain];
             gLookupFails = YES;
-            [rows[0] performClick:nil];
-            [rows[1] performClick:nil];
-            NSDictionary *clicked = @{@"stateA": @([rows[0] state]), @"stateB": @([rows[1] state])};
+            for (NSButton *b in @[sends[0], sends[1], receives[0], receives[1]]) [b performClick:nil];
+            NSArray *(^states)(void) = ^NSArray *{
+                return @[@([sends[0] state]), @([receives[0] state]), @([sends[1] state]), @([receives[1] state])];
+            };
+            NSArray *clicked = states();
             [checkbox performClick:nil];
             [checkbox performClick:nil];
-            report[@"unreadClicks"] = @{@"clicked": clicked, @"toggled": @{@"stateA": @([rows[0] state]), @"stateB": @([rows[1] state])},
-                                        @"storedSame": @([[[NSUserDefaults standardUserDefaults] objectForKey:@"shareClippingsAccountIDs"] isEqual:stored])};
+            report[@"unreadClicks"] = @{@"clicked": clicked, @"toggled": states(), @"storedSame": @([StoredLists() isEqual:stored])};
             gLookupFails = NO;
             [stored release];
         }
@@ -554,13 +766,14 @@ int main(int argc, const char **argv)
             // Account A is deleted while the window is open: a click on its row cannot be
             // stored (no login account has its UID now), so the row must not stay checked.
             [checkbox performClick:nil];
-            NSArray *stored = [[[NSUserDefaults standardUserDefaults] objectForKey:@"shareClippingsAccountIDs"] copy];
+            NSDictionary *stored = [StoredLists() retain];
             NSArray *left = @[FixtureLoginAccounts[1], FixtureLoginAccounts[2]];
             [FixtureLoginAccounts release];
             FixtureLoginAccounts = [left retain];
-            [rows[0] performClick:nil];
-            report[@"gone"] = @{@"stateA": @([rows[0] state]), @"stateB": @([rows[1] state]),
-                                @"storedSame": @([[[NSUserDefaults standardUserDefaults] objectForKey:@"shareClippingsAccountIDs"] isEqual:stored])};
+            [sends[0] performClick:nil];
+            [receives[0] performClick:nil];
+            report[@"gone"] = @{@"states": @[@([sends[0] state]), @([receives[0] state]), @([sends[1] state]), @([receives[1] state])],
+                                @"storedSame": @([StoredLists() isEqual:stored])};
             [stored release];
         }
         Emit(report);
@@ -590,6 +803,54 @@ class PreferencesAccountSharingTests(PreferencesNibCase):
         self.assertTrue(r["section"], "no 'Other accounts on this Mac:' section with the sharing checkbox")
         return r
 
+    def column_right(self, r: dict, where: str = "") -> float:
+        """Where the Receive column ends: where the fields above the section end (alignment
+        rects), the two password fields, the Favorites number field and both folder buttons,
+        which the Restore Default arrows stand beside. They share that edge, left of the
+        arrows' frames and of the symbols drawn in them."""
+        fields = r["fieldsRight"]
+        self.assertEqual(sorted(fields), sorted(["skipPboardTypesList", "skipPasswordLengthsList", "favoritesRememberNum",
+                                                 "saveToLocationButton", "autoSaveToLocationButton"]),
+                         f"{where}: a field above the section is missing")
+        self.assertEqual(len(set(fields.values())), 1, f"{where}: the fields above the section do not end at one edge: {fields}")
+        right = next(iter(fields.values()))
+        self.assertGreater(r["arrowsInkRight"], right, f"{where}: the Restore Default arrows do not stand right of the fields")
+        self.assertLess(r["arrowsInkRight"], r["arrowsRight"], f"{where}: the arrows' symbols are not narrower than their frames")
+        return right
+
+    def test_receive_column_ends_flush_with_the_fields_above(self) -> None:
+        """"Receive" (its header's alignment rect) ends exactly where the fields above end, also
+        when the arrows beside them are wider (their frames and symbols end further right, the
+        fields stay): the edge comes from the fields, not from the arrows. Send keeps its column
+        8 pt left of Receive's, so it moves by the same amount; both headers fill their columns,
+        which are as wide as the wider header (whole points), the checkboxes are centred under
+        them and each name ends 8 pt before Send."""
+        wider = self.builders.replace("buildGeneralAccountSharingSection",
+                                      "fixtureWidenRestoreArrows,buildGeneralAccountSharingSection")
+        self.assertNotEqual(wider, self.builders, "the sharing section is not built")
+        runs = {"as built": self.section("off"), "wider arrows": self.report("off", wider)}
+        normal, widened = runs["as built"], runs["wider arrows"]
+        self.assertEqual(widened["fieldsRight"], normal["fieldsRight"], "wider arrows moved the fields")
+        self.assertEqual(widened["arrowsRight"] - normal["arrowsRight"], 4, "the arrows did not get wider")
+        self.assertGreater(widened["arrowsInkRight"], normal["arrowsInkRight"], "the arrows' symbols did not move right")
+        for where, r in runs.items():
+            right = self.column_right(r, where)
+            send, receive = r["headers"]["send"], r["headers"]["receive"]
+            width = math.ceil(max(send["textW"], receive["textW"]))
+            self.assertEqual(receive["align"]["x"] + receive["align"]["w"], right,
+                             f"{where}: 'Receive' ends at {receive['align']['x'] + receive['align']['w']:g}, the fields at {right:g}")
+            self.assertEqual((receive["align"]["x"], receive["align"]["w"]), (right - width, width),
+                             f"{where}: 'Receive' does not fill its column")
+            self.assertEqual((send["align"]["x"], send["align"]["w"]), (right - 2 * width - 8, width),
+                             f"{where}: 'Send' does not stand 8 pt left of the Receive column")
+            for row in r["rows"]:
+                self.assertLessEqual(abs(row["send"]["midX"] - (right - width - 8 - width / 2)), 0.5,
+                                     f"{where}: the Send checkbox is not centred under 'Send'")
+                self.assertLessEqual(abs(row["receive"]["midX"] - (right - width / 2)), 0.5,
+                                     f"{where}: the Receive checkbox is not centred under 'Receive'")
+                self.assertEqual(row["name"]["align"]["x"] + row["name"]["align"]["w"], right - 2 * width - 16,
+                                 f"{where}: the name does not end 8 pt before Send")
+
     def baseline(self) -> dict:
         builders = ",".join(b for b in self.builders.split(",") if b != "buildGeneralAccountSharingSection")
         return self.report("baseline", builders)
@@ -608,51 +869,109 @@ class PreferencesAccountSharingTests(PreferencesNibCase):
         self.assertEqual(r["lowestNib"] - label_top, 16, "label 16 pt below the Saving section")
         self.assertEqual(r["label"]["y"] - (r["checkbox"]["y"] + r["checkbox"]["h"]), 8, "checkbox 8 pt below the label")
 
-    def test_one_row_per_other_account_indented_like_the_password_suboptions(self) -> None:
+    def test_one_line_per_other_account_with_a_send_and_a_receive_checkbox(self) -> None:
         r = self.section("off")
+        self.assertEqual(r["lineCounts"], [2, 2, 2], "one name, one Send and one Receive checkbox per account")
         rows = r["rows"]
         self.assertEqual([row["title"] for row in rows], ["Account A", "Account B"], "this account is not listed")
-        self.assertEqual([row["tag"] for row in rows], [7001, 7002])
         pitch = r["reference"]["y"] - r["below"]["y"]
         self.assertEqual(pitch, 20)
+        headers = r["headers"]
+        self.assertIsNotNone(headers, "no Send and Receive column headers")
+        send, receive = headers["send"], headers["receive"]
+        self.assertEqual((send["text"], receive["text"]), ("Send", "Receive"))
+        for h in (send, receive):
+            self.assertEqual(h["frame"]["y"], r["checkbox"]["y"] - pitch, "the headers are one line below the checkbox")
+            self.assertEqual(h["frame"]["h"], r["reference"]["h"])
+            self.assertTrue(h["fontSame"] and h["fits"], h)
+        # Two columns as wide as the wider header (whole points), 8 pt apart, "Receive"
+        # ending where the fields above end; each header fills its column, its text centred.
+        right = self.column_right(r)
+        width = math.ceil(max(send["textW"], receive["textW"]))
+        send_mid, receive_mid = right - width - 8 - width / 2, right - width / 2
+        self.assertEqual(receive["align"]["x"] + receive["align"]["w"], right, "'Receive' does not end with the fields above")
+        self.assertLessEqual(abs(receive["midX"] - receive_mid), 0.5, "'Receive' is not centred in its column")
+        self.assertLessEqual(abs(send["midX"] - send_mid), 0.5, "'Send' is not centred in its column")
         for i, row in enumerate(rows):
-            self.assertEqual(row["frame"]["x"], r["suboption"]["x"], "rows are indented like 'Diagnostics: save data type, not content'")
-            self.assertEqual(row["frame"]["h"], r["reference"]["h"])
-            self.assertEqual(row["frame"]["y"], r["checkbox"]["y"] - pitch * (i + 1), "rows follow the checkbox at the pane's pitch")
-            self.assertEqual(row["frame"]["x"] + row["frame"]["w"], r["checkbox"]["x"] + r["checkbox"]["w"], "right edges align")
-            self.assertTrue(row["fontSame"] and row["fits"], row)
-            self.assertEqual(row["action"], "toggleShareAccount:")
-            self.assertTrue(row["targetIsController"])
+            name, box_s, box_r = row["name"], row["send"], row["receive"]
+            y = r["checkbox"]["y"] - pitch * (i + 2)
+            self.assertEqual((name["frame"]["y"], box_s["frame"]["y"], box_r["frame"]["y"]), (y, y, y),
+                             "a line's name and checkboxes are not on the line below the one above")
+            for v in (name, box_s, box_r):
+                self.assertEqual(v["frame"]["h"], r["reference"]["h"])
+                self.assertTrue(v["fontSame"] and v["fits"], v)
+            self.assertEqual(name["align"]["x"], r["suboptionAlign"]["x"], "names are indented like 'Diagnostics: save data type, not content'")
+            self.assertEqual(right - 2 * width - 16, name["align"]["x"] + name["align"]["w"], "the name ends 8 pt before Send")
+            self.assertLessEqual(abs(box_s["midX"] - send_mid), 0.5, "the Send checkbox is not centred under 'Send'")
+            self.assertLessEqual(abs(box_r["midX"] - receive_mid), 0.5, "the Receive checkbox is not centred under 'Receive'")
+            self.assertEqual((box_s["title"], box_r["title"]), ("", ""), "the checkboxes carry the name as a title")
+            self.assertEqual((name["tag"], box_s["tag"], box_r["tag"]), (7001 + i,) * 3)
+            self.assertEqual((box_s["action"], box_r["action"]), ("toggleSendToAccount:", "toggleReceiveFromAccount:"))
+            self.assertTrue(box_s["targetIsController"] and box_r["targetIsController"])
 
-    def test_rows_show_the_stored_choice_and_are_off_until_sharing_is_on(self) -> None:
+    def test_a_long_name_is_shortened_before_send_and_widens_nothing(self) -> None:
+        short, long = self.section("off"), self.section("long-name")
+        self.assertEqual(long["windowWidth"], short["windowWidth"], "a long account name widens the window")
+        rows = {row["name"]["tag"]: row for row in long["rows"]}
+        short_rows = {row["name"]["tag"]: row for row in short["rows"]}
+        name = rows[7001]["name"]
+        self.assertEqual(name["text"], LONG_NAME)
+        self.assertEqual(name["frame"], short_rows[7001]["name"]["frame"], "the name column is not fixed")
+        self.assertGreater(name["textW"], name["align"]["w"], "the dummy name is not longer than the column")
+        self.assertEqual(name["lineBreak"], 4, "the name is not shortened with an ellipsis at its end")
+        self.assertEqual(name["tooltip"], LONG_NAME, "the full name is not in the tooltip")
+        self.assertEqual(name["axValue"], LONG_NAME, "VoiceOver does not get the full name")
+        self.assertEqual(short_rows[7002]["name"]["tooltip"], "Account B")
+        for key in ("send", "receive"):
+            self.assertEqual(rows[7001][key]["frame"], short_rows[7001][key]["frame"], "a long name moves a checkbox")
+        self.assertEqual(rows[7001]["send"]["axControl"], "Send to " + LONG_NAME)
+
+    def test_the_section_keeps_its_place_when_the_pane_gets_narrower(self) -> None:
+        r = self.section("narrower")
+        self.assertLess(r["paneWidths"][1], r["paneWidths"][0], "the pane did not get narrower")
+        moved = [(b["view"], b["frame"], a["frame"]) for b, a in zip(r["before"], r["after"]) if b["frame"] != a["frame"]]
+        self.assertEqual(moved, [], "a view of the section moved or changed its width with the pane")
+
+    def test_checkboxes_show_the_stored_lists_and_are_off_until_sharing_is_on(self) -> None:
         off, on = self.section("off"), self.section("on")
-        self.assertEqual([row["state"] for row in off["rows"]], [0, 1], "Account B is chosen in the defaults")
-        self.assertEqual([row["enabled"] for row in off["rows"]], [False, False], "the list is disabled while sharing is off")
-        self.assertEqual([row["enabled"] for row in on["rows"]], [True, True])
-        self.assertEqual([row["state"] for row in on["rows"]], [0, 1])
+        self.assertEqual([(row["send"]["state"], row["receive"]["state"]) for row in off["rows"]], [(0, 0), (1, 0)],
+                         "Account B is in the stored send list only")
+        self.assertEqual({(row["send"]["enabled"], row["receive"]["enabled"]) for row in off["rows"]}, {(False, False)},
+                         "the checkboxes are disabled while sharing is off")
+        self.assertEqual(off["textColors"], "disabled", "names and headers are not greyed while sharing is off")
+        self.assertEqual({(row["send"]["enabled"], row["receive"]["enabled"]) for row in on["rows"]}, {(True, True)})
+        self.assertEqual(on["textColors"], "label", "names and headers do not look like the pane's labels while sharing is on")
+        self.assertEqual([(row["send"]["state"], row["receive"]["state"]) for row in on["rows"]], [(0, 0), (1, 0)])
 
-    def test_clicks_store_the_choice_and_follow_the_checkbox(self) -> None:
+    def test_clicks_store_each_list_and_follow_the_checkbox(self) -> None:
         r = self.section("click")
+        self.assertIn("clicks", r, "no two account lines with Send and Receive checkboxes to click")
         steps = r["clicks"]
-        self.assertEqual(steps[0], {"share": True, "enabled": True, "chosen": [7002]})
-        self.assertEqual(steps[1], {"stateA": 1, "chosen": [7001, 7002]})
-        self.assertEqual(steps[2], {"stateB": 0, "chosen": [7001]})
-        self.assertEqual(steps[3], {"share": False, "enabled": False, "chosen": [7001]}, "the choice is kept while off")
+        self.assertEqual(steps[0], {"share": True, "enabled": True, "colors": "label", "chosen": {"send": [7002], "receive": []}})
+        self.assertEqual(steps[1], {"sendA": 1, "receiveA": 0, "chosen": {"send": [7001, 7002], "receive": []}})
+        self.assertEqual(steps[2], {"sendA": 1, "receiveA": 1, "chosen": {"send": [7001, 7002], "receive": [7001]}})
+        self.assertEqual(steps[3], {"sendB": 0, "receiveB": 0, "chosen": {"send": [7001], "receive": [7001]}})
+        self.assertEqual(steps[4], {"share": False, "enabled": False, "colors": "disabled",
+                                    "chosen": {"send": [7001], "receive": [7001]}, "states": [1, 1, 0, 0]},
+                         "the choice is kept while off")
 
-    def test_a_click_that_cannot_be_stored_leaves_the_rows_as_stored(self) -> None:
+    def test_a_click_that_cannot_be_stored_leaves_the_checkboxes_as_stored(self) -> None:
         r = self.section("click-gone")
-        self.assertEqual(r["gone"], {"stateA": 0, "stateB": 1, "storedSame": True},
-                         "a click on a deleted account's row stores nothing, so the row must not show it checked")
+        self.assertIn("gone", r, "no two account lines with Send and Receive checkboxes to click")
+        self.assertEqual(r["gone"], {"states": [0, 0, 1, 0], "storedSame": True},
+                         "a click on a deleted account's Send or Receive stores nothing, so it must not show checked")
 
     def test_while_the_accounts_cannot_be_read_a_click_is_undone(self) -> None:
         r = self.section("click-unread")
-        self.assertEqual(r["unreadClicks"], {"clicked": {"stateA": 0, "stateB": 1}, "toggled": {"stateA": 0, "stateB": 1},
-                                             "storedSame": True},
-                         "while the accounts cannot be read the rows must keep showing the stored choice")
+        self.assertIn("unreadClicks", r, "no two account lines with Send and Receive checkboxes to click")
+        self.assertEqual(r["unreadClicks"], {"clicked": [0, 0, 1, 0], "toggled": [0, 0, 1, 0], "storedSame": True},
+                         "while the accounts cannot be read both columns must keep showing the stored lists")
 
     def test_no_other_account_shows_a_line_instead_of_the_list(self) -> None:
         r = self.section("none")
         self.assertEqual(r["rows"], [])
+        self.assertEqual(r["lineCounts"], [0, 0, 0])
+        self.assertIsNone(r["headers"], "column headers without any account")
         self.assertEqual(r["none"]["text"], NONE)
         # Its text starts at the indented checkboxes' box and ends with the checkbox above it:
         # alignment rects, since a label's text sits 2 pt inside its frame.
@@ -665,7 +984,8 @@ class PreferencesAccountSharingTests(PreferencesNibCase):
         r = self.section("status")
         self.assertIn("status", r, "no note line in the section")
         status = r["status"]
-        last = r["rows"][-1]["frame"]["y"]
+        self.assertTrue(r["rows"], "no account lines")
+        last = r["rows"][-1]["name"]["frame"]["y"]
         # Its text starts at the account rows' boxes and ends with the checkbox: alignment rects.
         self.assertEqual(status["align"]["x"], r["suboptionAlign"]["x"], "the note's text does not start at the rows' boxes")
         self.assertEqual(status["frame"]["y"], last - 20, "one line below the last account")
@@ -688,8 +1008,8 @@ class PreferencesAccountSharingTests(PreferencesNibCase):
         base = self.baseline()
         self.assertFalse(base["section"])
         base_gap = base["lowestNib"] - (base["permissions"]["y"] + base["permissions"]["h"])
-        # The account rows (or the "no other accounts" line); a hidden note takes no line.
-        for mode, lines in (("off", 2), ("none", 1)):
+        # The headers and the account lines (or the "no other accounts" line); a hidden note takes no line.
+        for mode, lines in (("off", 3), ("none", 1)):
             r = self.section(mode)
             grown = r["paneHeight"] - base["paneHeight"]
             self.assertEqual(grown, r["label"]["h"] + r["checkbox"]["h"] + 16 + 8 + 20 * lines, mode)
@@ -714,13 +1034,51 @@ class PreferencesAccountSharingTests(PreferencesNibCase):
         return dict(os.environ, FLYCUT_GENERAL_XIB_SPEC=str(spec))
 
     def check_list_edges(self, s: dict, where: str) -> None:
-        """Every line of the list starts at the indented checkboxes' edge and ends with the
-        sharing checkbox, by alignment rect: a checkbox's box, a label's text."""
+        """By alignment rect (a checkbox's box, a label's text): every line of the list starts at
+        the indented checkboxes' edge; the "no other accounts", "cannot be read" and note lines and
+        end with the sharing checkbox; the Receive column ends where the fields above end
+        (exactly); both columns are as wide as the wider header (whole points) and 8 pt apart,
+        each name ends 8 pt before the Send column; each
+        header and checkbox is centred in its column (within 0.5 pt: whole points), each
+        checkbox on its name's line; nothing reaches further right than the pane's labels."""
         edges = s["edges"]
-        self.assertTrue(edges["lines"], f"{where}: no lines")
-        for line in edges["lines"]:
-            self.assertEqual(line["x"], edges["column"], f"{where}: {line['view']} starts off the checkboxes' edge: {line}")
-            self.assertEqual(line["maxX"], edges["maxX"], f"{where}: {line['view']} ends off the checkbox's edge: {line}")
+        lines = edges["lines"]
+        self.assertTrue(lines, f"{where}: no lines")
+        by: dict = {}
+        for line in lines:
+            by.setdefault(line["view"], []).append(line)
+            if line["view"] in ("accountSharingAccountName", "accountSharingNoAccounts", "accountSharingAccountsUnread",
+                                "accountSharingStatus"):
+                self.assertEqual(line["x"], edges["column"], f"{where}: {line['view']} starts off the checkboxes' edge: {line}")
+            if line["view"] in ("accountSharingNoAccounts", "accountSharingAccountsUnread", "accountSharingStatus"):
+                self.assertEqual(line["maxX"], edges["maxX"], f"{where}: {line['view']} ends off the checkbox's edge: {line}")
+            self.assertLessEqual(line["frameMaxX"], s["savingMaxX"] + 0.01, f"{where}: {line['view']} reaches past the labels")
+        names = by.get("accountSharingAccountName", [])
+        self.assertEqual((len(by.get("accountSharingSend", [])), len(by.get("accountSharingReceive", []))),
+                         (len(names), len(names)), f"{where}: not one Send and one Receive checkbox per name")
+        headers = len(by.get("accountSharingSendHeader", [])) + len(by.get("accountSharingReceiveHeader", []))
+        self.assertEqual(headers, 2 if names else 0, f"{where}: column headers")
+        if not names:
+            return
+        send, receive = by["accountSharingSendHeader"][0], by["accountSharingReceiveHeader"][0]
+        self.assertEqual(send["y"], receive["y"], f"{where}: the headers are not on one line")
+        width = math.ceil(max(send["maxX"] - send["x"], receive["maxX"] - receive["x"]))
+        right = self.column_right(s, where)
+        self.assertTrue(right < s["arrowsRight"] <= edges["maxX"] + 0.5,
+                        f"{where}: no arrow column right of the fields and left of the checkbox's edge")
+        send_mid, receive_mid = right - width - 8 - width / 2, right - width / 2
+        self.assertEqual(receive["maxX"], right, f"{where}: 'Receive' does not end where the fields above end")
+        for header, mid in ((send, send_mid), (receive, receive_mid)):
+            self.assertLessEqual(abs(header["midX"] - mid), 0.5, f"{where}: {header['view']} is not centred in its column")
+        for name in names:
+            self.assertEqual(right - 2 * width - 16, name["maxX"], f"{where}: a name does not end 8 pt before the Send column")
+            line = [l for l in lines if l["y"] == name["y"]]
+            self.assertEqual(sorted(l["view"] for l in line), ["accountSharingAccountName", "accountSharingReceive",
+                                                              "accountSharingSend"], f"{where}: a line is not name, Send, Receive")
+        for box in by["accountSharingSend"]:
+            self.assertLessEqual(abs(box["midX"] - send_mid), 0.5, f"{where}: a Send checkbox is off its column")
+        for box in by["accountSharingReceive"]:
+            self.assertLessEqual(abs(box["midX"] - receive_mid), 0.5, f"{where}: a Receive checkbox is off its column")
 
     def check_right_edge(self, s: dict, where: str) -> None:
         """The sharing checkbox, and the section's lines with it, end where General's other
@@ -732,11 +1090,18 @@ class PreferencesAccountSharingTests(PreferencesNibCase):
                              f"{where}: the sharing checkbox ends at {box['x'] + box['w']:g}, General's controls at {right:g}")
 
     def check_xib_spacing(self, s: dict, where: str) -> None:
-        # Top down: the label, the checkbox, then the rows of the list (and the note while it shows).
-        views = sorted((v for v in s["section"] if not v["hidden"]), key=lambda v: -(v["frame"]["y"] + v["frame"]["h"]))
-        gaps = [p["frame"]["y"] - (n["frame"]["y"] + n["frame"]["h"]) for p, n in zip(views, views[1:])]
+        # Top down, line by line: the label, the checkbox, then the lines of the list (headers,
+        # accounts, and the note while it shows); the views of one line share their frame.
+        views = [v for v in s["section"] if not v["hidden"]]
+        rows: dict = {}
+        for v in views:
+            rows.setdefault(v["frame"]["y"], []).append(v)
+        for y, line in rows.items():
+            self.assertEqual({v["frame"]["h"] for v in line}.__len__(), 1, f"{where}: views of one line differ in height: {line}")
+        ordered = sorted(rows.values(), key=lambda line: -(line[0]["frame"]["y"] + line[0]["frame"]["h"]))
+        gaps = [p[0]["frame"]["y"] - (n[0]["frame"]["y"] + n[0]["frame"]["h"]) for p, n in zip(ordered, ordered[1:])]
         self.assertEqual(s["labelBelowLowest"], 16, f"{where}: the label is not 16 pt below the Saving section")
-        self.assertEqual(gaps, [8] + [6] * (len(views) - 2), f"{where}: label -> checkbox 8 pt, row -> row 6 pt")
+        self.assertEqual(gaps, [8] + [6] * (len(ordered) - 2), f"{where}: label -> checkbox 8 pt, line -> line 6 pt")
         self.assertEqual(s["belowTheSection"], 16, f"{where}: the permissions row is not 16 pt below the section")
         self.assertEqual(s["permissions"]["y"], 8, f"{where}: the permissions row left its place at the bottom")
         self.assertTrue(s["inContent"] and s["inBox"] and s["boxInContent"], f"{where}: {s['section']}")
@@ -786,9 +1151,11 @@ class PreferencesAccountSharingTests(PreferencesNibCase):
                 self.assertEqual([v["frame"] for v in s["section"]], [v["frame"] for v in hidden["section"]], w)
 
     def check_placed(self, order: str) -> None:
+        widths = set()
         for accounts in (0, 1, 2, 3, 6):
             with self.subTest(accounts=accounts):
                 steps = self.placed(accounts, order, "stored", note=True)
+                widths |= {s["windowWidth"] for s in steps}
                 self.assertEqual([s["step"] for s in steps], STEPS + NOTE_STEPS)
                 # master's NIB: the rows 20 pt apart, 4 pt between their alignment rects
                 self.check_note(steps, f"NIB, {accounts} other accounts, {order}", 4)
@@ -810,6 +1177,9 @@ class PreferencesAccountSharingTests(PreferencesNibCase):
                                      f"{where}: the permissions row left its place at the bottom")
                     self.check_right_edge(s, where)
                     self.check_list_edges(s, where)
+        if not widths:
+            self.skipTest("nothing placed (no NIB fixture)")
+        self.assertEqual(len(widths), 1, f"the window's width changes with the account list: {sorted(widths)}")
 
     def check_nib_place(self, s: dict, where: str) -> None:
         self.assertEqual(s["labelBelowLowest"], 16, f"{where}: the label is not 16 pt below the Saving section")
@@ -899,10 +1269,17 @@ class PreferencesAccountSharingTests(PreferencesNibCase):
         self.assertEqual(r["tooltip"], TOOLTIP)
         self.assertEqual(r["axControl"], TITLE)
         self.assertEqual(r["axCell"], TITLE)
+        texts = [r["tooltip"]]
         for row in r["rows"]:
-            self.assertEqual((row["axControl"], row["axCell"]), (row["title"], row["title"]), "VoiceOver reads the name")
-            self.assertEqual(row["tooltip"], row_tooltip(row["title"]))
-        for text in [r["tooltip"]] + [row["tooltip"] for row in r["rows"]]:
+            name = row["title"]
+            self.assertEqual((row["send"]["axControl"], row["send"]["axCell"]), (f"Send to {name}",) * 2,
+                             "VoiceOver does not say what the Send checkbox does")
+            self.assertEqual((row["receive"]["axControl"], row["receive"]["axCell"]), (f"Receive from {name}",) * 2,
+                             "VoiceOver does not say what the Receive checkbox does")
+            self.assertEqual(row["send"]["tooltip"], send_tooltip(name))
+            self.assertEqual(row["receive"]["tooltip"], receive_tooltip(name))
+            texts += [row["send"]["tooltip"], row["receive"]["tooltip"]]
+        for text in texts:
             self.assertNotIn("\u2014", text)
 
     def test_key_view_order_runs_through_the_checkbox_and_the_accounts(self) -> None:
@@ -913,7 +1290,9 @@ class PreferencesAccountSharingTests(PreferencesNibCase):
         self.assertIn("Check Accessibility Permissions", order)
         share = order.index("share")
         self.assertEqual(order[share - 1], r["favoritesTitle"], order)
-        self.assertEqual(order[share + 1:share + 4], ["row:Account A", "row:Account B", "Check Accessibility Permissions"], order)
+        self.assertEqual(order[share + 1:share + 6], ["send:Account A", "receive:Account A", "send:Account B", "receive:Account B",
+                                                      "Check Accessibility Permissions"], order)
+
         none = self.section("none")["keyOrder"]
         self.assertEqual(none[none.index("share") + 1], "Check Accessibility Permissions", none)
 

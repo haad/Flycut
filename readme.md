@@ -82,7 +82,7 @@ The list has a search field at the top, then your favorites (each with a filled 
 
 ## Sharing With Other Accounts
 
-Turn on "Share copied text with these accounts:" in Preferences > General and check the accounts to share with, in each account that should take part; text you copy then also shows up in Flycut in the accounts that checked each other. It is off by default; passwords Flycut recognizes and copies marked as private are never shared. See the [Help File](help.md) for details.
+Turn on "Share copied text with these accounts:" in Preferences > General and check "Send", "Receive" or both for each other account that should take part; a copy goes from one account to another only if the sender checked "Send" for it and the receiver checked "Receive" for the sender. It is off by default; passwords Flycut recognizes and copies marked as private are never shared. See the [Help File](help.md) for details.
 
 ## Why Flycut?
 

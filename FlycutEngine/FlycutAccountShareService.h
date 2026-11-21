@@ -10,11 +10,12 @@
 //
 
 // Runs FlycutAccountShare for the app: "Share copied text with other accounts on
-// this Mac". While it runs, this account keeps an inbox for every other login
-// account of the Mac it chose (all of them while nothing is chosen), watches it
-// and hands what arrives to its delegate; copies the delegate offers go to every
-// such account that turned sharing on and chose this one too (any other account
-// has no inbox folder for it to write into).
+// this Mac". While it runs, this account keeps an inbox with a folder for every
+// other login account of the Mac it receives from, watches it and hands what
+// arrives to its delegate; copies the delegate offers go to every other account
+// it sends to that turned sharing on and receives from this one (any other
+// account has no inbox folder for it to write into). So a copy goes from A to B
+// only if A sends to B and B receives from A.
 //
 // All file work runs on one private serial queue; the public methods and the
 // delegate calls belong to the main thread. The engine, the list of accounts and
@@ -78,10 +79,18 @@ typedef BOOL (^FlycutAccountShareSessionState)(void);
 // nothing is taken in, copies wait in the inbox (the pickup limits and the
 // 24-hour drop still apply). Turning it off takes in what waits. Main thread.
 @property (nonatomic) BOOL pickupPaused;
-// The accounts this one shares with, of those in the account list; nil: all of
-// them. Taking one out removes its folder in the inbox with what waits there and
-// withdraws this account's copies waiting for it. Main thread.
-@property (nonatomic, copy) NSArray<NSNumber *> *chosenAccountUIDs;
+// The accounts this one sends its copies to, of those in the account list; nil:
+// all of them. Taking one out withdraws this account's copies waiting for it.
+// Main thread.
+@property (nonatomic, readonly, copy) NSArray<NSNumber *> *sendAccountUIDs;
+// The accounts this one receives from, of those in the account list; nil: all
+// of them. Taking one out removes its folder in the inbox with what waits there;
+// with none left there is no inbox. A copy from an account no longer on it is
+// not added. Main thread.
+@property (nonatomic, readonly, copy) NSArray<NSNumber *> *receiveAccountUIDs;
+// Sets both lists with one refresh of the inbox. While the account list
+// cannot be read only removals take effect. Main thread.
+-(void)setSendAccountUIDs:(NSArray<NSNumber *> *)send receiveAccountUIDs:(NSArray<NSNumber *> *)receive;
 // Whether each sender's folder is watched for changes (YES; tests turn it off to
 // see the safety pickup alone).
 @property (nonatomic) BOOL watchesSenderFolders;
@@ -93,8 +102,8 @@ typedef BOOL (^FlycutAccountShareSessionState)(void);
 // and no path. Set before -start.
 @property (nonatomic, copy) void (^logHandler)(NSString *line);
 
-// Sharing is on: prepares the inbox for every other account, excludes it from
-// Time Machine, watches it and takes in what waits there.
+// Sharing is on: prepares the inbox for every other account it receives from,
+// excludes it from Time Machine, watches it and takes in what waits there.
 -(void)start;
 // Sharing is turned off: stops, deletes the inbox with everything in it and
 // this account's copies that still wait in the other accounts' inboxes.
@@ -108,8 +117,8 @@ typedef BOOL (^FlycutAccountShareSessionState)(void);
 -(void)stop;
 
 // A copy was added to the history. While running and on the console it is sent
-// to every other account in the background; FlycutOperator (the engine's filter)
-// decides whether it may leave the account at all.
+// to every other account it sends to, in the background; FlycutOperator (the
+// engine's filter) decides whether it may leave the account at all.
 -(void)offerText:(NSString *)text
 		  ofType:(NSString *)type
   availableTypes:(NSArray<NSString *> *)availableTypes

@@ -45,7 +45,8 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 	FlycutAccountShareSessionState sessionState;
 	BOOL running;
 	BOOL pickupPaused;
-	NSArray *chosenAccountUIDs;
+	NSArray *sendAccountUIDs;
+	NSArray *receiveAccountUIDs;
 	NSUInteger generation;
 	FlycutSharedClipping *pendingPasteboardClipping;
 	NSInteger inboxErrorCode;
@@ -53,7 +54,8 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 	dispatch_queue_t queue;
 	BOOL queueRunning;
 	BOOL queuePickupPaused;
-	NSArray *queueChosen;
+	NSArray *queueSend;
+	NSArray *queueReceive;
 	NSUInteger queueGeneration;
 	NSArray *recipients;
 	NSMutableArray *folderWatches;
@@ -69,8 +71,8 @@ typedef NS_ENUM(NSInteger, FCShareArrival) {
 	NSInteger loggedErrorCode;
 }
 
-@synthesize engine, delegate, running, pickupPaused, chosenAccountUIDs, safetyInterval, watchesSenderFolders, inboxErrorCode,
-	logHandler;
+@synthesize engine, delegate, running, pickupPaused, sendAccountUIDs, receiveAccountUIDs, safetyInterval, watchesSenderFolders,
+	inboxErrorCode, logHandler;
 
 +(NSString *)sharedRootPath
 {
@@ -270,8 +272,10 @@ static void LogLookupFailure(NSString *reason)
 	[folderWatches release];
 	[recipients release];
 	[pendingPasteboardClipping release];
-	[chosenAccountUIDs release];
-	[queueChosen release];
+	[sendAccountUIDs release];
+	[receiveAccountUIDs release];
+	[queueSend release];
+	[queueReceive release];
 	[accountList release];
 	[sessionState release];
 	[logHandler release];
@@ -286,8 +290,8 @@ static void LogLookupFailure(NSString *reason)
 
 #pragma mark - Queue work
 
-// The other accounts of this Mac this one shares with: the injected list, cut
-// down to the chosen ones.
+// The other accounts of this Mac: the injected list without this one; nil if
+// the lookup failed.
 -(NSArray *)otherAccountsOnQueue
 {
 	NSArray *accounts = accountList != nil ? accountList() : @[];
@@ -295,10 +299,19 @@ static void LogLookupFailure(NSString *reason)
 		return nil;   // the lookup failed
 	NSMutableArray *others = [NSMutableArray array];
 	for ( id uid in accounts )
-		if ( [uid isKindOfClass:[NSNumber class]] && [uid unsignedIntValue] != [engine ownUID]
-			&& ![others containsObject:uid] && ( queueChosen == nil || [queueChosen containsObject:uid] ) )
+		if ( [uid isKindOfClass:[NSNumber class]] && [uid unsignedIntValue] != [engine ownUID] && ![others containsObject:uid] )
 			[others addObject:uid];
 	return others;
+}
+
+// Those of the other accounts that a list names (nil: all of them).
+static NSArray *ChosenAccounts(NSArray *others, NSArray *chosen)
+{
+	NSMutableArray *accounts = [NSMutableArray array];
+	for ( NSNumber *uid in others )
+		if ( chosen == nil || [chosen containsObject:uid] )
+			[accounts addObject:uid];
+	return accounts;
 }
 
 -(void)stopWatchingOnQueue
@@ -389,36 +402,80 @@ static NSString *FailureReason(NSInteger code)
 		[delegate accountShareServiceDidChangeState:self];
 }
 
-// Prepares (or repairs) the inbox for the other accounts, keeps it out of Time
-// Machine backups and watches every sender's folder.
+// While the account list cannot be read nothing is added, but what the lists
+// no longer name goes: this account's copies waiting for an account it no
+// longer sends to are withdrawn, and the folders of the accounts it no longer
+// receives from are removed (with none left, the inbox). The safety timer
+// tries the rest again.
+-(void)applyRemovalsOnQueue
+{
+	NSMutableArray *kept = [NSMutableArray array];
+	for ( NSNumber *previous in recipients ) {
+		if ( queueSend == nil || [queueSend containsObject:previous] )
+			[kept addObject:previous];
+		else
+			[engine withdrawFromRecipient:[previous unsignedIntValue] error:NULL];
+	}
+	[recipients release];
+	recipients = [kept copy];
+	if ( queueReceive == nil )
+		return;
+	NSArray *before = [engine senderUIDs];
+	NSMutableArray *senders = [NSMutableArray array];
+	for ( NSNumber *sender in before )
+		if ( [queueReceive containsObject:sender] )
+			[senders addObject:sender];
+	if ( [senders count] == [before count] )
+		return;
+	for ( dispatch_source_t source in folderWatches )
+		dispatch_source_cancel(source);
+	[folderWatches removeAllObjects];
+	if ( [senders count] == 0 ) {
+		[engine wipeInbox:NULL];
+		return;
+	}
+	[engine prepareInboxForSenders:senders error:NULL];
+	if ( watchesSenderFolders )
+		for ( NSNumber *sender in [engine senderUIDs] )
+			[self watchFolderOfSender:[sender unsignedIntValue]];
+}
+
+// Notes the accounts this one sends to, prepares (or repairs) the inbox for the
+// accounts it receives from, keeps it out of Time Machine backups and watches
+// every sender's folder.
 -(void)refreshInboxOnQueue
 {
 	needsRefresh = NO;
 	NSArray *others = [self otherAccountsOnQueue];
-	// The account list could not be read: everything stays as it is (nothing
-	// withdrawn, nothing wiped) and the safety timer tries again.
+	// The account list could not be read: nothing is added (no account is
+	// sent to or received from anew), only what was unchecked goes, and the
+	// safety timer tries again.
 	if ( others == nil ) {
 		needsRefresh = YES;
+		[self applyRemovalsOnQueue];
 		return;
 	}
-	// An account no longer shared with loses this account's copies waiting for it.
+	NSArray *sendTo = ChosenAccounts(others, queueSend), *receiveFrom = ChosenAccounts(others, queueReceive);
+	// An account no longer sent to loses this account's copies waiting for it.
 	for ( NSNumber *previous in recipients )
-		if ( ![others containsObject:previous] )
+		if ( ![sendTo containsObject:previous] )
 			[engine withdrawFromRecipient:[previous unsignedIntValue] error:NULL];
 	[recipients release];
-	recipients = [others copy];
+	recipients = [sendTo copy];
 	for ( dispatch_source_t source in folderWatches )
 		dispatch_source_cancel(source);
 	[folderWatches removeAllObjects];
-	// Sharing with nobody: no inbox, it would only tell the others that this
-	// account turned sharing on.
-	if ( [others count] == 0 ) {
-		[engine wipeInbox:NULL];
+	// Receiving from nobody: no inbox, it would only tell the others that this
+	// account turned sharing on. An inbox that cannot be deleted now is
+	// deleted at the next safety tick.
+	if ( [receiveFrom count] == 0 ) {
+		if ( ![engine wipeInbox:NULL] )
+			needsRefresh = YES;
 		[self noteRefreshResultOnQueue:0];
 		return;
 	}
 	NSError *error = nil;
-	if ( ![engine prepareInboxForSenders:others error:&error] ) {
+	if ( ![engine prepareInboxForSenders:receiveFrom error:&error] ) {
 		needsRefresh = YES;
 		[self noteRefreshResultOnQueue:[error code] != 0 ? [error code] : FlycutAccountShareErrorIO];
 		return;
@@ -471,10 +528,15 @@ static NSString *FailureReason(NSInteger code)
 	// Paused after the queue took them in: nothing may be added with content now.
 	if ( !running || forGeneration != generation || pickupPaused )
 		return;
+	// Taken in just before its sender left the Receive list: not added.
+	NSMutableArray *received = [NSMutableArray array];
 	for ( FlycutSharedClipping *clipping in clippings )
+		if ( receiveAccountUIDs == nil || [receiveAccountUIDs containsObject:[NSNumber numberWithUnsignedInt:[clipping senderUID]]] )
+			[received addObject:clipping];
+	for ( FlycutSharedClipping *clipping in received )
 		[delegate accountShareService:self didReceiveClipping:clipping];
 	BOOL active = [self sessionIsActive];
-	FlycutSharedClipping *newest = [clippings lastObject];
+	FlycutSharedClipping *newest = [received lastObject];
 	if ( arrival == FCShareArrivalLaunch && newest != nil && [engine currentTime] - [newest created] >= kLaunchPasteboardAge )
 		newest = nil;
 	if ( newest != nil && ( arrival != FCShareArrivalLive || !active ) ) {
@@ -583,7 +645,8 @@ static NSString *FailureReason(NSInteger code)
 		queueRunning = NO;
 		[self stopWatchingOnQueue];
 		// Own copies the others have not taken in yet go too.
-		NSMutableArray *withdraw = [NSMutableArray arrayWithArray:[self otherAccountsOnQueue]];
+		NSArray *others = [self otherAccountsOnQueue];
+		NSMutableArray *withdraw = [NSMutableArray arrayWithArray:others != nil ? ChosenAccounts(others, queueSend) : @[]];
 		for ( NSNumber *recipient in recipients )
 			if ( ![withdraw containsObject:recipient] )
 				[withdraw addObject:recipient];
@@ -593,16 +656,23 @@ static NSString *FailureReason(NSInteger code)
 	});
 }
 
--(void)setChosenAccountUIDs:(NSArray<NSNumber *> *)uids
+// Both lists at once: the inbox is set up once, never from one new list and
+// one old one.
+-(void)setSendAccountUIDs:(NSArray<NSNumber *> *)send receiveAccountUIDs:(NSArray<NSNumber *> *)receive
 {
-	NSArray *chosen = [[uids copy] autorelease];
-	if ( chosen == chosenAccountUIDs || [chosen isEqual:chosenAccountUIDs] )
+	NSArray *sendTo = [[send copy] autorelease], *receiveFrom = [[receive copy] autorelease];
+	if ( ( sendTo == sendAccountUIDs || [sendTo isEqual:sendAccountUIDs] )
+		&& ( receiveFrom == receiveAccountUIDs || [receiveFrom isEqual:receiveAccountUIDs] ) )
 		return;
-	[chosenAccountUIDs release];
-	chosenAccountUIDs = [chosen retain];
+	[sendAccountUIDs release];
+	sendAccountUIDs = [sendTo retain];
+	[receiveAccountUIDs release];
+	receiveAccountUIDs = [receiveFrom retain];
 	dispatch_async(queue, ^{
-		[queueChosen release];
-		queueChosen = [chosen retain];
+		[queueSend release];
+		queueSend = [sendTo retain];
+		[queueReceive release];
+		queueReceive = [receiveFrom retain];
 		if ( queueRunning )
 			[self refreshInboxOnQueue];
 	});

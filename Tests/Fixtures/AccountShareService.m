@@ -288,6 +288,23 @@ static void Offer(FlycutAccountShareService *service, NSString *text) {
 
 static NSString *TextOf(id clipping) { return [(FlycutSharedClipping *)clipping text]; }
 
+// Each account chooses whom it sends to and whom it receives from, both lists
+// at once (one refresh, never one new list with one old one).
+@interface FlycutAccountShareService (OneWayTesting)
+- (NSArray *)sendAccountUIDs;
+- (NSArray *)receiveAccountUIDs;
+- (void)setSendAccountUIDs:(NSArray *)send receiveAccountUIDs:(NSArray *)receive;
+@end
+
+// The accounts a service sends to and receives from (nil: every account); NO
+// if the service cannot be told.
+static BOOL Choose(FlycutAccountShareService *service, NSArray *send, NSArray *receive) {
+    if (![service respondsToSelector:@selector(setSendAccountUIDs:receiveAccountUIDs:)])
+        return NO;
+    [service setSendAccountUIDs:send receiveAccountUIDs:receive];
+    return YES;
+}
+
 // ---------------------------------------------------------------------------
 
 static int RunStartPreparesAllAccounts(void) {
@@ -778,19 +795,20 @@ static int RunWithdrawOnOff(void) {
     return f;
 }
 
-// Choosing accounts: B keeps a folder only for the accounts it chose, A writes only
-// to the accounts it chose, so a copy goes from A to B only if both chose each
-// other. Unchoosing removes the folder with what waits in it and withdraws this
-// account's own waiting copies.
+// Choosing accounts both ways (Send and Receive checked): B keeps a folder only for
+// the accounts it receives from, A writes only to the accounts it sends to, so a
+// copy goes from A to B only if both chose each other. Unchoosing removes the
+// folder with what waits in it and withdraws this account's own waiting copies.
 static int RunChosenAccounts(void) {
     int f = 0;
     FCRecorder *ra = [[[FCRecorder alloc] init] autorelease], *rb = [[[FCRecorder alloc] init] autorelease];
     FlycutAccountShareService *a = Service(kA, ra), *b = Service(kB, rb);
     [a setWatchesSenderFolders:NO];
     [b setWatchesSenderFolders:NO];
-    [a setChosenAccountUIDs:@[@(kB)]];
-    [b setChosenAccountUIDs:@[]];
-    f += Check([[a chosenAccountUIDs] isEqualToArray:@[@(kB)]], "the service keeps the chosen accounts");
+    if (!Choose(a, @[@(kB)], @[@(kB)]) || !Choose(b, @[], @[]))
+        return Check(NO, "the service takes the accounts to send to and to receive from");
+    f += Check([[a sendAccountUIDs] isEqualToArray:@[@(kB)]] && [[a receiveAccountUIDs] isEqualToArray:@[@(kB)]],
+               "the service keeps the chosen accounts");
     [a start];
     [b start];
     Settle(a);
@@ -801,7 +819,7 @@ static int RunChosenAccounts(void) {
     Offer(a, @"example-50 alpha");
     Settle(a);
     f += Check(!Exists(TopPath(kB)), "A's copy goes nowhere: B did not choose A");
-    [b setChosenAccountUIDs:@[@(kA), @(kUnopted), @4242]];
+    Choose(b, @[@(kA), @(kUnopted), @4242], @[@(kA), @(kUnopted), @4242]);
     Settle(b);
     f += Check(Exists(FromPath(kB, kA)) && Exists(FromPath(kB, kUnopted)) && [Entries(TopPath(kB)) count] == 2,
                "B chooses A and 7003: their folders appear; 4242, not an account here, is ignored");
@@ -812,7 +830,7 @@ static int RunChosenAccounts(void) {
     Settle(b);
     f += Check([Entries(FromPath(kA, kB)) count] == 1 && !Exists(TopPath(kUnopted)),
                "B's copy reaches A, which chose B; 7003 chose nobody and gets nothing");
-    [a setChosenAccountUIDs:@[]];
+    Choose(a, @[], @[]);
     Settle(a);
     f += Check(!Exists(TopPath(kA)), "A unchooses B: A's inbox goes, with B's copy waiting in it");
     f += Check([Entries(FromPath(kB, kA)) count] == 0 && Exists(FromPath(kB, kA)),
@@ -825,16 +843,208 @@ static int RunChosenAccounts(void) {
     Settle(a);
     Settle(b);
     f += Check([ra->received count] == 0 && [rb->received count] == 0, "neither takes anything in");
-    [b setChosenAccountUIDs:@[@(kA)]];
+    Choose(b, @[@(kA)], @[@(kA)]);
     Settle(b);
     f += Check(Exists(FromPath(kB, kA)) && !Exists(FromPath(kB, kUnopted)), "B unchooses 7003: only 7003's folder goes");
-    [a setChosenAccountUIDs:@[@(kB)]];
+    Choose(a, @[@(kB)], @[@(kB)]);
     Settle(a);
     Offer(a, @"example-54 epsilon");
     Settle(a);
     [b pickUp];
     f += Check(WaitFor(^BOOL { return [rb->received count] == 1; }, 3.0) && [TextOf([rb->received lastObject]) isEqualToString:@"example-54 epsilon"],
                "choosing each other again shares again");
+    [a stop];
+    [b stop];
+    return f;
+}
+
+// One way: a copy goes from A to B only if A sends to B and B receives from A.
+// An account that receives from nobody keeps no inbox, also while it sends.
+// Taking an account out of the send list withdraws this account's copies waiting
+// there; taking it out of the receive list removes its folder with what waits in
+// it. Each direction on its own.
+static int RunOneWay(void) {
+    int f = 0;
+    FCRecorder *ra = [[[FCRecorder alloc] init] autorelease], *rb = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *a = Service(kA, ra), *b = Service(kB, rb);
+    [a setWatchesSenderFolders:NO];
+    [b setWatchesSenderFolders:NO];
+    if (!Choose(a, @[@(kB)], @[]) || !Choose(b, @[], @[@(kA)]))
+        return Check(NO, "the service takes the accounts to send to and to receive from");
+    [a start];
+    [b start];
+    Settle(a);
+    Settle(b);
+    f += Check(!Exists(TopPath(kA)), "A sends to B but receives from nobody: A keeps no inbox");
+    f += Check(Exists(FromPath(kB, kA)) && [Entries(TopPath(kB)) count] == 1,
+               "B receives from A only: one folder, for A");
+    Offer(a, @"example-60 alpha");
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 1, "A sends to B and B receives from A: A's copy reaches B");
+    Offer(b, @"example-61 beta");
+    Settle(b);
+    f += Check(!Exists(TopPath(kA)) && [Entries(FromPath(kB, kA)) count] == 1, "B sends to nobody: its copy goes nowhere");
+    [b pickUp];
+    f += Check(WaitFor(^BOOL { return [rb->received count] == 1; }, 3.0) && [TextOf([rb->received lastObject]) isEqualToString:@"example-60 alpha"],
+               "B takes in A's copy");
+    // The other direction: A receives from B, but B does not send to A yet.
+    Choose(a, @[@(kB)], @[@(kB)]);
+    Settle(a);
+    f += Check(Exists(FromPath(kA, kB)) && [Entries(TopPath(kA)) count] == 1, "A receives from B: its inbox has a folder for B");
+    Offer(b, @"example-62 gamma");
+    Settle(b);
+    f += Check([Entries(FromPath(kA, kB)) count] == 0, "B does not send to A: nothing reaches A although A receives from B");
+    Choose(b, @[@(kA)], @[@(kA)]);
+    Settle(b);
+    Offer(b, @"example-63 delta");
+    Settle(b);
+    f += Check([Entries(FromPath(kA, kB)) count] == 1, "B sends to A now: B's copy reaches A");
+    // A stops sending to B while two copies wait there.
+    Offer(a, @"example-64 epsilon");
+    Offer(a, @"example-65 zeta");
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 2, "two of A's copies wait for B");
+    Choose(a, @[], @[@(kB)]);
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 0 && Exists(FromPath(kB, kA)),
+               "A stops sending to B: its copies waiting at B are withdrawn; B's folder for A stays");
+    f += Check([Entries(FromPath(kA, kB)) count] == 1, "A still receives from B: B's copy still waits in A's inbox");
+    Offer(a, @"example-66 eta");
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 0, "A sends nothing to B any more");
+    // B stops receiving from A while a copy waits.
+    Choose(a, @[@(kB)], @[@(kB)]);
+    Settle(a);
+    Offer(a, @"example-67 theta");
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 1, "A sends to B again: its copy waits for B");
+    Choose(b, @[@(kA)], @[]);
+    Settle(b);
+    f += Check(!Exists(TopPath(kB)), "B stops receiving from A: A's folder goes with the copy in it, and B, now "
+               "receiving from nobody, keeps no inbox");
+    f += Check([Entries(FromPath(kA, kB)) count] == 1, "B still sends to A: B's copy waiting at A stays");
+    Offer(b, @"example-68 iota");
+    Settle(b);
+    f += Check([Entries(FromPath(kA, kB)) count] == 2, "and B's next copy reaches A");
+    Offer(a, @"example-69 kappa");
+    Settle(a);
+    f += Check(!Exists(TopPath(kB)), "A's next copy goes nowhere: B does not receive from A");
+    [a pickUp];
+    [b pickUp];
+    Settle(a);
+    Settle(b);
+    f += Check(WaitFor(^BOOL { return [ra->received count] == 2; }, 3.0) && [rb->received count] == 1,
+               "A takes in B's two copies; B took in only the first copy of A");
+    [a stop];
+    [b stop];
+    return f;
+}
+
+// Unchecking Send while receiving from nobody: the copy waiting at the
+// recipient is withdrawn too (the refresh after a change of the send list
+// alone, with an empty receive list, must not stop before the withdrawal).
+static int RunSendOnlyWithdraw(void) {
+    int f = 0;
+    FCRecorder *ra = [[[FCRecorder alloc] init] autorelease], *rb = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *a = Service(kA, ra), *b = Service(kB, rb);
+    [a setWatchesSenderFolders:NO];
+    [b setWatchesSenderFolders:NO];
+    if (!Choose(a, @[@(kB)], @[]) || !Choose(b, @[], @[@(kA)]))
+        return Check(NO, "the service takes the accounts to send to and to receive from");
+    [a start];
+    [b start];
+    Settle(a);
+    Settle(b);
+    Offer(a, @"example-70 alpha");
+    Settle(a);
+    f += Check(!Exists(TopPath(kA)) && [Entries(FromPath(kB, kA)) count] == 1, "A receives from nobody; its copy waits for B");
+    Choose(a, @[], @[]);
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 0, "A unchecks Send for B, still receiving from nobody: its copy waiting at B is withdrawn");
+    [b pickUp];
+    Settle(b);
+    Spin(0.3);
+    f += Check([rb->received count] == 0, "B takes in nothing");
+    Offer(a, @"example-71 beta");
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 0, "A sends nothing more to B");
+    [a stop];
+    [b stop];
+    return f;
+}
+
+// A change of both lists is one refresh: the inbox is set up once, from both
+// new lists, never from the new send list with the old receive list.
+static int RunOneRefreshPerChoice(void) {
+    int f = 0;
+    FCRecorder *rb = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *b = Service(kB, rb);
+    [b setWatchesSenderFolders:NO];
+    if (!Choose(b, @[], @[@(kA)]))
+        return Check(NO, "the service takes the accounts to send to and to receive from");
+    [b start];
+    Settle(b);
+    f += Check(Exists(FromPath(kB, kA)) && [Entries(TopPath(kB)) count] == 1, "B receives from A: one folder");
+    int before = gFCPrepareCalls;
+    Choose(b, @[@(kA)], @[@(kUnopted)]);
+    Settle(b);
+    f += Check(gFCPrepareCalls - before == 1, "a change of both lists sets the inbox up once");
+    f += Check(Exists(FromPath(kB, kUnopted)) && !Exists(FromPath(kB, kA)) && [Entries(TopPath(kB)) count] == 1,
+               "with the new receive list: a folder for 7003 only");
+    before = gFCPrepareCalls;
+    Choose(b, @[@(kA)], @[@(kUnopted)]);
+    Settle(b);
+    f += Check(gFCPrepareCalls == before, "the same lists again change nothing");
+    [b stop];
+    return f;
+}
+
+// An inbox that cannot be deleted when the receive list empties (another
+// account holds the name for a moment) is deleted at the next safety tick.
+static int RunWipeRetried(void) {
+    int f = 0;
+    FCRecorder *rb = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *b = Service(kB, rb);
+    [b setWatchesSenderFolders:NO];
+    [b setSafetyInterval:0.3];
+    if (!Choose(b, @[], @[@(kA)]))
+        return Check(NO, "the service takes the accounts to send to and to receive from");
+    [b start];
+    Settle(b);
+    NSString *top = TopPath(kB);
+    f += Check(Exists(FromPath(kB, kA)), "B receives from A: it has an inbox");
+    FCRegisterOwnerAt(AT_FDCWD, [top fileSystemRepresentation], 4242);
+    Choose(b, @[], @[]);
+    Settle(b);
+    f += Check(Exists(top), "while another account holds the name, the inbox cannot be deleted");
+    FCRegisterOwnerAt(AT_FDCWD, [top fileSystemRepresentation], kB);
+    f += Check(WaitFor(^BOOL { return !Exists(top); }, 3.0), "the safety timer deletes it once it can");
+    [b stop];
+    return f;
+}
+
+// A copy taken in just before its sender left the Receive list is not added.
+static int RunDeliverOnlyFromReceived(void) {
+    int f = 0;
+    FCRecorder *ra = [[[FCRecorder alloc] init] autorelease], *rb = [[[FCRecorder alloc] init] autorelease];
+    FlycutAccountShareService *a = Service(kA, ra), *b = Service(kB, rb);
+    [a setWatchesSenderFolders:NO];
+    [b setWatchesSenderFolders:NO];
+    if (!Choose(a, @[@(kB)], @[]) || !Choose(b, @[], @[@(kA)]))
+        return Check(NO, "the service takes the accounts to send to and to receive from");
+    [a start];
+    [b start];
+    Settle(a);
+    Settle(b);
+    Offer(a, @"example-72 alpha");
+    Settle(a);
+    f += Check([Entries(FromPath(kB, kA)) count] == 1, "A's copy waits for B");
+    [b pickUp];
+    [b waitForQueue];                       // taken in; handed to the main thread, not delivered yet
+    Choose(b, @[], @[]);                    // B unchecks Receive for A first
+    Settle(b);
+    Spin(0.3);
+    f += Check([rb->received count] == 0 && [rb->pasteboard count] == 0, "B does not add a copy from an account it no longer receives from");
     [a stop];
     [b stop];
     return f;
@@ -944,23 +1154,37 @@ static int RunLookupFailure(void) {
     f += Check([Entries(FromPath(kB, kA)) count] == 1 && [Entries(FromPath(kA, kB)) count] == 1 && Exists(FromPath(kB, kUnopted)),
                "a copy waits in each direction; B keeps a folder for 7003 too");
     works = NO;
-    [b setChosenAccountUIDs:@[@(kA)]];
+    if (!Choose(b, @[], @[@(kA)]))
+        return f + Check(NO, "the service takes the accounts to send to and to receive from");
     Settle(b);
-    f += Check([Entries(FromPath(kB, kA)) count] == 1 && Exists(FromPath(kB, kUnopted)),
-               "while B's lookup fails, a new choice wipes nothing in B's inbox");
-    f += Check([Entries(FromPath(kA, kB)) count] == 1, "and withdraws nothing B sent");
+    f += Check([Entries(FromPath(kB, kA)) count] == 1 && !Exists(FromPath(kB, kUnopted)),
+               "while B's lookup fails, what the receive list no longer names goes: 7003's folder; A's stays with its copy");
+    f += Check([Entries(FromPath(kA, kB)) count] == 0, "and B's copy waiting at A is withdrawn: B no longer sends to A");
+    Choose(b, @[@(kA)], @[@(kA)]);
+    Settle(b);
+    Offer(b, @"example-92 gamma");
+    Settle(b);
+    f += Check([Entries(FromPath(kA, kB)) count] == 0, "while it fails, nothing is added: A, back on the send list, gets nothing yet");
     [b sessionDidBecomeActive];
     Settle(b);
-    f += Check(Exists(FromPath(kB, kA)) && Exists(FromPath(kB, kUnopted)) && [Entries(FromPath(kA, kB)) count] == 1,
-               "a return to the console wipes and withdraws nothing either");
+    f += Check(Exists(FromPath(kB, kA)) && !Exists(FromPath(kB, kUnopted)) && [Entries(FromPath(kA, kB)) count] == 0,
+               "a return to the console adds and deletes nothing more");
     f += Check([rb->received count] == 1 && [TextOf([rb->received lastObject]) isEqualToString:@"example-90 alpha"],
                "and still takes in what waited");
     f += Check([b inboxErrorCode] == 0 && rb->stateChanges == 0, "no inbox failure is reported");
     works = YES;
     [b sessionDidBecomeActive];
     Settle(b);
+    Offer(b, @"example-93 delta");
+    Settle(b);
     f += Check(Exists(FromPath(kB, kA)) && !Exists(FromPath(kB, kUnopted)) && [Entries(FromPath(kA, kB)) count] == 1,
-               "once it works again the new choice applies: 7003's folder goes, the rest stays");
+               "once it works again A is sent to again; 7003 stays out");
+    works = NO;
+    Choose(b, @[], @[]);
+    Settle(b);
+    f += Check(!Exists(TopPath(kB)) && [Entries(FromPath(kA, kB)) count] == 0,
+               "receiving from nobody and sending to nobody while it fails: B's inbox goes and its copy at A is withdrawn");
+    works = YES;
     [a stop];
     [b stop];
     return f;
@@ -1186,6 +1410,11 @@ int main(int argc, const char **argv) {
                                 @"pause-pickup": [NSValue valueWithPointer:RunPausePickup],
                                 @"withdraw-on-off": [NSValue valueWithPointer:RunWithdrawOnOff],
                                 @"chosen-accounts": [NSValue valueWithPointer:RunChosenAccounts],
+                                @"one-way": [NSValue valueWithPointer:RunOneWay],
+                                @"send-only-withdraw": [NSValue valueWithPointer:RunSendOnlyWithdraw],
+                                @"one-refresh": [NSValue valueWithPointer:RunOneRefreshPerChoice],
+                                @"wipe-retried": [NSValue valueWithPointer:RunWipeRetried],
+                                @"deliver-only-received": [NSValue valueWithPointer:RunDeliverOnlyFromReceived],
                                 @"account-names": [NSValue valueWithPointer:RunAccountNames],
                                 @"setup-failure": [NSValue valueWithPointer:RunSetupFailure],
                                 @"lookup-failure": [NSValue valueWithPointer:RunLookupFailure],

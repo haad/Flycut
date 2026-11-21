@@ -33,6 +33,38 @@ REAL_HOME = pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir)
 SHARED = pathlib.Path("/Users/Shared")
 ENGINE = "FlycutEngine/FlycutAccountShare.m"   # compiled into the fixture with trace wrappers
 
+# The sentences of help.md and readme.md about Send and Receive, whole.
+HELP_SENTENCES = (
+    'Under "Other accounts on this Mac:" in the General pane, turn on "Share copied text with these accounts:". '
+    'Below it, each other account of this Mac has two checkboxes: "Send" gives the text you copy to that account, '
+    'and "Receive" takes in the text that account copies.',
+    'All of them are off by default, and you can check one without the other: for example, send to a second account '
+    'without getting its copies back.',
+    'A copy goes from one account to another only if both have turned sharing on, the sending account has checked '
+    '"Send" for the other one and the receiving account has checked "Receive" for the sender; it then shows up in '
+    'the receiving account\'s clipboard history.',
+    'If the list of accounts cannot be read for a moment, Flycut adds no account, but what you unchecked still stops '
+    'at once (a click on "Send" or "Receive" in that moment is undone); if that happens when Flycut starts, sharing '
+    'begins once the list can be read again, for example when you switch back to the account.',
+    'When you switch to an account that takes in copies, the newest text that arrived while you were away is on its '
+    'clipboard, ready to paste, if that clipboard still holds what Flycut keeps: the last copy it took into the '
+    'history or a clipping you pasted from Flycut.',
+    'The copies for an account wait in a hidden folder in /Users/Shared, in one subfolder per account it receives '
+    'from; another account can only add its own copies there, and Time Machine skips the folder. Any other '
+    'account on this Mac can see that the folder exists and which accounts may add copies to it, but not the '
+    'copies; an account that sends to you can also tell how many copies from the others wait there and when '
+    'they came or were taken in. An account that receives from nobody has no such folder.',
+    'Turning the option off deletes your folder with everything in it (if it cannot be deleted at once, Flycut '
+    'tries again every minute, also after it restarts), and the copies you sent that the other accounts have not '
+    'taken in yet.',
+    'Unchecking "Receive" for an account deletes what it sent that still waits for you, and it can no longer add '
+    'copies; unchecking "Send" for an account deletes your copies that still wait for it.',
+)
+README_SENTENCE = (
+    'Turn on "Share copied text with these accounts:" in Preferences > General and check "Send", "Receive" or both '
+    'for each other account that should take part; a copy goes from one account to another only if the sender '
+    'checked "Send" for it and the receiver checked "Receive" for the sender.')
+
 
 def method_body(source: str, signature: str) -> str:
     found = [m.start() for m in re.finditer(re.escape(signature) + r"\s*\{", source)]
@@ -167,7 +199,7 @@ class AccountShareAppControllerTests(unittest.TestCase):
     def test_turning_off_withdraws_the_copies_waiting_elsewhere(self) -> None:
         self.run_case("toggle-withdraws")
 
-    def test_chosen_accounts_reach_the_service(self) -> None:
+    def test_send_and_receive_lists_reach_the_service_one_way_each(self) -> None:
         self.run_case("choose-accounts")
 
     def test_a_shared_copy_never_replaces_a_newer_or_unseen_pasteboard(self) -> None:
@@ -187,6 +219,12 @@ class AccountShareAppControllerTests(unittest.TestCase):
 
     def test_a_failed_account_lookup_changes_nothing(self) -> None:
         self.run_case("lookup-failure")
+
+    def test_a_click_reaches_the_service_when_the_lookup_after_it_fails(self) -> None:
+        self.run_case("lookup-fails-after-click")
+
+    def test_unchecking_send_while_receiving_from_nobody_withdraws(self) -> None:
+        self.run_case("send-only-untick")
 
     def test_a_failed_inbox_setup_shows_a_note(self) -> None:
         self.run_case("setup-failure-note")
@@ -209,7 +247,7 @@ class AccountShareAppControllerTests(unittest.TestCase):
         self.assertLess(setup.index("[self updateAccountSharePickupPause];"), setup.index("[self passAccountShareChoice];"),
                         "pickup is paused before sharing starts if tracking is paused")
         self.assertLess(setup.index("accountShareChoicePending = YES;"), setup.index("[self passAccountShareChoice];"))
-        passing = method_body(source, "-(void)passAccountShareChoice")
+        passing = method_body(source, "-(void)passAccountShareChoiceForAccounts:(NSArray *)accounts")
         self.assertIn("[accountShareService start];", passing)
         self.assertIn('boolForKey:@"shareClippingsAcrossAccounts"', passing)
         terminate = method_body(source, "- (void)applicationWillTerminate:(NSNotification *)notification")
@@ -224,7 +262,24 @@ class AccountShareAppControllerTests(unittest.TestCase):
         self.assertLess(text_branch.index("if (revealPasteboardTypes) {"), text_branch.index(offer))
         registered = method_body(source, "- (id)init")
         self.assertRegex(registered, r"numberWithBool:NO\],\s*@\"shareClippingsAcrossAccounts\"")
-        self.assertRegex(registered, r"\[NSArray array\],\s*@\"shareClippingsAccountIDs\"")
+        self.assertRegex(registered, r"\[NSArray array\],\s*@\"shareClippingsSendAccountIDs\"")
+        self.assertRegex(registered, r"\[NSArray array\],\s*@\"shareClippingsReceiveAccountIDs\"")
+        # One list per direction replaces the one list for both; no released Flycut stored the
+        # older lists, so nothing reads them.
+        for old in ('@"shareClippingsAccountIDs"', '@"shareClippingsAccountUIDs"'):
+            self.assertNotIn(old, source)
+
+    def test_help_says_what_send_and_receive_do(self) -> None:
+        help_text = (ROOT / "help.md").read_text()
+        readme = (ROOT / "readme.md").read_text()
+        for sentence in HELP_SENTENCES:
+            self.assertIn(sentence, help_text)
+        self.assertIn(README_SENTENCE, readme)
+        for stale in ("check the accounts below it that you want to share with", "checked your account too",
+                      "Unchecking an account does the same", "check the accounts to share with",
+                      "in the accounts that checked each other", "When you switch to such an account",
+                      "Flycut changes nothing (no copy is deleted"):
+            self.assertNotIn(stale, help_text + readme)
 
     def test_nothing_reaches_the_real_shared_folder(self) -> None:
         prefs = REAL_HOME / "Library/Preferences"
@@ -232,7 +287,8 @@ class AccountShareAppControllerTests(unittest.TestCase):
         before = snapshot_names(SHARED)
         for mode in ("capture", "recopy", "away-no-echo", "toggle", "diagnostics-pause", "toggle-withdraws",
                      "choose-accounts", "pasteboard-guard", "launch-pasteboard-guard", "tracking-pause",
-                     "choice-follows-account", "setup-failure-note", "kept-pasteboard", "lookup-failure"):
+                     "choice-follows-account", "setup-failure-note", "kept-pasteboard", "lookup-failure",
+                     "lookup-fails-after-click", "send-only-untick"):
             self.run_case(mode)
         self.assertEqual(before, snapshot_names(SHARED))
         self.assertEqual(set(os.listdir(prefs)), before_prefs)

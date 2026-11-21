@@ -72,7 +72,9 @@
     FlycutAccountShareService *accountShareService;
     NSInteger accountShareOfferedGeneration;   // the clipboard generation offered last (-pollPB:)
     NSButton *accountSharingCheckbox;
-    // One checkbox per other login account of this Mac (Preferences, General).
+    // The account list (Preferences, General): the "Send" and "Receive" column
+    // headers and, per other login account of this Mac, its name and its Send
+    // and Receive checkboxes.
     NSMutableArray *accountSharingRows;
     // The height of the note's line below the list; the pane has it only while
     // the note shows.
