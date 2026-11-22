@@ -875,14 +875,21 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 
 -(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY
 {
-    // One line at the pitch of the checkbox rows above it, every control
-    // exactly as high as the checkbox and centred on its line: the color wells
-    // use the mini control size (16 pt) and the state labels take the font and
-    // title colour of the checkbox itself. The hint below the line is made like
-    // the other row labels of this pane (same label factory, so the same font
-    // and colour) and starts at their left edge.
+    // Two lines at the pitch of the checkbox rows above: the checkbox, then
+    // its colour options ("Active" and "Paused", each with its colour well
+    // and a preview of the icon). The options start where the checkbox's
+    // title starts, like the sub-options under "Don't save passwords" on
+    // General, so the row is as wide as its content and leaves the window's
+    // width to the other panes. Every control is exactly as high as the
+    // checkbox and centred on its line: the colour wells use the mini control
+    // size (16 pt) and the state labels take the font and title colour of the
+    // checkbox itself. The hint below the options is made like the other row
+    // labels of this pane (same label factory, so the same font and colour)
+    // and starts where the options start, at the checkbox's title: it says
+    // what the checkbox does.
     NSRect panelFrame = [appearancePanel frame];
-    const int height = 56;
+    const CGFloat linePitch = 35.0;  // a checkbox row's: 40 pt high, 5 pt over the one above
+    const int height = 56 + (int)linePitch;
     NSBox *row = [[[NSBox alloc] initWithFrame:NSMakeRect(0, frameMaxY - height + 5,
                                                           panelFrame.size.width - 10, height)] autorelease];
     [row setTitlePosition:NSNoTitle];
@@ -890,7 +897,8 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 
     CGFloat contentWidth = [[row contentView] bounds].size.width;
     const CGFloat rowLabelX = FlycutAppearanceRowInset;  // where every row label of this pane starts
-    const CGFloat lineMidY = 32.0;
+    const CGFloat optionsMidY = 32.5;  // where a checkbox row has its line: 4 pt + half of 25
+    const CGFloat checkboxMidY = optionsMidY + linePitch;
     const NSSize wellSize = NSMakeSize(32.0, 16.0);  // NSColorWell at NSControlSizeMini
     const CGFloat previewSide = 16.0;                // the menu bar icon's own size
 
@@ -904,6 +912,15 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     if (checkboxTitleColor == nil)
         checkboxTitleColor = [NSColor controlTextColor];  // NSButtonCell's title colour
 
+    NSSize checkboxSize = [menuIconCustomColorsCheckbox fittingSize];
+    [menuIconCustomColorsCheckbox setFrame:NSMakeRect(rowLabelX, checkboxMidY - checkboxSize.height / 2.0,
+                                                      ceil(checkboxSize.width), checkboxSize.height)];
+    [menuIconCustomColorsCheckbox setIdentifier:@"menuIconCustomColorsCheckbox"];
+    [menuIconCustomColorsCheckbox setTarget:self];
+    [menuIconCustomColorsCheckbox setAction:@selector(toggleMenuIconCustomColors:)];
+    [row addSubview:menuIconCustomColorsCheckbox];
+    CGFloat titleX = rowLabelX + NSMinX([[menuIconCustomColorsCheckbox cell] titleRectForBounds:[menuIconCustomColorsCheckbox bounds]]);
+
     NSTextField *activeLabel = [NSTextField labelWithString:@"Active"];
     NSTextField *pausedLabel = [NSTextField labelWithString:@"Paused"];
     for (NSTextField *label in @[activeLabel, pausedLabel]) {
@@ -913,25 +930,25 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     NSSize activeLabelSize = [activeLabel fittingSize];
     NSSize pausedLabelSize = [pausedLabel fittingSize];
 
-    CGFloat pausedPreviewX = contentWidth - FlycutAppearanceRowInset - previewSide;
-    CGFloat pausedColorWellX = pausedPreviewX - 4.0 - wellSize.width;
-    CGFloat pausedLabelX = pausedColorWellX - 4.0 - ceil(pausedLabelSize.width);
-    CGFloat activePreviewX = pausedLabelX - 14.0 - previewSide;
-    CGFloat activeColorWellX = activePreviewX - 4.0 - wellSize.width;
-    CGFloat activeLabelX = activeColorWellX - 4.0 - ceil(activeLabelSize.width);
-
-    CGFloat checkboxHeight = [menuIconCustomColorsCheckbox fittingSize].height;
-    [menuIconCustomColorsCheckbox setFrame:NSMakeRect(rowLabelX, lineMidY - checkboxHeight / 2.0,
-                                                      activeLabelX - rowLabelX - 8.0, checkboxHeight)];
-    [menuIconCustomColorsCheckbox setIdentifier:@"menuIconCustomColorsCheckbox"];
-    [menuIconCustomColorsCheckbox setTarget:self];
-    [menuIconCustomColorsCheckbox setAction:@selector(toggleMenuIconCustomColors:)];
-    [row addSubview:menuIconCustomColorsCheckbox];
-
-    [activeLabel setFrame:NSMakeRect(activeLabelX, lineMidY - ceil(activeLabelSize.height) / 2.0,
+    // The label's text starts at its alignment rect, 2 pt into its frame.
+    // Each well follows 8 pt after its label's text, the gap between a label
+    // and its control on General; its preview 4 pt after the well, and the
+    // second pair 16 pt after the first, as between the number fields there.
+    [activeLabel setFrame:NSMakeRect(0, optionsMidY - ceil(activeLabelSize.height) / 2.0,
                                      ceil(activeLabelSize.width), ceil(activeLabelSize.height))];
+    CGFloat labelInset = NSMinX([activeLabel alignmentRectForFrame:[activeLabel frame]]) - NSMinX([activeLabel frame]);
+    CGFloat activeLabelX = titleX - labelInset;
+    CGFloat activeColorWellX = NSMaxX([activeLabel alignmentRectForFrame:NSMakeRect(activeLabelX, 0, ceil(activeLabelSize.width),
+                                                                                    ceil(activeLabelSize.height))]) + 8.0;
+    CGFloat activePreviewX = activeColorWellX + wellSize.width + 4.0;
+    CGFloat pausedLabelX = activePreviewX + previewSide + 16.0 - labelInset;
+    CGFloat pausedColorWellX = NSMaxX([pausedLabel alignmentRectForFrame:NSMakeRect(pausedLabelX, 0, ceil(pausedLabelSize.width),
+                                                                                    ceil(pausedLabelSize.height))]) + 8.0;
+    CGFloat pausedPreviewX = pausedColorWellX + wellSize.width + 4.0;
+
+    [activeLabel setFrameOrigin:NSMakePoint(activeLabelX, NSMinY([activeLabel frame]))];
     [row addSubview:activeLabel];
-    menuIconActiveColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(activeColorWellX, lineMidY - wellSize.height / 2.0,
+    menuIconActiveColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(activeColorWellX, optionsMidY - wellSize.height / 2.0,
                                                                            wellSize.width, wellSize.height)];
     [menuIconActiveColorWell setColorWellStyle:NSColorWellStyleMinimal];
     [menuIconActiveColorWell setControlSize:NSControlSizeMini];
@@ -942,10 +959,10 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     [menuIconActiveColorWell setAction:@selector(setActiveMenuIconColor:)];
     [row addSubview:menuIconActiveColorWell];
 
-    [pausedLabel setFrame:NSMakeRect(pausedLabelX, lineMidY - ceil(pausedLabelSize.height) / 2.0,
+    [pausedLabel setFrame:NSMakeRect(pausedLabelX, optionsMidY - ceil(pausedLabelSize.height) / 2.0,
                                      ceil(pausedLabelSize.width), ceil(pausedLabelSize.height))];
     [row addSubview:pausedLabel];
-    menuIconPausedColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(pausedColorWellX, lineMidY - wellSize.height / 2.0,
+    menuIconPausedColorWell = [[NSColorWell alloc] initWithFrame:NSMakeRect(pausedColorWellX, optionsMidY - wellSize.height / 2.0,
                                                                            wellSize.width, wellSize.height)];
     [menuIconPausedColorWell setColorWellStyle:NSColorWellStyleMinimal];
     [menuIconPausedColorWell setControlSize:NSControlSizeMini];
@@ -956,7 +973,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     [menuIconPausedColorWell setAction:@selector(setPausedMenuIconColor:)];
     [row addSubview:menuIconPausedColorWell];
 
-    menuIconActivePreview = [[NSImageView alloc] initWithFrame:NSMakeRect(activePreviewX, lineMidY - previewSide / 2.0,
+    menuIconActivePreview = [[NSImageView alloc] initWithFrame:NSMakeRect(activePreviewX, optionsMidY - previewSide / 2.0,
                                                                          previewSide, previewSide)];
     [menuIconActivePreview setImage:[FlycutMenuIcon imageForPaused:NO]];
     [menuIconActivePreview setImageScaling:NSImageScaleProportionallyUpOrDown];
@@ -964,7 +981,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     [menuIconActivePreview setAccessibilityLabel:@"Active menu bar icon preview"];
     [row addSubview:menuIconActivePreview];
 
-    menuIconPausedPreview = [[NSImageView alloc] initWithFrame:NSMakeRect(pausedPreviewX, lineMidY - previewSide / 2.0,
+    menuIconPausedPreview = [[NSImageView alloc] initWithFrame:NSMakeRect(pausedPreviewX, optionsMidY - previewSide / 2.0,
                                                                          previewSide, previewSide)];
     [menuIconPausedPreview setImage:[FlycutMenuIcon imageForPaused:YES]];
     [menuIconPausedPreview setImageScaling:NSImageScaleProportionallyUpOrDown];
@@ -976,7 +993,9 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
                                                                   aligned:NSTextAlignmentNatural
                                                                  andFrame:NSZeroRect];
     NSSize automaticSize = [[automaticLabel cell] cellSizeForBounds:NSMakeRect(0, 0, CGFLOAT_MAX, CGFLOAT_MAX)];
-    [automaticLabel setFrame:NSMakeRect(rowLabelX, 4, MIN(ceil(automaticSize.width), contentWidth - rowLabelX - FlycutAppearanceRowInset),
+    [automaticLabel setFrame:NSMakeRect(0, 4, ceil(automaticSize.width), ceil(automaticSize.height))];
+    CGFloat automaticX = titleX - (NSMinX([automaticLabel alignmentRectForFrame:[automaticLabel frame]]) - NSMinX([automaticLabel frame]));
+    [automaticLabel setFrame:NSMakeRect(automaticX, 4, MIN(ceil(automaticSize.width), contentWidth - automaticX - FlycutAppearanceRowInset),
                                         ceil(automaticSize.height))];
     [row addSubview:automaticLabel];
     [automaticLabel release];

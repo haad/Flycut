@@ -213,6 +213,23 @@ static NSTextField *FindLabel(NSView *root, NSString *text)
     return nil;
 }
 
+static NSButton *FindButtonTitled(NSView *root, NSString *title)
+{
+    if ([root isKindOfClass:[NSButton class]] && [[(NSButton *)root title] isEqualToString:title])
+        return (NSButton *)root;
+    for (NSView *child in [root subviews]) {
+        NSButton *match = FindButtonTitled(child, title);
+        if (match != nil)
+            return match;
+    }
+    return nil;
+}
+
+static CGFloat MidYIn(NSView *view, NSView *reference)
+{
+    return NSMidY([view convertRect:[view bounds] toView:reference]);
+}
+
 // Where a label's text starts and ends, in the coordinates of another view.
 static NSRect TextRectInView(NSTextField *label, NSView *view)
 {
@@ -346,8 +363,9 @@ int main(void)
             }
         }
         // The hint under the line reads like the other row labels of the pane
-        // ("Bezel width", "Search clipboard hotkey:"): same left edge, font and
-        // text colour, compared with those live labels. It sits below the line.
+        // ("Bezel width", "Search clipboard hotkey:"): same font and text
+        // colour, compared with those live labels. It sits below the line and
+        // starts where the checkbox's title starts (checked further down).
         NSTextField *hint = FindLabel(colorRow, @"Off uses the automatic macOS color.");
         if (hint == nil) {
             fprintf(stderr, "the automatic-colour hint is missing\n");
@@ -359,12 +377,6 @@ int main(void)
                 fprintf(stderr, "row label %s is missing\n", [title UTF8String]);
                 return 37;
             }
-            NSRect hintText = TextRectInView(hint, panel), referenceText = TextRectInView(reference, panel);
-            if (fabs(NSMinX(hintText) - NSMinX(referenceText)) > 0.5) {
-                fprintf(stderr, "hint text starts at x=%.1f, row label %s at x=%.1f\n", NSMinX(hintText),
-                        [title UTF8String], NSMinX(referenceText));
-                return 38;
-            }
             if (!FontsEqual([hint font], [reference font]) || !ResolvedColorsEqual([hint textColor], [reference textColor])) {
                 fprintf(stderr, "hint font %s %.1f colour %s; row label %s font %s %.1f colour %s\n",
                         [[[hint font] fontName] UTF8String], [[hint font] pointSize], [[[hint textColor] description] UTF8String],
@@ -373,9 +385,14 @@ int main(void)
                 return 39;
             }
         }
-        if (NSMaxY([hint frame]) > NSMinY([checkbox frame]) + 0.5 || [hint isEditable] || [hint isBordered]) {
-            fprintf(stderr, "the hint is not a plain label below the checkbox line: hint=%s checkbox=%s\n",
-                    [NSStringFromRect([hint frame]) UTF8String], [NSStringFromRect([checkbox frame]) UTF8String]);
+        NSView *rowContent = [hint superview];
+        NSArray *options = @[FindLabel(colorRow, @"Active"), activeWell, activePreview, FindLabel(colorRow, @"Paused"), pausedWell, pausedPreview];
+        CGFloat optionsBottom = CGFLOAT_MAX;
+        for (NSView *option in options)
+            optionsBottom = MIN(optionsBottom, NSMinY([option convertRect:[option bounds] toView:rowContent]));
+        if (NSMaxY([hint frame]) > optionsBottom + 0.5 || [hint isEditable] || [hint isBordered]) {
+            fprintf(stderr, "the hint is not a plain label below the line of colour options: hint=%s options from y=%.1f\n",
+                    [NSStringFromRect([hint frame]) UTF8String], optionsBottom);
             return 40;
         }
         NSSize hintFitting = [[hint cell] cellSizeForBounds:NSMakeRect(0, 0, CGFLOAT_MAX, CGFLOAT_MAX)];
@@ -384,14 +401,73 @@ int main(void)
                     [NSStringFromSize(hintFitting) UTF8String]);
             return 41;
         }
-        // One inset on both sides of the row: the paused preview ends as far
-        // from the row's right edge as the hint starts from its left edge.
-        NSView *rowContent = [hint superview];
-        NSRect pausedInRow = [pausedPreview convertRect:[pausedPreview bounds] toView:rowContent];
-        if (fabs(NSWidth([rowContent bounds]) - NSMaxX(pausedInRow) - NSMinX([hint frame])) > 0.5) {
-            fprintf(stderr, "the colour row ends %.1f from the right edge, the hint starts at %.1f\n",
-                    NSWidth([rowContent bounds]) - NSMaxX(pausedInRow), NSMinX([hint frame]));
+        // The checkbox has its line to itself, one checkbox-row pitch below the
+        // checkbox above it (the pitch of the rows above, measured). Its colour
+        // options follow on a second line one pitch further down, all centred
+        // on it, in the order Active, its well and preview, Paused, its well
+        // and preview. They start where the checkbox's title starts, like the
+        // sub-options under "Don't save passwords" on General.
+        NSButton *gifs = (NSButton *)FindButtonTitled(panel, @"Download animated GIFs from web");
+        NSButton *images = (NSButton *)FindButtonTitled(panel, @"Capture images from clipboard");
+        if (gifs == nil || images == nil) {
+            fprintf(stderr, "the checkbox rows above the colour row are missing\n");
             return 42;
+        }
+        CGFloat pitch = MidYIn(images, panel) - MidYIn(gifs, panel);
+        CGFloat checkboxMidY = MidYIn(checkbox, panel), optionsMidY = MidYIn(activeWell, panel);
+        if (pitch < 20.0 || fabs(MidYIn(gifs, panel) - checkboxMidY - pitch) > 0.5 || fabs(checkboxMidY - optionsMidY - pitch) > 0.5) {
+            fprintf(stderr, "the checkbox rows are %.1f pt apart; the colour checkbox is %.1f below the one above, its options %.1f below it\n",
+                    pitch, MidYIn(gifs, panel) - checkboxMidY, checkboxMidY - optionsMidY);
+            return 43;
+        }
+        NSRect checkboxInPanel = [checkbox convertRect:[checkbox bounds] toView:panel];
+        CGFloat previousMaxX = -CGFLOAT_MAX;
+        for (NSView *option in options) {
+            NSRect r = [option convertRect:[option bounds] toView:panel];
+            if (fabs(NSMidY(r) - optionsMidY) > 0.5 || NSMaxY(r) > NSMinY(checkboxInPanel) + 0.5 || NSMinX(r) < previousMaxX - 0.01) {
+                fprintf(stderr, "colour option %s at %s is not on its own line under the checkbox %s, after the one before it (x %.1f)\n",
+                        [[option description] UTF8String], [NSStringFromRect(r) UTF8String], [NSStringFromRect(checkboxInPanel) UTF8String], previousMaxX);
+                return 44;
+            }
+            previousMaxX = NSMaxX(r);
+        }
+        NSTextField *activeLabel = FindLabel(colorRow, @"Active");
+        CGFloat titleStart = NSMinX([checkbox convertRect:[[checkbox cell] titleRectForBounds:[checkbox bounds]] toView:panel]);
+        CGFloat activeStart = NSMinX([[activeLabel superview] convertRect:[activeLabel alignmentRectForFrame:[activeLabel frame]] toView:panel]);
+        if (fabs(activeStart - titleStart) > 0.5) {
+            fprintf(stderr, "\"Active\" starts at x=%.1f, the checkbox title at x=%.1f\n", activeStart, titleStart);
+            return 45;
+        }
+        // The hint belongs to the checkbox as well: it starts where the
+        // checkbox's title and "Active" start, not at the row labels' edge.
+        CGFloat hintStart = NSMinX([[hint superview] convertRect:[hint alignmentRectForFrame:[hint frame]] toView:panel]);
+        CGFloat hintText = NSMinX(TextRectInView(hint, panel)), activeText = NSMinX(TextRectInView(activeLabel, panel));
+        if (fabs(hintStart - titleStart) > 0.5 || fabs(hintText - activeText) > 0.5) {
+            fprintf(stderr, "the hint starts at x=%.1f (text %.1f), the checkbox title at x=%.1f (\"Active\" text %.1f)\n",
+                    hintStart, hintText, titleStart, activeText);
+            return 47;
+        }
+        // Each well follows 8 pt after its label's text (a label and its
+        // control on General), its preview 4 pt after the well, and the second
+        // pair 16 pt after the first; measured by alignment rects.
+        {
+            NSTextField *pausedLabel = FindLabel(colorRow, @"Paused");
+            NSArray *line = @[activeLabel, activeWell, activePreview, pausedLabel, pausedWell, pausedPreview];
+            const double wanted[] = {8.0, 4.0, 16.0, 8.0, 4.0};
+            for (NSUInteger i = 0; i + 1 < [line count]; i++) {
+                NSView *a = line[i], *b = line[i + 1];
+                double gap = NSMinX([[b superview] convertRect:[b alignmentRectForFrame:[b frame]] toView:panel]) -
+                             NSMaxX([[a superview] convertRect:[a alignmentRectForFrame:[a frame]] toView:panel]);
+                if (fabs(gap - wanted[i]) > 0.5) {
+                    fprintf(stderr, "colour option gap %lu is %.1f pt, wanted %.1f\n", (unsigned long)i, gap, wanted[i]);
+                    return 48;
+                }
+            }
+        }
+        // The checkbox is no wider than its box and title.
+        if (NSWidth([checkbox frame]) > [checkbox fittingSize].width + 0.5) {
+            fprintf(stderr, "the checkbox is %.1f pt wide, its box and title %.1f\n", NSWidth([checkbox frame]), [checkbox fittingSize].width);
+            return 46;
         }
         if ([checkbox state] != NSControlStateValueOff || [activeWell isEnabled] || [pausedWell isEnabled]) {
             fprintf(stderr, "custom controls must start in automatic mode\n");
@@ -972,9 +1048,11 @@ class MenuBarIconColorRegressionTests(unittest.TestCase):
         self.assertEqual(source.count("static const CGFloat FlycutAppearanceRowInset = "), 1)
         start = source.index("-(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY\n{")
         body = source[start:source.index("\n}\n", start)]
-        # Left edge (hint, checkbox) and right edge (paused preview) both come from the shared inset.
+        # The left edge (hint, checkbox) comes from the shared inset; the colour options start at the
+        # checkbox title, on their own line, and no longer hang on the row's right edge.
         self.assertIn("rowLabelX = FlycutAppearanceRowInset;", body)
-        self.assertIn("contentWidth - FlycutAppearanceRowInset - previewSide", body)
+        self.assertIn("titleRectForBounds:", body)
+        self.assertNotIn("contentWidth - FlycutAppearanceRowInset - previewSide", body)
 
 
 if __name__ == "__main__":

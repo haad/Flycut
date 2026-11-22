@@ -746,7 +746,7 @@ static int PaneSwitchRefused(void)
 
 // Every arrow is one gap right of its control, and the arrows of a pane line
 // up: on Appearance one column for sliders and the search hotkey, ending at
-// the rows' inset (where the menu bar colour row ends, too); on General the
+// the rows' inset; on General the
 // arrows that end a line share one column, and so do the two folder arrows.
 static const CGFloat ArrowGap = 4.0;
 
@@ -792,11 +792,22 @@ static int ArrowColumns(void)
                 NSWidth([[label superview] bounds]), NSMinX([label frame]));
         return 144;
     }
-    // With the menu bar colour row (#20), that row ends at the column's right edge.
+    // The menu bar colour options (#20) stand on their own line under their
+    // checkbox, from its title on; they end before the arrow column.
     NSView *paused = Find(panel, ^BOOL(NSView *view) { return [[view identifier] isEqualToString:@"menuIconPausedPreview"]; });
-    if (paused != nil && !Same(NSMaxX(FrameIn(paused, content)), NSMaxX(first))) {
-        fprintf(stderr, "Appearance: the colour row ends at %.1f, the arrow column at %.1f\\n", NSMaxX(FrameIn(paused, content)), NSMaxX(first));
-        return 145;
+    NSButton *colors = (NSButton *)Find(panel, ^BOOL(NSView *view) { return [[view identifier] isEqualToString:@"menuIconCustomColorsCheckbox"]; });
+    NSView *active = Find(panel, ^BOOL(NSView *view) {
+        return [view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] isEqualToString:@"Active"];
+    });
+    if (paused != nil) {
+        CGFloat title = NSMinX([colors convertRect:[[colors cell] titleRectForBounds:[colors bounds]] toView:content]);
+        CGFloat start = NSMinX([[active superview] convertRect:[active alignmentRectForFrame:[active frame]] toView:content]);
+        if (colors == nil || active == nil || NSMaxX(FrameIn(paused, content)) > NSMinX(first) - ArrowGap + 0.5 || !Same(start, title)
+            || NSMaxY(FrameIn(paused, content)) > NSMinY(FrameIn(colors, content)) + 0.5) {
+            fprintf(stderr, "Appearance: the colour options start at %.1f (title %.1f), end at %.1f; the arrow column starts at %.1f\\n",
+                    start, title, NSMaxX(FrameIn(paused, content)), NSMinX(first));
+            return 145;
+        }
     }
 
     // Hotkeys: the same gap.
