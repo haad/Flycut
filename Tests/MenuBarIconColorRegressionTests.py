@@ -360,16 +360,22 @@ int main(void)
                 return 35;
             }
         }
-        // The hint under the line reads like the other row labels of the pane
-        // ("Bezel width", "Search clipboard hotkey:"): same font and text
-        // colour, compared with those live labels. It sits below the line and
+        // The hint under the line reads like the other words of the pane that
+        // explain a control (the labels at a slider's ends, "Smaller" and
+        // "Bigger"): same font and text colour, compared with those live labels,
+        // and a step smaller than the row labels. It sits below the line and
         // starts where the checkbox's title starts (checked further down).
         NSTextField *hint = FindLabel(colorRow, @"Off uses the automatic macOS color.");
         if (hint == nil) {
             fprintf(stderr, "the automatic-colour hint is missing\n");
             return 36;
         }
-        for (NSString *title in @[@"Bezel width", @"Search clipboard hotkey:"]) {
+        NSTextField *rowLabel = FindLabel(panel, @"Bezel width");
+        if (rowLabel == nil || [[hint font] pointSize] >= [[rowLabel font] pointSize]) {
+            fprintf(stderr, "hint %.1f pt, row label %.1f pt\n", [[hint font] pointSize], [[rowLabel font] pointSize]);
+            return 38;
+        }
+        for (NSString *title in @[@"Smaller", @"Bigger"]) {
             NSTextField *reference = FindLabel(panel, title);
             if (reference == nil || reference == hint) {
                 fprintf(stderr, "row label %s is missing\n", [title UTF8String]);

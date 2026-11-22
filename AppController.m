@@ -519,6 +519,23 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 // out by these rules there (-layOutAppearancePane); so is Hotkeys
 // (-layOutHotkeysPaneForWidth:), which keeps them with any compiled NIB.
 static const CGFloat FlycutPaneMargin = 16.0;
+
+// One type scale, General's, in every pane: a label names a control in the
+// system font at its regular size (13 pt) in labelColor, like a checkbox
+// title; what explains a control (a hint, the words at a slider's ends) is a
+// step smaller (11 pt) in secondaryLabelColor. Both stay plain labels, which
+// VoiceOver reads as text.
+static void FlycutStyleAsLabel(NSTextField *field)
+{
+	[field setFont:[NSFont systemFontOfSize:[NSFont systemFontSize]]];
+	[field setTextColor:[NSColor labelColor]];
+}
+
+static void FlycutStyleAsHint(NSTextField *field)
+{
+	[field setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
+	[field setTextColor:[NSColor secondaryLabelColor]];
+}
 static const CGFloat FlycutLabelGap = 8.0;
 static const CGFloat FlycutSectionGap = 16.0;
 static const CGFloat FlycutRowGap = 6.0;
@@ -1007,6 +1024,7 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
     NSTextField *automaticLabel = [self preferencePanelSliderLabelForText:@"Off uses the automatic macOS color."
                                                                   aligned:NSTextAlignmentNatural
                                                                  andFrame:NSZeroRect];
+    FlycutStyleAsHint(automaticLabel);
     NSSize automaticSize = [[automaticLabel cell] cellSizeForBounds:NSMakeRect(0, 0, CGFLOAT_MAX, CGFLOAT_MAX)];
     [automaticLabel setFrame:NSMakeRect(0, 4, ceil(automaticSize.width), ceil(automaticSize.height))];
     CGFloat automaticX = titleX - (NSMinX([automaticLabel alignmentRectForFrame:[automaticLabel frame]]) - NSMinX([automaticLabel frame]));
@@ -1238,7 +1256,12 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 	[newLabel setAlignment:alignment];
 	[newLabel setBordered:NO];
 	[newLabel setDrawsBackground:NO];
-	[newLabel setFont:[NSFont labelFontOfSize:10]];
+	// A row's label names its control; the labels at a slider's two ends
+	// explain it.
+	if (alignment == NSTextAlignmentNatural)
+		FlycutStyleAsLabel(newLabel);
+	else
+		FlycutStyleAsHint(newLabel);
 	[newLabel setStringValue:text];
 	return newLabel;
 }
@@ -2444,8 +2467,12 @@ static NSTextField *FlycutLabelAligned(NSArray *views, NSTextAlignment alignment
 		NSString *text = [[label stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]];
 		if (![text isEqualToString:[label stringValue]])
 			[label setStringValue:text];
+		// The NIB sets 10 pt for the labels and the help text.
+		FlycutStyleAsLabel(label);
 		column = MAX(column, left + FlycutNaturalSize(label).width + FlycutLabelGap);
 	}
+	if (help != nil)
+		FlycutStyleAsHint(help);
 	NSMutableArray *lines = [NSMutableArray array];
 	for (NSUInteger i = 0; i < [recorders count]; i++)
 		[lines addObject:FlycutLine(i == 0 ? FlycutSectionGap : FlycutRowGap, @[labels[i], recorders[i], arrows[i]],

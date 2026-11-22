@@ -339,6 +339,41 @@ static int General(void)
     return 0;
 }
 
+// One type scale: every label of Appearance and Hotkeys is a label (system
+// font, 13 pt, labelColor, like a checkbox title) or explains a control (11 pt,
+// secondaryLabelColor): the hints and the words at a slider's ends. All of them
+// stay static text for VoiceOver.
+static int TypeScale(void)
+{
+    NSSet *hints = [NSSet setWithArray:@[@"Lighter", @"Darker", @"Smaller", @"Bigger", @"Off uses the automatic macOS color."]];
+    NSMutableArray *seen = [NSMutableArray array];
+    for (NSNumber *index in @[@(appearancePane), @(hotkeysPane)]) {
+        ChangePane([index integerValue]);
+        for (NSView *v in Views(Root([index integerValue]))) {
+            if (![v isKindOfClass:[NSTextField class]] || [(NSTextField *)v isEditable] || [(NSTextField *)v isBezeled]) continue;
+            NSTextField *t = (NSTextField *)v;
+            NSString *text = [t stringValue];
+            BOOL hint = [hints containsObject:text] || [text hasPrefix:@"To change"];
+            CGFloat size = hint ? [NSFont smallSystemFontSize] : [NSFont systemFontSize];
+            NSColor *colour = hint ? [NSColor secondaryLabelColor] : [NSColor labelColor];
+            NSFont *font = [t font];
+            BOOL system = [[font familyName] isEqualToString:[[NSFont systemFontOfSize:size] familyName]] &&
+                          !([[font fontDescriptor] symbolicTraits] & NSFontDescriptorTraitBold);
+            [seen addObject:[NSString stringWithFormat:@"%@ %.0f %@", text, [font pointSize], [[t textColor] colorNameComponent]]];
+            if (!system || fabs([font pointSize] - size) > 0.01 || ![[t textColor] isEqual:colour])
+                return Fail(90, [NSString stringWithFormat:@"%@ \"%@\": %@ %.1f pt %@, wanted the system font %.0f pt %@", hint ? @"hint" : @"label", text,
+                                 [font fontName], [font pointSize], [t textColor], size, colour]);
+            // the field's cell is the element VoiceOver reads (the field itself is ignored)
+            id element = NSAccessibilityUnignoredDescendant(t);
+            if (![[element accessibilityRole] isEqualToString:NSAccessibilityStaticTextRole] || ![[element accessibilityValue] isEqual:text])
+                return Fail(91, [NSString stringWithFormat:@"\"%@\" is not static text for VoiceOver (%@ %@)", text, [element accessibilityRole], [element accessibilityValue]]);
+        }
+    }
+    report[@"labels"] = seen;
+    if ([seen count] < 12) return Fail(92, [NSString stringWithFormat:@"only %lu labels found: %@", (unsigned long)[seen count], seen]);
+    return 0;
+}
+
 int main(int argc, const char **argv)
 {
     @autoreleasepool {
@@ -374,7 +409,7 @@ int main(int argc, const char **argv)
         }
         Show();
         int result = [mode isEqualToString:@"appearance"] ? Appearance() : [mode isEqualToString:@"hotkeys"] ? Hotkeys()
-                   : [mode isEqualToString:@"acknowledgements"] ? Acknowledgements() : [mode hasPrefix:@"general"] ? General() : 2;
+                   : [mode isEqualToString:@"acknowledgements"] ? Acknowledgements() : [mode hasPrefix:@"general"] ? General() : [mode isEqualToString:@"type-scale"] ? TypeScale() : 2;
         if (result == 0) Emit(report);
         return result;
     }
@@ -394,6 +429,9 @@ class PreferencesPaneLayoutTests(PreferencesNibCase):
 
     def test_hotkeys_window_follows_its_pane_when_it_opens_on_it(self) -> None:
         self.run_mode("hotkeys-shown", "the window does not fit the Hotkeys pane it opens on")
+
+    def test_labels_and_hints_follow_one_type_scale(self) -> None:
+        self.run_mode("type-scale", "a label or hint is not in the Preferences' type scale")
 
     def test_acknowledgements_text_keeps_the_margins(self) -> None:
         self.run_mode("acknowledgements", "the Acknowledgements text is not on the margins")
