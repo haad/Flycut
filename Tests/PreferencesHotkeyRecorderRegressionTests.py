@@ -138,11 +138,15 @@ static NSButton *RestoreButton(NSString *identifier)
     return [found isKindOfClass:[NSButton class]] ? (NSButton *)found : nil;
 }
 
+// The slider on the arrow's line (the pane holds every row's controls in one view).
 static NSSlider *SliderNextTo(NSButton *button)
 {
+    NSSlider *found = nil;
     for (NSView *view in [[button superview] subviews])
-        if ([view isKindOfClass:[NSSlider class]]) return (NSSlider *)view;
-    return nil;
+        if ([view isKindOfClass:[NSSlider class]] &&
+            (found == nil || fabs(NSMidY([view frame]) - NSMidY([button frame])) < fabs(NSMidY([found frame]) - NSMidY([button frame]))))
+            found = (NSSlider *)view;
+    return found;
 }
 
 static BOOL ComboIs(SRRecorderControl *recorder, NSInteger code, NSUInteger flags)
@@ -569,14 +573,14 @@ static int RememberCancel(void)
 }
 
 // The Hotkeys pane's help text says what the arrow next to the recorder does,
-// and still fits next to it.
+// and fits under the recorder, from where the recorder starts.
 static int HelpText(void)
 {
     NSView *pane = [mainRecorder superview];
     NSButton *button = RestoreButton(@"restoreDefaultMainHotkey");
     NSTextField *help = nil;
     for (NSView *view in [pane subviews])
-        if ([view isKindOfClass:[NSTextField class]] && NSMinX([view frame]) > NSMaxX([mainRecorder frame])) help = (NSTextField *)view;
+        if ([view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] hasPrefix:@"To change"]) help = (NSTextField *)view;
     if (help == nil || button == nil) return 130;
     NSString *text = [help stringValue];
     if ([text rangeOfString:@"arrow"].location == NSNotFound || [text rangeOfString:@"default"].location == NSNotFound) {
@@ -589,8 +593,9 @@ static int HelpText(void)
         fprintf(stderr, "help text needs %.1f, has %.1f\n", needed.height, NSHeight([help frame]));
         return 133;
     }
+    NSRect helpEdges = [help alignmentRectForFrame:[help frame]], recorderEdges = [mainRecorder alignmentRectForFrame:[mainRecorder frame]];
     if (!NSContainsRect([pane bounds], [help frame]) || NSIntersectsRect([help frame], [button frame]) ||
-        NSMinX([help frame]) < NSMaxX([button frame]) + 4) {
+        fabs(NSMinX(helpEdges) - NSMinX(recorderEdges)) > 0.5 || NSMaxY(helpEdges) > NSMinY(recorderEdges) + 0.5) {
         fprintf(stderr, "help %s button %s pane %s\n", [NSStringFromRect([help frame]) UTF8String],
                 [NSStringFromRect([button frame]) UTF8String], [NSStringFromRect([pane bounds]) UTF8String]);
         return 134;
@@ -781,15 +786,19 @@ static int ArrowColumns(void)
             return 142;
         }
     }
-    // The column ends as far from the row's right edge as the row labels start from its left edge.
+    // The column ends as far from the pane's right edge as the row labels start from its left
+    // edge, in the pane's own view (where the window's width rule measures it).
     NSView *label = Find(panel, ^BOOL(NSView *view) {
         return [view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] isEqualToString:@"Bezel width"];
     });
     NSButton *width = RestoreButton(@"restoreDefaultBezelWidth");
-    if (label == nil || [label superview] != [width superview]) return 143;
-    if (!Same(NSWidth([[label superview] bounds]) - NSMaxX([width frame]), NSMinX([label frame]))) {
-        fprintf(stderr, "Appearance: the arrow column ends at %.1f of %.1f, the labels start at %.1f\\n", NSMaxX([width frame]),
-                NSWidth([[label superview] bounds]), NSMinX([label frame]));
+    NSView *item = [[[prefs tabView] tabViewItemAtIndex:appearancePane] view];
+    if (label == nil || width == nil || ![panel isDescendantOf:item]) return 143;
+    NSRect labelEdges = [item convertRect:[label alignmentRectForFrame:[label frame]] fromView:[label superview]];
+    NSRect arrowFrame = [item convertRect:[width frame] fromView:[width superview]];
+    if (!Same(NSWidth([item bounds]) - NSMaxX(arrowFrame), NSMinX(labelEdges))) {
+        fprintf(stderr, "Appearance: the arrow column ends at %.1f of %.1f, the labels start at %.1f\\n", NSMaxX(arrowFrame),
+                NSWidth([item bounds]), NSMinX(labelEdges));
         return 144;
     }
     // The menu bar colour options (#20) stand on their own line under their

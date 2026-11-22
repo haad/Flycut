@@ -11,9 +11,9 @@ Now the window is as wide as the widest FIXED content of all panes plus that pan
 a label by its own text, a checkbox by its box and title, other controls by their alignment
 rects, every Restore Default arrow by its frame (shown or not). Controls that can take any width
 follow the window instead of setting it: a wrapping label (the Hotkeys hint), sliders, the
-Acknowledgements text, separators, and on Appearance the arrow column with what hangs on it (the
-sliders' right ends, the search recorder, the right-aligned "Darker"/"Bigger" labels). They end
-at the window's width less the pane's left inset. The tab view takes the window's width, so
+Acknowledgements text, separators, and on Appearance and Hotkeys the arrow column with what hangs
+on it (the sliders' right ends, the recorders, the right-aligned "Darker"/"Bigger" labels). They
+end at the window's width less the pane's left inset. The tab view takes the window's width, so
 every pane spans it, and no control reaches past the window. The window keeps its centre, and
 each pane still fits under the taller toolbar. The toolbar holds the four panes and no space;
 they are evenly spaced and centred (their item views' frames, measured offscreen).
@@ -157,7 +157,14 @@ static void LeavesIn(NSView *view, NSView *pane, BOOL appearance, NSMutableArray
     }
 }
 
-static void Leaves(NSView *view, NSView *pane, NSMutableArray *out) { LeavesIn(view, pane, IsAppearance(pane), out); }
+// Hotkeys stands its arrows in a column at the right margin like Appearance.
+static BOOL IsHotkeys(NSView *pane)
+{
+    NSView *recorder = [controller valueForKey:@"mainRecorder"];
+    return recorder != nil && [recorder isDescendantOf:pane];
+}
+
+static void Leaves(NSView *view, NSView *pane, NSMutableArray *out) { LeavesIn(view, pane, IsAppearance(pane) || IsHotkeys(pane), out); }
 
 // The pane's fixed content's right edge plus its left inset, in points. 0 for a pane without
 // fixed content (Acknowledgements: only its text, which follows the window).
@@ -304,16 +311,15 @@ int main(int argc, const char **argv)
 
         BOOL arrowOut = [mode isEqualToString:@"arrow-reaches-out"];
         if (arrowOut) {
-            // A Restore Default arrow, hidden while its value is the default, past everything else.
-            NSButton *arrow = nil;
-            for (NSInteger i = 0; i < [[prefs tabView] numberOfTabViewItems] && arrow == nil; i++) {
-                NSMutableArray *leaves = [NSMutableArray array];
-                Leaves([[[prefs tabView] tabViewItemAtIndex:i] view], [[[prefs tabView] tabViewItemAtIndex:i] view], leaves);
-                for (NSDictionary *leaf in leaves)
-                    if ([[leaf[@"view"] identifier] isEqualToString:@"restoreDefaultMainHotkey"]) arrow = leaf[@"view"];
-            }
-            if (arrow == nil || ![arrow isHidden]) return Fail(21, @"the main hotkey's Restore Default arrow is not there or not hidden");
-            [arrow setFrameOrigin:NSMakePoint(560, NSMinY([arrow frame]))];
+            // A Restore Default arrow, hidden while its value is the default, past everything else
+            // in a pane without an arrow column (General): one more, placed by its frame. Arrows of
+            // Appearance and Hotkeys stand in their column and follow the window.
+            NSView *general = [[controller valueForKey:@"savingSectionLabel"] superview];
+            NSButton *arrow = [[[NSButton alloc] initWithFrame:NSMakeRect(560, 20, 20, 20)] autorelease];
+            [arrow setIdentifier:@"restoreDefaultFixtureOnly"];
+            [arrow setHidden:YES];
+            [general addSubview:arrow];
+            if ([arrow superview] != general || ![arrow isHidden]) return Fail(21, @"the extra Restore Default arrow is not in General or not hidden");
         }
 
         double nibWidth = NSWidth([[prefs tabView] frame]);
@@ -499,7 +505,7 @@ int main(int argc, const char **argv)
                 ChangePane(i);
                 NSView *pane = [[[prefs tabView] tabViewItemAtIndex:i] view];
                 NSString *name = [[[prefs tabView] tabViewItemAtIndex:i] label];
-                BOOL appearance = IsAppearance(pane);
+                BOOL appearance = IsAppearance(pane) || IsHotkeys(pane);   // a pane with an arrow column
                 double inset = 0;
                 PaneNeed(pane, &inset, NULL);
                 double target = width - inset;
@@ -510,7 +516,7 @@ int main(int argc, const char **argv)
                     if (![leaf[@"elastic"] boolValue] || [view isKindOfClass:[NSBox class]]) continue;
                     [seen addObject:[NSString stringWithFormat:@"%@:%@", name, NSStringFromClass([view class])]];
                     BOOL arrow = [[view identifier] hasPrefix:@"restoreDefault"];
-                    if (!appearance || arrow) {
+                    if (!appearance || arrow || Wraps(view)) {
                         double end = arrow ? [leaf[@"maxX"] doubleValue] : [leaf[@"alignMaxX"] doubleValue];
                         if (fabs(end - target) > 0.5)
                             return Fail(50, [NSString stringWithFormat:@"%@: %@ %@ ends at %.1f, not at the window less the inset (%.1f - %.1f = %.1f)",
@@ -521,25 +527,29 @@ int main(int argc, const char **argv)
                         if (needs > NSHeight([view frame]) + 0.5)
                             return Fail(51, [NSString stringWithFormat:@"%@: the wrapping label needs %.1f pt, it has %.1f", name, needs, NSHeight([view frame])]);
                     }
-                    if (appearance && !arrow) {
+                    if (appearance && !arrow && !Wraps(view)) {
+                        // By alignment rects: the arrow on the view's line, the slider just above a label.
+                        NSRect edges = [view alignmentRectForFrame:[view frame]];
                         NSButton *rowArrow = nil;
                         NSSlider *rowSlider = nil;
                         for (NSView *sibling in [[view superview] subviews]) {
-                            if ([[sibling identifier] hasPrefix:@"restoreDefault"]) rowArrow = (NSButton *)sibling;
-                            if ([sibling isKindOfClass:[NSSlider class]]) rowSlider = (NSSlider *)sibling;
+                            if ([[sibling identifier] hasPrefix:@"restoreDefault"] &&
+                                (rowArrow == nil || fabs(NSMidY([sibling frame]) - NSMidY(edges)) < fabs(NSMidY([rowArrow frame]) - NSMidY(edges))))
+                                rowArrow = (NSButton *)sibling;
+                            NSRect s = [sibling alignmentRectForFrame:[sibling frame]];
+                            if ([sibling isKindOfClass:[NSSlider class]] && NSMinY(s) >= NSMaxY(edges) - 0.5 &&
+                                (rowSlider == nil || NSMinY(s) < NSMinY([rowSlider alignmentRectForFrame:[rowSlider frame]])))
+                                rowSlider = (NSSlider *)sibling;
                         }
                         if ([view isKindOfClass:[NSTextField class]]) {
-                            // a right-aligned min/max label: its slider is in the row above
-                            NSView *row = [[view superview] superview];
-                            if (rowSlider == nil && [row isKindOfClass:[NSBox class]])
-                                for (NSView *sibling in [[(NSBox *)row contentView] subviews])
-                                    if ([sibling isKindOfClass:[NSSlider class]]) rowSlider = (NSSlider *)sibling;
-                            if (rowSlider == nil || fabs(NSMaxX([view frame]) - (NSMaxX([rowSlider frame]) - 4)) > 0.5)
+                            // a right-aligned label at a slider's end, under it
+                            double sliderEnd = rowSlider ? NSMaxX([rowSlider alignmentRectForFrame:[rowSlider frame]]) : -1;
+                            if (rowSlider == nil || fabs(NSMaxX(edges) - sliderEnd) > 0.5)
                                 return Fail(52, [NSString stringWithFormat:@"%@: the right-aligned label %@ ends at %.1f, its slider at %.1f", name,
-                                                 [(NSTextField *)view stringValue], NSMaxX([view frame]), rowSlider ? NSMaxX([rowSlider frame]) : -1]);
-                        } else if (rowArrow == nil || fabs(NSMaxX([view frame]) - (NSMinX([rowArrow frame]) - 4)) > 0.5) {
+                                                 [(NSTextField *)view stringValue], NSMaxX(edges), sliderEnd]);
+                        } else if (rowArrow == nil || fabs(NSMaxX(edges) - (NSMinX([rowArrow frame]) - 4)) > 0.5) {
                             return Fail(53, [NSString stringWithFormat:@"%@: %@ ends at %.1f, its row's arrow starts at %.1f", name,
-                                             NSStringFromClass([view class]), NSMaxX([view frame]), rowArrow ? NSMinX([rowArrow frame]) : -1]);
+                                             NSStringFromClass([view class]), NSMaxX(edges), rowArrow ? NSMinX([rowArrow frame]) : -1]);
                         }
                     }
                 }

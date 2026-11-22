@@ -378,6 +378,9 @@ static const NSInteger FlycutDisplayNumLowest = 5;
 -(IBAction)toggleClipboardTracking:(id)sender;
 -(void)setupClipboardTrackingMenuItem;
 -(void)refreshMenuIconColorControls;
+-(void)layOutAppearancePane;
+-(void)layOutHotkeysPaneForWidth:(CGFloat)width;
+-(void)buildAcknowledgementsMargins;
 -(IBAction)toggleMenuIconCustomColors:(id)sender;
 -(IBAction)setActiveMenuIconColor:(id)sender;
 -(IBAction)setPausedMenuIconColor:(id)sender;
@@ -505,10 +508,22 @@ static const NSUInteger kPasteTargetActivationCheckLimit = 6;
 }
 
 
-// The code-built rows of the Appearance pane are inset by this much on both
-// sides of their content: row labels start at it, and whatever a row puts at
-// its right end stops at it.
-static const CGFloat FlycutAppearanceRowInset = 8.0;
+// One set of layout rules for every Preferences pane, General's (MainMenu.xib):
+// a 16 pt margin on both sides; labels start at the left margin; in a group
+// of labelled rows the controls start on one column, 8 pt after the group's
+// widest label; controls that can take any width (sliders, hotkey recorders,
+// list fields, folder buttons) end one gap before the Restore Default arrows,
+// which stand in one column at the right margin; 16 pt from the top of a pane
+// to its first row and between its sections, 6 pt between the rows of a
+// section and 16 pt below the last one. Appearance is built in code and laid
+// out by these rules there (-layOutAppearancePane); so is Hotkeys
+// (-layOutHotkeysPaneForWidth:), which keeps them with any compiled NIB.
+static const CGFloat FlycutPaneMargin = 16.0;
+static const CGFloat FlycutLabelGap = 8.0;
+static const CGFloat FlycutSectionGap = 16.0;
+static const CGFloat FlycutRowGap = 6.0;
+// The labels at the two ends of a slider stand this close under it.
+static const CGFloat FlycutSliderEndLabelGap = 2.0;
 
 
 
@@ -564,6 +579,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	NSLog(@"[Flycut Startup] Bundle ID: %@", bundleID);
 	NSLog(@"[Flycut Startup] Initial Accessibility Trust State: %@", initialTrustState ? @"TRUSTED" : @"NOT TRUSTED");
 	
+	[self buildAcknowledgementsMargins];
 	[self buildAppearancesPreferencePanel];
 
 	[self buildMainHotkeyRestoreDefaultButton];
@@ -895,8 +911,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     [row setTitlePosition:NSNoTitle];
     [row setTransparent:YES];
 
-    CGFloat contentWidth = [[row contentView] bounds].size.width;
-    const CGFloat rowLabelX = FlycutAppearanceRowInset;  // where every row label of this pane starts
+    const CGFloat rowLabelX = 0.0;  // -layOutAppearancePane moves the row to the pane's margin
     const CGFloat optionsMidY = 32.5;  // where a checkbox row has its line: 4 pt + half of 25
     const CGFloat checkboxMidY = optionsMidY + linePitch;
     const NSSize wellSize = NSMakeSize(32.0, 16.0);  // NSColorWell at NSControlSizeMini
@@ -995,8 +1010,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
     NSSize automaticSize = [[automaticLabel cell] cellSizeForBounds:NSMakeRect(0, 0, CGFLOAT_MAX, CGFLOAT_MAX)];
     [automaticLabel setFrame:NSMakeRect(0, 4, ceil(automaticSize.width), ceil(automaticSize.height))];
     CGFloat automaticX = titleX - (NSMinX([automaticLabel alignmentRectForFrame:[automaticLabel frame]]) - NSMinX([automaticLabel frame]));
-    [automaticLabel setFrame:NSMakeRect(automaticX, 4, MIN(ceil(automaticSize.width), contentWidth - automaticX - FlycutAppearanceRowInset),
-                                        ceil(automaticSize.height))];
+    [automaticLabel setFrame:NSMakeRect(automaticX, 4, ceil(automaticSize.width), ceil(automaticSize.height))];
     [row addSubview:automaticLabel];
     [automaticLabel release];
 
@@ -1242,17 +1256,14 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	[newRow setTitlePosition:NSNoTitle];
 	[newRow setTransparent:YES];
 
-	// The Restore Default arrow ends at the row inset, in one column with the
-	// other arrows of this pane; the slider ends one gap before it.
-	CGFloat restoreX = NSWidth([[newRow contentView] bounds]) - FlycutAppearanceRowInset - FlycutRestoreArrowSide;
-	CGFloat sliderMaxX = restoreX - FlycutRestoreArrowGap;
+	// -layOutAppearancePane places the label, the slider, the labels at its
+	// ends and the Restore Default arrow.
+    [newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSZeroRect]];
 
-    [newRow addSubview:[self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSMakeRect(8, 25, 100, 25)]];
+    [newRow addSubview:[self preferencePanelSliderLabelForText:minText aligned:NSTextAlignmentLeft andFrame:NSZeroRect]];
+    [newRow addSubview:[self preferencePanelSliderLabelForText:maxText aligned:NSTextAlignmentRight andFrame:NSZeroRect]];
 
-    [newRow addSubview:[self preferencePanelSliderLabelForText:minText aligned:NSTextAlignmentLeft andFrame:NSMakeRect(113, 0, 151, 25)]];
-    [newRow addSubview:[self preferencePanelSliderLabelForText:maxText aligned:NSTextAlignmentRight andFrame:NSMakeRect(sliderMaxX-151-4, 0, 151, 25)]];
-
-	NSSlider *newControl = [[NSSlider alloc] initWithFrame:NSMakeRect(109, 29, sliderMaxX - 109, 25)];
+	NSSlider *newControl = [[NSSlider alloc] initWithFrame:NSMakeRect(0, 0, 200, 25)];
 
 	newControl.numberOfTickMarks=ticks;
 	[newControl setMinValue:min];
@@ -1266,8 +1277,7 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	NSString *restoreIdentifier = [@"restoreDefault" stringByAppendingString:[[[keyPath substringToIndex:1] uppercaseString] stringByAppendingString:[keyPath substringFromIndex:1]]];
 	NSButton *restoreButton = [self restoreDefaultButtonWithIdentifier:restoreIdentifier
 	                                               accessibilityLabel:[@"Restore default " stringByAppendingString:[title lowercaseString]]];
-	[restoreButton setFrame:NSMakeRect(restoreX, NSMidY([newControl frame]) - FlycutRestoreArrowSide / 2.0,
-	                                   FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
+	[restoreButton setFrame:NSMakeRect(0, 0, FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
 	[newRow addSubview:restoreButton];
 
 	return newRow;
@@ -1341,12 +1351,11 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 	// comes from the NIB.
 	NSParameterAssert(recorder == &searchRecorder);
 
-	// The recorder keeps its designed height (SRMaxHeight); the label and the
-	// Restore Default button are centred on it. It ends where the sliders
-	// end, so its arrow stands in their arrows' column.
-	CGFloat restoreX = NSWidth([[newRow contentView] bounds]) - FlycutAppearanceRowInset - FlycutRestoreArrowSide;
+	// The recorder keeps its designed height (SRMaxHeight); -layOutAppearancePane
+	// puts it on the column of the slider rows, its arrow in theirs, and
+	// centres the label and the arrow on it.
 	*recorder = [[SRRecorderControl alloc] initWithFrame:NSZeroRect];
-	[*recorder setFrame:NSMakeRect(200, 14, restoreX - FlycutRestoreArrowGap - 200, 22)];
+	[*recorder setFrame:NSMakeRect(0, 0, 150, 22)];
 	[*recorder setDelegate:self];
 	[*recorder setAccessibilityElement:YES];
 	[*recorder setAccessibilityLabel:[title stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@": "]]];
@@ -1356,13 +1365,13 @@ static const CGFloat FlycutAppearanceRowInset = 8.0;
 
 	NSTextField *label = [self preferencePanelSliderLabelForText:title aligned:NSTextAlignmentNatural andFrame:NSZeroRect];
 	CGFloat labelHeight = ceil([label fittingSize].height);
-	[label setFrame:NSMakeRect(8, recorderMidY - labelHeight / 2.0, 180, labelHeight)];
+	[label setFrame:NSMakeRect(0, recorderMidY - labelHeight / 2.0, 180, labelHeight)];
 	[newRow addSubview:label];
 	[label release];
 
 	NSButton *restoreButton = [self restoreDefaultButtonWithIdentifier:@"restoreDefaultSearchHotkey"
 	                                               accessibilityLabel:[@"Restore default " stringByAppendingString:[[title lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@": "]]]];
-	[restoreButton setFrame:NSMakeRect(restoreX, recorderMidY - FlycutRestoreArrowSide / 2.0, FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
+	[restoreButton setFrame:NSMakeRect(0, recorderMidY - FlycutRestoreArrowSide / 2.0, FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
 	[newRow addSubview:restoreButton];
 
 	return newRow;
@@ -1522,6 +1531,41 @@ static NSString *FlycutFolderButtonTitle(NSButton *button, NSString *name)
 	return @"\u2026";
 }
 
+// The controls of one group of labelled rows start on one column, the gap
+// after the group's widest label, as the folder buttons do: the control
+// behind the widest label keeps its NIB constraint "leading = label.trailing
+// + c", the other one starts where it starts instead of after its own label
+// (General: the Save pop-up with the Remember field, the data types field with
+// the lengths field). Nothing pulls on the labels or on the controls' widths.
+static void FlycutAlignControlsOnOneColumn(NSView *pane, NSView *first, NSView *second)
+{
+	NSMutableArray *ties = [NSMutableArray array];
+	for (NSView *control in @[first ?: (id)[NSNull null], second ?: (id)[NSNull null]]) {
+		if (![control isKindOfClass:[NSView class]] || [control superview] != pane || [control translatesAutoresizingMaskIntoConstraints])
+			return;
+		NSLayoutConstraint *tie = nil;
+		for (NSLayoutConstraint *constraint in [pane constraints])
+			if ([constraint isActive] && [constraint firstItem] == control && [constraint firstAttribute] == NSLayoutAttributeLeading &&
+			    [constraint relation] == NSLayoutRelationEqual && [constraint secondAttribute] == NSLayoutAttributeTrailing &&
+			    [[constraint secondItem] isKindOfClass:[NSView class]])
+				tie = constraint;
+		if (tie == nil)
+			return;
+		[ties addObject:tie];
+	}
+	[pane layoutSubtreeIfNeeded];
+	CGFloat ends[2];
+	for (NSUInteger i = 0; i < 2; i++) {
+		NSView *label = [ties[i] secondItem];
+		ends[i] = NSMaxX([label alignmentRectForFrame:[label frame]]) + [ties[i] constant];
+	}
+	NSUInteger anchor = ends[1] > ends[0] ? 1 : 0;
+	NSLayoutConstraint *moved = ties[1 - anchor];
+	[moved setActive:NO];
+	[pane addConstraint:[NSLayoutConstraint constraintWithItem:[moved firstItem] attribute:NSLayoutAttributeLeading
+	                                                 relatedBy:NSLayoutRelationEqual toItem:[ties[anchor] firstItem]
+	                                                 attribute:NSLayoutAttributeLeading multiplier:1 constant:0]];
+}
 // The two folder buttons share their left edge (the one further right) and
 // their width (the wider one's), so their arrows stand in one column. Each
 // button's NIB constraint "leading = label.trailing + c" only holds it at
@@ -1570,7 +1614,8 @@ static NSControl *FlycutBoundControl(NSView *pane, NSString *key, Class kind)
 	NSString *keyPath = [@"values." stringByAppendingString:key];
 	for (NSView *view in [pane subviews]) {
 		if ([view isKindOfClass:kind] &&
-		    [[[view infoForBinding:NSValueBinding] objectForKey:NSObservedKeyPathKey] isEqualToString:keyPath])
+		    ([[[view infoForBinding:NSValueBinding] objectForKey:NSObservedKeyPathKey] isEqualToString:keyPath] ||
+		     [[[view infoForBinding:NSSelectedIndexBinding] objectForKey:NSObservedKeyPathKey] isEqualToString:keyPath]))
 			return (NSControl *)view;
 	}
 	return nil;
@@ -1624,11 +1669,9 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 	[button setFrame:NSMakeRect(NSMaxX(recorderFrame) + FlycutRestoreArrowGap, NSMidY(recorderFrame) - FlycutRestoreArrowSide / 2.0,
 	                            FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
 	[button setAutoresizingMask:[mainRecorder autoresizingMask]];
-	// The help text starts right after the recorder; it says what the arrow
-	// does, moves over and grows downwards.
+	// The help text says what the arrow does.
 	for (NSView *view in [pane subviews]) {
-		NSRect frame = [view frame];
-		if (![view isKindOfClass:[NSTextField class]] || NSMinX(frame) < NSMaxX(recorderFrame))
+		if (![view isKindOfClass:[NSTextField class]] || NSMinX([view frame]) < NSMaxX(recorderFrame))
 			continue;
 		NSTextField *help = (NSTextField *)view;
 		NSString *text = [help stringValue];
@@ -1637,17 +1680,9 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		if (end.location != NSNotFound && [text rangeOfString:@"arrow"].location == NSNotFound)
 			[help setStringValue:[text stringByReplacingCharactersInRange:end
 			                                                    withString:[clear stringByAppendingString:@" To go back to the default, click the arrow that appears next to a changed hotkey."]]];
-		CGFloat shift = MAX(0.0, NSMaxX([button frame]) + 8 - NSMinX(frame));
-		frame.origin.x += shift;
-		frame.size.width -= shift;
-		CGFloat neededHeight = ceil([[help cell] cellSizeForBounds:NSMakeRect(0, 0, NSWidth(frame), CGFLOAT_MAX)].height);
-		if (neededHeight > NSHeight(frame)) {
-			frame.origin.y -= neededHeight - NSHeight(frame);
-			frame.size.height = neededHeight;
-		}
-		[view setFrame:frame];
 	}
 	[pane addSubview:button];
+	[self layOutHotkeysPaneForWidth:NSWidth([FlycutPaneRoot(pane) bounds])];
 }
 
 // The NIB gives these controls no accessibility label, so VoiceOver said only
@@ -1701,6 +1736,10 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		observer = [[FlycutRestoreDefaultsObserver alloc] initWithController:self];
 	const CGFloat side = FlycutRestoreArrowSide, gap = FlycutRestoreArrowGap, margin = 16.0;
 	FlycutAlignFolderButtons(pane, saveToLocationButton, autoSaveToLocationButton);
+	FlycutAlignControlsOnOneColumn(pane, FlycutBoundControl(pane, @"savePreference", [NSPopUpButton class]),
+	                               FlycutBoundControl(pane, @"rememberNum", [NSTextField class]));
+	FlycutAlignControlsOnOneColumn(pane, FlycutBoundControl(pane, @"skipPboardTypesList", [NSTextField class]),
+	                               FlycutBoundControl(pane, @"skipPasswordLengthsList", [NSTextField class]));
 	FlycutPutFolderOptionsBelow(pane, autoSaveToLocationButton, (NSButton *)FlycutBoundControl(pane, @"saveForgottenClippings", [NSButton class]),
 	                            (NSButton *)FlycutBoundControl(pane, @"saveForgottenFavorites", [NSButton class]));
 	FlycutLetFolderButtonFillItsRow(saveToLocationButton);
@@ -2078,9 +2117,12 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 	NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 	SRRecorderControl *recorder = [self restoreDefaultRecorderForIdentifier:identifier];
 	NSTextField *field = (NSTextField *)FlycutBoundControl([savingSectionLabel superview], key, [NSTextField class]);
+	// The slider bound to the arrow's key (to the user defaults themselves);
+	// Appearance's rows share one view.
 	NSSlider *slider = nil;
 	for (NSView *view in [[sender superview] subviews])
-		if ([view isKindOfClass:[NSSlider class]])
+		if ([view isKindOfClass:[NSSlider class]] &&
+		    [[[view infoForBinding:NSValueBinding] objectForKey:NSObservedKeyPathKey] isEqualToString:key])
 			slider = (NSSlider *)view;
 
 	if ([key hasPrefix:@"ShortcutRecorder "]) {
@@ -2139,6 +2181,303 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 	}
 }
 
+#pragma mark - Pane layout (the rules above FlycutPaneMargin)
+
+// The view a pane is measured in: the tab view item's view (also while its
+// tab is not shown and it has no superview), else the topmost view.
+static NSView *FlycutPaneRoot(NSView *view)
+{
+	NSView *root = view;
+	while ([root superview] != nil && ![[root superview] isKindOfClass:[NSTabView class]])
+		root = [root superview];
+	return root;
+}
+
+static BOOL FlycutIsLabel(NSView *view)
+{
+	return [view isKindOfClass:[NSTextField class]] && ![(NSTextField *)view isEditable] && ![(NSTextField *)view isBezeled];
+}
+
+static BOOL FlycutIsRestoreArrow(NSView *view)
+{
+	return [view isKindOfClass:[NSButton class]] && [[view identifier] hasPrefix:@"restoreDefault"];
+}
+
+// A view's size by its alignment rect with all of its content on one line: a
+// label as wide as its text, a checkbox as its box and title, other controls
+// as they are.
+static NSSize FlycutNaturalSize(NSView *view)
+{
+	if (FlycutIsLabel(view)) {
+		NSTextField *label = (NSTextField *)view;
+		CGFloat text = ceil([[label attributedStringValue] size].width);
+		CGFloat frameWidth = NSWidth([label frameForAlignmentRect:NSMakeRect(0, 0, text, 10)]);
+		CGFloat height = ceil([[label cell] cellSizeForBounds:NSMakeRect(0, 0, CGFLOAT_MAX, CGFLOAT_MAX)].height);
+		return [label alignmentRectForFrame:NSMakeRect(0, 0, frameWidth, height)].size;
+	}
+	if ([view isKindOfClass:[NSButton class]] && [[(NSButton *)view cell] showsStateBy] != NSNoCellMask) {
+		NSSize fitting = [view fittingSize];
+		return [view alignmentRectForFrame:NSMakeRect(0, 0, ceil(fitting.width), fitting.height)].size;
+	}
+	return [view alignmentRectForFrame:[view frame]].size;
+}
+
+// How tall a wrapping label is at an alignment width.
+static CGFloat FlycutWrappedHeight(NSTextField *label, CGFloat width)
+{
+	CGFloat frameWidth = NSWidth([label frameForAlignmentRect:NSMakeRect(0, 0, width, 10)]);
+	CGFloat height = ceil([[label cell] cellSizeForBounds:NSMakeRect(0, 0, frameWidth, CGFLOAT_MAX)].height);
+	return NSHeight([label alignmentRectForFrame:NSMakeRect(0, 0, frameWidth, height)]);
+}
+
+// One line of a pane, gap points below the line above it (or the pane's top):
+// its views, each at its x with its width (alignment rects in the pane's root
+// view; a width of 0 keeps the natural one), centred on the line. A wrapping
+// line holds one label that wraps at its width.
+static NSDictionary *FlycutLine(CGFloat gap, NSArray *views, NSArray *xs, NSArray *widths, BOOL wraps)
+{
+	return @{@"gap": @(gap), @"views": views, @"xs": xs, @"widths": widths, @"wraps": @(wraps)};
+}
+
+static CGFloat FlycutLineHeight(NSDictionary *line)
+{
+	NSArray *views = line[@"views"], *widths = line[@"widths"];
+	CGFloat height = 0.0;
+	for (NSUInteger i = 0; i < [views count]; i++) {
+		NSView *view = views[i];
+		if (FlycutIsRestoreArrow(view))
+			continue;
+		height = MAX(height, [line[@"wraps"] boolValue] ? FlycutWrappedHeight((NSTextField *)view, [widths[i] doubleValue])
+		                                                 : FlycutNaturalSize(view).height);
+	}
+	return height;
+}
+
+// Places a line whose top edge is at top (root coordinates). An arrow goes by
+// its frame: its alignment rect changes with its state.
+static void FlycutPlaceLine(NSDictionary *line, CGFloat top, NSView *root)
+{
+	NSArray *views = line[@"views"], *xs = line[@"xs"], *widths = line[@"widths"];
+	CGFloat height = FlycutLineHeight(line);
+	for (NSUInteger i = 0; i < [views count]; i++) {
+		NSView *view = views[i];
+		BOOL arrow = FlycutIsRestoreArrow(view);
+		NSSize natural = arrow ? NSMakeSize(FlycutRestoreArrowSide, FlycutRestoreArrowSide) : FlycutNaturalSize(view);
+		CGFloat width = [widths[i] doubleValue] > 0.0 ? [widths[i] doubleValue] : natural.width;
+		CGFloat h = [line[@"wraps"] boolValue] ? height : natural.height;
+		NSRect rect = [[view superview] convertRect:NSMakeRect([xs[i] doubleValue], top - height / 2.0 - h / 2.0, width, h) fromView:root];
+		[view setFrame:arrow ? rect : [view frameForAlignmentRect:rect]];
+	}
+}
+
+// Lays out lines from the top of box down and gives box the height they need
+// (the window takes a pane's box height when the pane is shown).
+static void FlycutPlaceLines(NSArray *lines, NSView *box, NSView *root)
+{
+	// Measured in the box's content area (a box with a border or title keeps
+	// its chrome; the panes' boxes have none).
+	NSView *inner = [box isKindOfClass:[NSBox class]] ? [(NSBox *)box contentView] : box;
+	CGFloat chrome = NSHeight([box frame]) - NSHeight([inner frame]);
+	CGFloat height = FlycutSectionGap;
+	for (NSDictionary *line in lines)
+		height += [line[@"gap"] doubleValue] + FlycutLineHeight(line);
+	[box setFrameSize:NSMakeSize(NSWidth([box frame]), ceil(height) + chrome)];
+	CGFloat top = NSMaxY([root convertRect:[inner bounds] fromView:inner]);
+	for (NSDictionary *line in lines) {
+		top -= [line[@"gap"] doubleValue];
+		FlycutPlaceLine(line, top, root);
+		top -= FlycutLineHeight(line);
+	}
+}
+
+static NSView *FlycutViewOfClass(NSArray *views, Class kind)
+{
+	for (NSView *view in views)
+		if ([view isKindOfClass:kind])
+			return view;
+	return nil;
+}
+
+static NSTextField *FlycutLabelAligned(NSArray *views, NSTextAlignment alignment)
+{
+	for (NSView *view in views)
+		if (FlycutIsLabel(view) && [(NSTextField *)view alignment] == alignment)
+			return (NSTextField *)view;
+	return nil;
+}
+
+// Appearance's rows are built in code, each in a box of its own. Their
+// controls move into the panel itself, row by row (the order VoiceOver reads
+// them in), the boxes go, and the pane is laid out by the rules above
+// FlycutPaneMargin: the three sliders and the search hotkey are one group of
+// labelled rows; the labels at a slider's ends stand under its two ends; the
+// checkboxes follow a section gap below; the colour options and their hint
+// keep their places under the last checkbox's title, a row gap apart.
+-(void)layOutAppearancePane
+{
+	NSView *content = [appearancePanel contentView];
+	if (content == nil)
+		return;
+	NSMutableArray *rows = [NSMutableArray array];
+	for (NSView *row in [[[content subviews] copy] autorelease]) {
+		if (![row isKindOfClass:[NSBox class]])
+			continue;
+		NSArray *views = [[[[(NSBox *)row contentView] subviews] copy] autorelease];
+		for (NSView *view in views) {
+			NSRect frame = [content convertRect:[view frame] fromView:[view superview]];
+			[view retain];
+			[view removeFromSuperview];
+			[content addSubview:view];
+			[view release];
+			[view setAutoresizingMask:NSViewNotSizable];
+			[view setFrame:frame];
+		}
+		[row removeFromSuperview];
+		[rows addObject:views];
+	}
+	[content setAutoresizesSubviews:NO];
+	NSView *root = FlycutPaneRoot(appearancePanel);
+	CGFloat left = FlycutPaneMargin;
+	CGFloat arrowX = NSWidth([root bounds]) - FlycutPaneMargin - FlycutRestoreArrowSide;
+	CGFloat column = left;
+	for (NSArray *views in rows) {
+		NSTextField *label = FlycutLabelAligned(views, NSTextAlignmentNatural);
+		if (label != nil && (FlycutViewOfClass(views, [NSSlider class]) != nil || FlycutViewOfClass(views, [SRRecorderControl class]) != nil))
+			column = MAX(column, left + FlycutNaturalSize(label).width + FlycutLabelGap);
+	}
+	CGFloat width = arrowX - FlycutRestoreArrowGap - column;
+	NSMutableArray *lines = [NSMutableArray array];
+	BOOL afterLabelledRows = NO;
+	for (NSArray *views in rows) {
+		CGFloat gap = [lines count] == 0 ? FlycutSectionGap : FlycutRowGap;
+		NSView *control = FlycutViewOfClass(views, [NSSlider class]) ?: FlycutViewOfClass(views, [SRRecorderControl class]);
+		NSTextField *label = FlycutLabelAligned(views, NSTextAlignmentNatural);
+		NSView *arrow = nil;
+		for (NSView *view in views)
+			if (FlycutIsRestoreArrow(view))
+				arrow = view;
+		if (control != nil && label != nil && arrow != nil) {
+			[lines addObject:FlycutLine(gap, @[label, control, arrow], @[@(left), @(column), @(arrowX)], @[@0, @(width), @0], NO)];
+			NSTextField *minLabel = FlycutLabelAligned(views, NSTextAlignmentLeft), *maxLabel = FlycutLabelAligned(views, NSTextAlignmentRight);
+			if (minLabel != nil && maxLabel != nil)
+				[lines addObject:FlycutLine(FlycutSliderEndLabelGap, @[minLabel, maxLabel],
+				                            @[@(column), @(column + width - FlycutNaturalSize(maxLabel).width)], @[@0, @0], NO)];
+			afterLabelledRows = YES;
+			continue;
+		}
+		NSButton *checkbox = (NSButton *)FlycutViewOfClass(views, [NSButton class]);
+		if (checkbox == nil)
+			continue;
+		if (afterLabelledRows)
+			gap = FlycutSectionGap;
+		afterLabelledRows = NO;
+		CGFloat dx = left - NSMinX([root convertRect:[checkbox alignmentRectForFrame:[checkbox frame]] fromView:[checkbox superview]]);
+		[lines addObject:FlycutLine(gap, @[checkbox], @[@(left)], @[@0], NO)];
+		// The views under the checkbox, line by line from the top, where the
+		// row put them relative to the checkbox.
+		NSMutableArray *rest = [NSMutableArray arrayWithArray:views];
+		[rest removeObject:checkbox];
+		[rest sortUsingComparator:^NSComparisonResult(NSView *a, NSView *b) {
+			CGFloat ya = NSMidY([a frame]), yb = NSMidY([b frame]);
+			return ya > yb + 2.0 ? NSOrderedAscending : (yb > ya + 2.0 ? NSOrderedDescending :
+			       (NSMinX([a frame]) < NSMinX([b frame]) ? NSOrderedAscending : NSOrderedDescending));
+		}];
+		while ([rest count] > 0) {
+			NSMutableArray *same = [NSMutableArray array], *xs = [NSMutableArray array], *zeros = [NSMutableArray array];
+			CGFloat midY = NSMidY([rest[0] frame]);
+			for (NSView *view in rest)
+				if (fabs(NSMidY([view frame]) - midY) <= 2.0) {
+					[same addObject:view];
+					[xs addObject:@(NSMinX([root convertRect:[view alignmentRectForFrame:[view frame]] fromView:[view superview]]) + dx)];
+					[zeros addObject:@0];
+				}
+			[rest removeObjectsInArray:same];
+			[lines addObject:FlycutLine(FlycutRowGap, same, xs, zeros, NO)];
+		}
+	}
+	FlycutPlaceLines(lines, appearancePanel, root);
+}
+
+// Lays the Hotkeys pane out by the rules above FlycutPaneMargin for a pane
+// width points wide: every recorder on a line of its own with the label in
+// front of it and its Restore Default arrow behind it; the recorders start
+// on one column after the widest label and end before the arrows; the help
+// text below them starts where they start and wraps at the right margin. The
+// pane's box takes the height that needs; a window that shows the pane
+// follows (UKPrefsPanel sizes it to a pane's box when the pane changes).
+-(void)layOutHotkeysPaneForWidth:(CGFloat)width
+{
+	NSView *pane = [mainRecorder superview];
+	NSBox *box = (NSBox *)[pane superview];
+	if (pane == nil || ![box isKindOfClass:[NSBox class]] || width <= 0.0)
+		return;
+	NSView *root = FlycutPaneRoot(box);
+	NSMutableArray *recorders = [NSMutableArray array], *labels = [NSMutableArray array], *arrows = [NSMutableArray array];
+	for (NSView *view in [pane subviews])
+		if ([view isKindOfClass:[SRRecorderControl class]])
+			[recorders addObject:view];
+	[recorders sortUsingComparator:^NSComparisonResult(NSView *a, NSView *b) {
+		return NSMidY([a frame]) > NSMidY([b frame]) ? NSOrderedAscending : NSOrderedDescending;
+	}];
+	for (NSView *recorder in recorders) {
+		NSView *label = nil, *arrow = nil;
+		CGFloat y = NSMidY([recorder frame]);
+		for (NSView *view in [pane subviews]) {
+			if (FlycutIsLabel(view) && NSMaxX([view frame]) <= NSMinX([recorder frame]) + 0.5 &&
+			    (label == nil || fabs(NSMidY([view frame]) - y) < fabs(NSMidY([label frame]) - y)))
+				label = view;
+			if (FlycutIsRestoreArrow(view) && (arrow == nil || fabs(NSMidY([view frame]) - y) < fabs(NSMidY([arrow frame]) - y)))
+				arrow = view;
+		}
+		if (label == nil || arrow == nil || [labels containsObject:label] || [arrows containsObject:arrow])
+			return;
+		[labels addObject:label];
+		[arrows addObject:arrow];
+	}
+	NSTextField *help = nil;
+	for (NSView *view in [pane subviews])
+		if (FlycutIsLabel(view) && ![labels containsObject:view])
+			help = (NSTextField *)view;
+	CGFloat left = FlycutPaneMargin, arrowX = width - FlycutPaneMargin - FlycutRestoreArrowSide, column = left;
+	for (NSTextField *label in labels) {
+		// The NIB's title is "Main Hotkey" with a line break, two lines high.
+		NSString *text = [[label stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+		if (![text isEqualToString:[label stringValue]])
+			[label setStringValue:text];
+		column = MAX(column, left + FlycutNaturalSize(label).width + FlycutLabelGap);
+	}
+	NSMutableArray *lines = [NSMutableArray array];
+	for (NSUInteger i = 0; i < [recorders count]; i++)
+		[lines addObject:FlycutLine(i == 0 ? FlycutSectionGap : FlycutRowGap, @[labels[i], recorders[i], arrows[i]],
+		                            @[@(left), @(column), @(arrowX)], @[@0, @(arrowX - FlycutRestoreArrowGap - column), @0], NO)];
+	if (help != nil)
+		[lines addObject:FlycutLine(FlycutRowGap, @[help], @[@(column)], @[@(width - FlycutPaneMargin - column)], YES)];
+	CGFloat before = NSHeight([box frame]);
+	[pane setAutoresizesSubviews:NO];
+	FlycutPlaceLines(lines, box, root);
+	CGFloat grow = NSHeight([box frame]) - before;
+	NSWindow *window = [pane window];
+	if (window != nil && grow != 0.0 && fabs(NSHeight([[window contentView] frame]) - before) < 0.5) {
+		NSRect frame = [window frame];
+		frame.origin.y -= grow;
+		frame.size.height += grow;
+		[window setFrame:frame display:NO];
+	}
+}
+
+// The Acknowledgements text has the margins of the other panes, 16 pt on both
+// sides (13 in the NIB); the window's width rule lets it span the rest.
+-(void)buildAcknowledgementsMargins
+{
+	NSScrollView *scrollView = [acknowledgementsView enclosingScrollView];
+	NSView *root = FlycutPaneRoot(scrollView);
+	if (scrollView == nil || root == scrollView)
+		return;
+	NSRect edges = [root convertRect:[scrollView alignmentRectForFrame:[scrollView frame]] fromView:[scrollView superview]];
+	edges.origin.x = FlycutPaneMargin;
+	edges.size.width = NSWidth([root bounds]) - 2.0 * FlycutPaneMargin;
+	[scrollView setFrame:[scrollView frameForAlignmentRect:[[scrollView superview] convertRect:edges fromView:root]]];
+}
 -(void) buildAppearancesPreferencePanel
 {
 	if (menuIconCustomColorsCheckbox != nil)
@@ -2224,37 +2563,7 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
     [appearancePanel addSubview:row];
     nextYMax = row.frame.origin.y;
     
-    // Size against the NSBox content view, not its outer frame. AppKit gives
-    // NSBox a smaller inset content area; using the outer height placed the
-    // final row at a negative y-coordinate and clipped its button.
-    NSView *panelContentView = [appearancePanel contentView];
-    NSArray *appearanceRows = [[panelContentView subviews] copy];
-    NSRect rowUnion = NSZeroRect;
-    BOOL hasRows = NO;
-    for (NSView *appearanceRow in appearanceRows) {
-        rowUnion = hasRows ? NSUnionRect(rowUnion, [appearanceRow frame]) : [appearanceRow frame];
-        hasRows = YES;
-    }
-    if (hasRows) {
-        const CGFloat panelVerticalPadding = 8.0;
-        NSRect contentBounds = [panelContentView bounds];
-        CGFloat requiredContentHeight = NSHeight(rowUnion) + (2.0 * panelVerticalPadding);
-        CGFloat heightDelta = requiredContentHeight - NSHeight(contentBounds);
-        if (heightDelta > 0.0) {
-            NSRect resizedPanelFrame = [appearancePanel frame];
-            resizedPanelFrame.size.height += heightDelta;
-            [appearancePanel setFrame:resizedPanelFrame];
-            contentBounds = [panelContentView bounds];
-        }
-
-        CGFloat rowOffset = NSMaxY(contentBounds) - panelVerticalPadding - NSMaxY(rowUnion);
-        for (NSView *appearanceRow in appearanceRows) {
-            NSRect rowFrame = [appearanceRow frame];
-            rowFrame.origin.y += rowOffset;
-            [appearanceRow setFrame:rowFrame];
-        }
-    }
-    [appearanceRows release];
+    [self layOutAppearancePane];
 
     (void)nextYMax;
     
@@ -2268,15 +2577,15 @@ static BOOL FlycutLabelWraps(NSView *view)
 }
 
 // Controls that can take any width: they follow the window's width instead of
-// setting it. On Appearance the Restore Default arrows stand in a column at the
-// right; the sliders, the search recorder and the right-aligned slider labels
-// hang on it.
-static BOOL FlycutFollowsWindowWidth(NSView *view, BOOL inAppearance)
+// setting it. On Appearance and Hotkeys the Restore Default arrows stand in a
+// column at the right; the sliders, the recorders and the right-aligned slider
+// labels hang on it.
+static BOOL FlycutFollowsWindowWidth(NSView *view, BOOL arrowColumn)
 {
 	if ([view isKindOfClass:[NSSlider class]] || [view isKindOfClass:[NSScrollView class]] || [view isKindOfClass:[NSBox class]] ||
 	    FlycutLabelWraps(view))
 		return YES;
-	if (!inAppearance)
+	if (!arrowColumn)
 		return NO;
 	if ([[view identifier] hasPrefix:@"restoreDefault"] || [view isKindOfClass:[SRRecorderControl class]])
 		return YES;
@@ -2311,7 +2620,7 @@ static CGFloat FlycutContentMaxX(NSView *view)
 // arrow that appears with a changed value must not be cut off). leftmost gets
 // the pane's left inset (alignment rects), rightmost the right edge of its
 // fixed content, both in the pane's own coordinates.
-static void FlycutCollectPaneLeaves(NSView *container, NSView *pane, BOOL inAppearance, CGFloat *leftmost, CGFloat *rightmost,
+static void FlycutCollectPaneLeaves(NSView *container, NSView *pane, BOOL arrowColumn, CGFloat *leftmost, CGFloat *rightmost,
                                     NSMutableArray *leaves)
 {
 	for (NSView *view in [container subviews]) {
@@ -2322,13 +2631,13 @@ static void FlycutCollectPaneLeaves(NSView *container, NSView *pane, BOOL inAppe
 		BOOL holdsViews = isBox ? [(NSBox *)view boxType] != NSBoxSeparator
 		                        : ([view isMemberOfClass:[NSView class]] && [[view subviews] count] > 0);
 		if (holdsViews) {
-			FlycutCollectPaneLeaves(isBox ? [(NSBox *)view contentView] : view, pane, inAppearance, leftmost, rightmost, leaves);
+			FlycutCollectPaneLeaves(isBox ? [(NSBox *)view contentView] : view, pane, arrowColumn, leftmost, rightmost, leaves);
 			continue;
 		}
 		[leaves addObject:view];
 		NSRect edges = [pane convertRect:[view alignmentRectForFrame:[view frame]] fromView:[view superview]];
 		*leftmost = MIN(*leftmost, NSMinX(edges));
-		if (FlycutFollowsWindowWidth(view, inAppearance))
+		if (FlycutFollowsWindowWidth(view, arrowColumn))
 			continue;
 		NSRect content = [view frame];
 		content.size.width = FlycutContentMaxX(view) - NSMinX(content);
@@ -2340,10 +2649,10 @@ static void FlycutCollectPaneLeaves(NSView *container, NSView *pane, BOOL inAppe
 // width ends there, and a fixed control whose edges reach past it (a
 // checkbox as wide as its row) ends there too; its content fits, the window
 // is as wide as that. Controls placed by constraints follow their pane.
-static void FlycutFitPaneLeavesToRight(NSView *pane, CGFloat right, NSArray *leaves, BOOL inAppearance)
+static void FlycutFitPaneLeavesToRight(NSView *pane, CGFloat right, NSArray *leaves, BOOL arrowColumn)
 {
-	CGFloat column = 0.0;     // Appearance: where its arrow column ends now
-	if (inAppearance)
+	CGFloat column = 0.0;     // Appearance, Hotkeys: where the arrow column ends now
+	if (arrowColumn)
 		for (NSView *view in leaves)
 			if ([[view identifier] hasPrefix:@"restoreDefault"])
 				column = MAX(column, NSMaxX([pane convertRect:[view frame] fromView:[view superview]]));
@@ -2353,7 +2662,7 @@ static void FlycutFitPaneLeavesToRight(NSView *pane, CGFloat right, NSArray *lea
 			continue;
 		NSRect frame = [view frame];
 		CGFloat edge = NSMaxX([pane convertRect:[view alignmentRectForFrame:frame] fromView:[view superview]]);
-		if (!FlycutFollowsWindowWidth(view, inAppearance)) {
+		if (!FlycutFollowsWindowWidth(view, arrowColumn)) {
 			// By its edges (a label's text, a checkbox's box and title), not its
 			// frame: the 2 pt a label keeps free may reach past the content.
 			if (edge > right + 0.5)
@@ -2364,9 +2673,9 @@ static void FlycutFitPaneLeavesToRight(NSView *pane, CGFloat right, NSArray *lea
 			CGFloat height = MAX(NSHeight(frame), ceil([[(NSTextField *)view cell] cellSizeForBounds:NSMakeRect(0, 0, width, CGFLOAT_MAX)].height));
 			frame.origin.y += NSHeight(frame) - height;
 			frame.size = NSMakeSize(width, height);
-		} else if (inAppearance && ([view isKindOfClass:[NSSlider class]] || [view isKindOfClass:[SRRecorderControl class]])) {
+		} else if (arrowColumn && ([view isKindOfClass:[NSSlider class]] || [view isKindOfClass:[SRRecorderControl class]])) {
 			frame.size.width += shift;
-		} else if (inAppearance) {
+		} else if (arrowColumn) {
 			frame.origin.x += shift;     // an arrow, or a label ending at its slider's end
 		} else {
 			frame.size.width += right - edge;
@@ -2404,14 +2713,15 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	for (NSTabViewItem *item in [tabView tabViewItems]) {
 		NSView *pane = [item view];
 		[pane layoutSubtreeIfNeeded];
-		BOOL inAppearance = appearancePanel != nil && [appearancePanel isDescendantOf:pane];
+		BOOL arrowColumn = (appearancePanel != nil && [appearancePanel isDescendantOf:pane]) ||
+		                   (mainRecorder != nil && [mainRecorder isDescendantOf:pane]);
 		CGFloat leftmost = CGFLOAT_MAX, rightmost = 0.0;
 		NSMutableArray *leaves = [NSMutableArray array];
-		FlycutCollectPaneLeaves(pane, pane, inAppearance, &leftmost, &rightmost, leaves);
+		FlycutCollectPaneLeaves(pane, pane, arrowColumn, &leftmost, &rightmost, leaves);
 		if (rightmost > 0.0)
 			width = MAX(width, ceil(rightmost + leftmost));
 		if ([leaves count] > 0)
-			[panes addObject:@[pane, @(leftmost), leaves, @(inAppearance)]];
+			[panes addObject:@[pane, @(leftmost), leaves, @(arrowColumn)]];
 	}
 	if (width <= 0.0)
 		return;
@@ -2423,6 +2733,8 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	NSRect fitted = [prefsPanel frameRectForContentRect:content];
 	fitted.origin.x = NSMidX(original) - NSWidth(fitted) / 2.0;
 	[prefsPanel setFrame:fitted display:NO animate:NO];
+	// The Hotkeys help text wraps at the new width; its pane may need a line more.
+	[self layOutHotkeysPaneForWidth:width];
 	[[prefsPanel contentView] layoutSubtreeIfNeeded];
 }
 

@@ -281,7 +281,6 @@ int main(void)
         AppController *controller = [[AppController alloc] init];
         NSBox *panel = [[[NSBox alloc] initWithFrame:NSMakeRect(0, 0, __APPEARANCE_PANEL_WIDTH__, 350)] autorelease];
         [controller setValue:panel forKey:@"appearancePanel"];
-        CGFloat originalHeight = [panel frame].size.height;
         [controller buildAppearancesPreferencePanel];
 
         NSButton *checkbox = (NSButton *)FindView(panel, @"menuIconCustomColorsCheckbox");
@@ -294,8 +293,7 @@ int main(void)
             fprintf(stderr, "appearance panel is missing native state-color controls or previews\n");
             return 21;
         }
-        if ([panel frame].size.height <= originalHeight ||
-            !NSContainsRect([panel bounds], [[checkbox superview] frame])) {
+        if (!NSContainsRect([panel bounds], [[checkbox superview] frame])) {
             fprintf(stderr, "state-color row is clipped by the appearance panel\n");
             return 22;
         }
@@ -1045,14 +1043,16 @@ class MenuBarIconColorRegressionTests(unittest.TestCase):
 
     def test_appearance_rows_share_one_inset_constant(self) -> None:
         source = (ROOT / "AppController.m").read_text()
-        self.assertEqual(source.count("static const CGFloat FlycutAppearanceRowInset = "), 1)
+        # One margin for every pane; Appearance's own row inset is gone.
+        self.assertEqual(source.count("static const CGFloat FlycutPaneMargin = 16.0;"), 1)
+        self.assertNotIn("FlycutAppearanceRowInset", source)
         start = source.index("-(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY\n{")
         body = source[start:source.index("\n}\n", start)]
-        # The left edge (hint, checkbox) comes from the shared inset; the colour options start at the
-        # checkbox title, on their own line, and no longer hang on the row's right edge.
-        self.assertIn("rowLabelX = FlycutAppearanceRowInset;", body)
+        # The row is built from x 0 and moved to the margin by the pane's layout; the colour options
+        # start at the checkbox title, on their own line, and do not hang on the row's right edge.
+        self.assertIn("rowLabelX = 0.0;", body)
         self.assertIn("titleRectForBounds:", body)
-        self.assertNotIn("contentWidth - FlycutAppearanceRowInset - previewSide", body)
+        self.assertNotIn("contentWidth", body)
 
 
 if __name__ == "__main__":
