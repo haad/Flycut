@@ -4,8 +4,10 @@
 Every native fixture of the menu-bar test modules imports
 Tests/Fixtures/FixtureIsolation.h. These tests pin that rule and check the
 header itself: defaults stay in process memory, writes that reach a real
-NSUserDefaults object stop the fixture, and the status-item stand-in is an
-off-screen, non-activating panel that is never shown.
+NSUserDefaults object stop the fixture, the status-item stand-in is an
+off-screen, non-activating panel that is never shown, and every window lays
+out at the same backing scale whatever screen it would be on (a 1x screen next
+to a 2x one is what a session sees while another account has the console).
 """
 
 from __future__ import annotations
@@ -101,6 +103,48 @@ static int Trip(void)
     return 31;
 }
 
+static CGFloat OneX(id self, SEL _cmd)
+{
+    (void)self;
+    (void)_cmd;
+    return 1.0;
+}
+
+// Screens and windows answer -backingScaleFactor through one fixed function. Then every
+// screen is made to report 1x, as a session's main screen can, and a window lays out a
+// label and a checkbox after it: the numbers that depend on the scale are printed.
+static int Scale(void)
+{
+    SEL selector = @selector(backingScaleFactor);
+    IMP screen = class_getMethodImplementation([NSScreen class], selector);
+    BOOL pinned = screen == class_getMethodImplementation([NSWindow class], selector);
+    CGFloat fixed = pinned ? ((CGFloat (*)(id, SEL))screen)(nil, selector) : 0.0;
+    method_setImplementation(class_getInstanceMethod([NSScreen class], selector), (IMP)OneX);
+    [NSApplication sharedApplication];
+    NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(-10000.0, -10000.0, 400.0, 60.0)
+                                                   styleMask:NSWindowStyleMaskBorderless
+                                                     backing:NSBackingStoreBuffered defer:NO];
+    NSView *content = [window contentView];
+    NSTextField *label = [NSTextField labelWithString:@"Remember:"];
+    NSButton *box = [NSButton checkboxWithTitle:@"Receive" target:nil action:nil];
+    for (NSView *view in @[label, box]) {
+        [view setTranslatesAutoresizingMaskIntoConstraints:NO];
+        [content addSubview:view];
+    }
+    [NSLayoutConstraint activateConstraints:@[
+        [[label leadingAnchor] constraintEqualToAnchor:[content leadingAnchor] constant:20.0],
+        [[label topAnchor] constraintEqualToAnchor:[content topAnchor] constant:10.0],
+        [[box leadingAnchor] constraintEqualToAnchor:[label trailingAnchor] constant:8.0],
+        [[box topAnchor] constraintEqualToAnchor:[content topAnchor] constant:10.0]]];
+    [content layoutSubtreeIfNeeded];
+    NSRect aligned = [content backingAlignedRect:NSMakeRect(0.25, 0.0, 10.25, 1.0) options:NSAlignAllEdgesNearest];
+    printf("FIXTURE_SCALE pinned=%d fixed=%.2f window=%.2f label=%.2f box=%.2f aligned=%.2f,%.2f\n",
+           pinned, fixed, [window backingScaleFactor], NSWidth([label frame]), NSMinX([box frame]),
+           NSMinX(aligned), NSWidth(aligned));
+    [window release];
+    return 0;
+}
+
 int main(int argc, const char **argv)
 {
     @autoreleasepool {
@@ -108,6 +152,8 @@ int main(int argc, const char **argv)
             return Check();
         if (argc == 2 && strcmp(argv[1], "trip") == 0)
             return Trip();
+        if (argc == 2 && strcmp(argv[1], "scale") == 0)
+            return Scale();
     }
     return 2;
 }
@@ -164,6 +210,30 @@ class FixtureIsolationRegressionTests(unittest.TestCase):
             self.assertIn("FixtureIsolation: -[NSUserDefaults setBool:forKey:] reached a real",
                           trip.stderr)
 
+    def test_screens_and_windows_report_one_fixed_backing_scale(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="flycut-fixture-isolation-") as directory:
+            source = pathlib.Path(directory) / "FixtureIsolationProbe.m"
+            binary = pathlib.Path(directory) / "FixtureIsolationProbe"
+            source.write_text(PROBE)
+            build = subprocess.run(
+                ["/usr/bin/xcrun", "clang", "-fno-objc-arc", "-fblocks", "-fmodules",
+                 "-mmacosx-version-min=13.5", "-arch", "arm64", "-I", str(FIXTURES),
+                 str(source), "-framework", "AppKit", "-o", str(binary)],
+                cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+            )
+            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
+            run = subprocess.run([str(binary), "scale"], cwd=ROOT, text=True,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            found = re.findall(r"^FIXTURE_SCALE (.*)$", run.stdout, re.M)
+            self.assertEqual(len(found), 1, run.stdout + run.stderr)
+            values = dict(item.split("=") for item in found[0].split())
+            self.assertEqual((values["pinned"], values["fixed"]), ("1", "2.00"), found[0])
+            # Laid out on a 2x pixel grid although every screen reports 1x: half points.
+            self.assertEqual(values["window"], "2.00", found[0])
+            self.assertEqual(values["aligned"], "0.50,10.00", found[0])
+            for name in ("label", "box"):
+                self.assertEqual(float(values[name]) * 2 % 2, 1.0, f"{name} not on a half point: {found[0]}")
 
 if __name__ == "__main__":
     unittest.main()
