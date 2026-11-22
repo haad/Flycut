@@ -2151,11 +2151,59 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
     
 }
 
-// The right edge of what a pane shows, and its left inset, in the pane's own
-// coordinates: every visible control and every Restore Default arrow, shown
-// or not (an arrow that appears with a changed value must not be cut off),
-// looking through plain views and boxes.
-static void FlycutCollectPaneContentEdges(NSView *container, NSView *pane, CGFloat *leftmost, CGFloat *rightmost)
+// A label whose text runs over more than one line at its width (the Hotkeys hint).
+static BOOL FlycutLabelWraps(NSView *view)
+{
+	return [view isKindOfClass:[NSTextField class]] && ![(NSTextField *)view isEditable] && [[(NSTextField *)view cell] wraps] &&
+	       [[(NSTextField *)view attributedStringValue] size].width > NSWidth([view frame]);
+}
+
+// Controls that can take any width: they follow the window's width instead of
+// setting it. On Appearance the Restore Default arrows stand in a column at the
+// right; the sliders, the search recorder and the right-aligned slider labels
+// hang on it.
+static BOOL FlycutFollowsWindowWidth(NSView *view, BOOL inAppearance)
+{
+	if ([view isKindOfClass:[NSSlider class]] || [view isKindOfClass:[NSScrollView class]] || [view isKindOfClass:[NSBox class]] ||
+	    FlycutLabelWraps(view))
+		return YES;
+	if (!inAppearance)
+		return NO;
+	if ([[view identifier] hasPrefix:@"restoreDefault"] || [view isKindOfClass:[SRRecorderControl class]])
+		return YES;
+	return [view isKindOfClass:[NSTextField class]] && [(NSTextField *)view alignment] == NSTextAlignmentRight;
+}
+
+// Where a control's content ends, in its superview's coordinates: a label's
+// text by its own width, a checkbox's box and title, an arrow's frame (its
+// alignment rect changes with its state), other controls' alignment rects.
+static CGFloat FlycutContentMaxX(NSView *view)
+{
+	NSRect frame = [view frame];
+	if ([[view identifier] hasPrefix:@"restoreDefault"])
+		return NSMaxX(frame);
+	if ([view isKindOfClass:[NSTextField class]] && ![(NSTextField *)view isEditable] && ![(NSTextField *)view isBezeled]) {
+		NSRect edges = [view alignmentRectForFrame:frame];
+		CGFloat text = ceil([[(NSTextField *)view attributedStringValue] size].width);
+		NSTextAlignment alignment = [(NSTextField *)view alignment];
+		if (alignment == NSTextAlignmentRight)
+			return NSMaxX(edges);
+		if (alignment == NSTextAlignmentCenter)
+			return MIN(NSMaxX(edges), NSMidX(edges) + text / 2.0);
+		return MIN(NSMaxX(edges), NSMinX(edges) + text);
+	}
+	if ([view isKindOfClass:[NSButton class]] && ![view isKindOfClass:[NSPopUpButton class]] && [[(NSButton *)view title] length] > 0)
+		frame.size.width = MIN(NSWidth(frame), [view fittingSize].width);
+	return NSMaxX([view alignmentRectForFrame:frame]);
+}
+
+// A pane's controls at leaf level, looking through plain views and boxes:
+// every visible control and every Restore Default arrow, shown or not (an
+// arrow that appears with a changed value must not be cut off). leftmost gets
+// the pane's left inset (alignment rects), rightmost the right edge of its
+// fixed content, both in the pane's own coordinates.
+static void FlycutCollectPaneLeaves(NSView *container, NSView *pane, BOOL inAppearance, CGFloat *leftmost, CGFloat *rightmost,
+                                    NSMutableArray *leaves)
 {
 	for (NSView *view in [container subviews]) {
 		BOOL restoreArrow = [view isKindOfClass:[NSButton class]] && [[view identifier] hasPrefix:@"restoreDefault"];
@@ -2165,12 +2213,56 @@ static void FlycutCollectPaneContentEdges(NSView *container, NSView *pane, CGFlo
 		BOOL holdsViews = isBox ? [(NSBox *)view boxType] != NSBoxSeparator
 		                        : ([view isMemberOfClass:[NSView class]] && [[view subviews] count] > 0);
 		if (holdsViews) {
-			FlycutCollectPaneContentEdges(isBox ? [(NSBox *)view contentView] : view, pane, leftmost, rightmost);
-		} else {
-			NSRect frame = [pane convertRect:[view bounds] fromView:view];
-			*leftmost = MIN(*leftmost, NSMinX(frame));
-			*rightmost = MAX(*rightmost, NSMaxX(frame));
+			FlycutCollectPaneLeaves(isBox ? [(NSBox *)view contentView] : view, pane, inAppearance, leftmost, rightmost, leaves);
+			continue;
 		}
+		[leaves addObject:view];
+		NSRect edges = [pane convertRect:[view alignmentRectForFrame:[view frame]] fromView:[view superview]];
+		*leftmost = MIN(*leftmost, NSMinX(edges));
+		if (FlycutFollowsWindowWidth(view, inAppearance))
+			continue;
+		NSRect content = [view frame];
+		content.size.width = FlycutContentMaxX(view) - NSMinX(content);
+		*rightmost = MAX(*rightmost, NSMaxX([pane convertRect:content fromView:[view superview]]));
+	}
+}
+
+// Lets a pane's controls end at right (pane coordinates): what can take any
+// width ends there, and a fixed control whose edges reach past it (a
+// checkbox as wide as its row) ends there too; its content fits, the window
+// is as wide as that. Controls placed by constraints follow their pane.
+static void FlycutFitPaneLeavesToRight(NSView *pane, CGFloat right, NSArray *leaves, BOOL inAppearance)
+{
+	CGFloat column = 0.0;     // Appearance: where its arrow column ends now
+	if (inAppearance)
+		for (NSView *view in leaves)
+			if ([[view identifier] hasPrefix:@"restoreDefault"])
+				column = MAX(column, NSMaxX([pane convertRect:[view frame] fromView:[view superview]]));
+	CGFloat shift = column > 0.0 ? right - column : 0.0;
+	for (NSView *view in leaves) {
+		if (![view translatesAutoresizingMaskIntoConstraints] || ([view isKindOfClass:[NSBox class]]))
+			continue;
+		NSRect frame = [view frame];
+		CGFloat edge = NSMaxX([pane convertRect:[view alignmentRectForFrame:frame] fromView:[view superview]]);
+		if (!FlycutFollowsWindowWidth(view, inAppearance)) {
+			// By its edges (a label's text, a checkbox's box and title), not its
+			// frame: the 2 pt a label keeps free may reach past the content.
+			if (edge > right + 0.5)
+				frame.size.width -= edge - right;
+		} else if (FlycutLabelWraps(view)) {
+			// Keeps its top and grows downwards when it needs more lines.
+			CGFloat width = NSWidth(frame) + right - edge;
+			CGFloat height = MAX(NSHeight(frame), ceil([[(NSTextField *)view cell] cellSizeForBounds:NSMakeRect(0, 0, width, CGFLOAT_MAX)].height));
+			frame.origin.y += NSHeight(frame) - height;
+			frame.size = NSMakeSize(width, height);
+		} else if (inAppearance && ([view isKindOfClass:[NSSlider class]] || [view isKindOfClass:[SRRecorderControl class]])) {
+			frame.size.width += shift;
+		} else if (inAppearance) {
+			frame.origin.x += shift;     // an arrow, or a label ending at its slider's end
+		} else {
+			frame.size.width += right - edge;
+		}
+		[view setFrame:frame];
 	}
 }
 
@@ -2186,9 +2278,10 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	return nil;
 }
 
-// Preferences is as wide as its panes need: every pane's content with the
-// pane's own left inset as its right margin, never narrower than the NIB,
-// around the centre the window has. In the Preference style UKPrefsPanel
+// Preferences is as wide as what its panes show: the widest fixed content of
+// all panes, with that pane's own left inset as its right margin. Controls
+// that can take any width follow it, and the tab view, so every pane, spans
+// the window. It keeps the centre it has. In the Preference style UKPrefsPanel
 // gives the toolbar, its items need less than that.
 -(void)fitPreferencesWindowWidth
 {
@@ -2197,19 +2290,31 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 		return;
 	NSRect original = [prefsPanel frame];
 	[[prefsPanel contentView] layoutSubtreeIfNeeded];
-	CGFloat width = NSWidth([tabView frame]);
+	CGFloat width = 0.0;
+	NSMutableArray *panes = [NSMutableArray array];
 	for (NSTabViewItem *item in [tabView tabViewItems]) {
 		NSView *pane = [item view];
+		[pane layoutSubtreeIfNeeded];
+		BOOL inAppearance = appearancePanel != nil && [appearancePanel isDescendantOf:pane];
 		CGFloat leftmost = CGFLOAT_MAX, rightmost = 0.0;
-		FlycutCollectPaneContentEdges(pane, pane, &leftmost, &rightmost);
+		NSMutableArray *leaves = [NSMutableArray array];
+		FlycutCollectPaneLeaves(pane, pane, inAppearance, &leftmost, &rightmost, leaves);
 		if (rightmost > 0.0)
 			width = MAX(width, ceil(rightmost + leftmost));
+		if ([leaves count] > 0)
+			[panes addObject:@[pane, @(leftmost), leaves, @(inAppearance)]];
 	}
+	if (width <= 0.0)
+		return;
+	for (NSArray *entry in panes)
+		FlycutFitPaneLeavesToRight(entry[0], width - [entry[1] doubleValue], entry[2], [entry[3] boolValue]);
+	[tabView setFrameSize:NSMakeSize(width, NSHeight([tabView frame]))];
 	NSRect content = [prefsPanel contentRectForFrameRect:original];
 	content.size.width = width;
 	NSRect fitted = [prefsPanel frameRectForContentRect:content];
 	fitted.origin.x = NSMidX(original) - NSWidth(fitted) / 2.0;
 	[prefsPanel setFrame:fitted display:NO animate:NO];
+	[[prefsPanel contentView] layoutSubtreeIfNeeded];
 }
 
 -(IBAction) showPreferencePanel:(id)sender

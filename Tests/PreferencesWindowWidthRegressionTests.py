@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-"""The Preferences window is as wide as its panes need, in the Preference toolbar style.
+"""The Preferences window is as wide as what its panes show, in the Preference toolbar style.
 
 -[AppController showPreferencePanel:] used to widen the 507 pt window to 720 pt, whatever the
-panes held. The panes (a fixed 507 pt tab view at the left) leave the rest empty. On a macOS
-with the glass toolbar the default style puts the title and the items (General, Hotkeys,
-Appearance, a flexible space, Acknowledgements) in one row, which needs 586 pt before the last
-item moves into the overflow chevron. In the Preference style the title is on top and the items
-are centred below it, so the toolbar needs far less than the panes. The window is now as wide
-as every pane's content with the pane's own margin, never less than the NIB's width, around the
-same centre, and each pane still fits under the taller toolbar. The toolbar holds the four panes
-and no space; they are evenly spaced and centred (their item views' frames, measured offscreen).
+panes held. The Preference style puts the title on top and the four items centred below it, so
+the toolbar needs far less than the panes. The window was then fitted to the panes' FRAMES: the
+Hotkeys hint label's frame (16..502 in the NIB) set 518 pt, while its text ends near 450, and the
+tab view kept the NIB's 507 pt, so every pane had an empty strip at the right.
+
+Now the window is as wide as the widest FIXED content of all panes plus that pane's left inset:
+a label by its own text, a checkbox by its box and title, other controls by their alignment
+rects, every Restore Default arrow by its frame (shown or not). Controls that can take any width
+follow the window instead of setting it: a wrapping label (the Hotkeys hint), sliders, the
+Acknowledgements text, separators, and on Appearance the arrow column with what hangs on it (the
+sliders' right ends, the search recorder, the right-aligned "Darker"/"Bigger" labels). They end
+at the window's width less the pane's left inset. The tab view takes the window's width, so
+every pane spans it, and no control reaches past the window. The window keeps its centre, and
+each pane still fits under the taller toolbar. The toolbar holds the four panes and no space;
+they are evenly spaced and centred (their item views' frames, measured offscreen).
 
 The fixture loads the production NIB (master's compiled MainMenu.nib for trees that carry
 only MainMenu.xib, see Tests/Fixtures/PreferencesNibFixture.py), sends the builders that
@@ -17,10 +24,9 @@ only MainMenu.xib, see Tests/Fixtures/PreferencesNibFixture.py), sends the build
 real -showPreferencePanel:. The window is never ordered in; the toolbar is laid out offscreen,
 and -[NSToolbar visibleItems] says which items are on the bar and which are in the overflow
 (measured on this macOS: monotone in the width). The case measures the toolbar's need itself,
-one point at a time. A pane's content is every visible control (and every Restore Default
-arrow, shown or not) at the pane's leaf level; its need is its right edge plus its left inset.
-Run with the NIB's checkbox titles (master's compiled NIB has the long ones) and with those of
-MainMenu.xib. The drawn toolbar is not reproduced pixel for pixel; the sight test looks at it.
+one point at a time. Run with the NIB's checkbox titles (master's compiled NIB has the long
+ones) and with those of MainMenu.xib. The drawn toolbar is not reproduced pixel for pixel; the
+sight test looks at it.
 """
 from __future__ import annotations
 
@@ -86,7 +92,48 @@ static void FakeClose(NSWindow *self, SEL cmd)
 }
 
 // ---- A pane's content: every visible control, and every Restore Default arrow, at leaf level.
-static void Leaves(NSView *view, NSView *pane, NSMutableArray *out)
+static BOOL IsAppearance(NSView *pane)
+{
+    NSView *panel = [controller valueForKey:@"appearancePanel"];
+    return panel != nil && [panel isDescendantOf:pane];
+}
+
+// A label whose text runs over more than one line at its width (the Hotkeys hint).
+static BOOL Wraps(NSView *view)
+{
+    return [view isKindOfClass:[NSTextField class]] && ![(NSTextField *)view isEditable] && [[(NSTextField *)view cell] wraps]
+        && [[(NSTextField *)view attributedStringValue] size].width > NSWidth([view frame]);
+}
+
+// Controls that take the width the window gives them.
+static BOOL Elastic(NSView *view, BOOL appearance)
+{
+    if ([view isKindOfClass:[NSSlider class]] || [view isKindOfClass:[NSScrollView class]] || [view isKindOfClass:[NSBox class]] || Wraps(view))
+        return YES;
+    if (!appearance) return NO;
+    if ([[view identifier] hasPrefix:@"restoreDefault"] || [view isKindOfClass:NSClassFromString(@"SRRecorderControl")]) return YES;
+    return [view isKindOfClass:[NSTextField class]] && [(NSTextField *)view alignment] == NSTextAlignmentRight;
+}
+
+// Where a fixed control's content ends, in its superview's coordinates.
+static double ContentMaxX(NSView *view)
+{
+    NSRect frame = [view frame];
+    if ([[view identifier] hasPrefix:@"restoreDefault"]) return NSMaxX(frame);
+    if ([view isKindOfClass:[NSTextField class]] && ![(NSTextField *)view isEditable] && ![(NSTextField *)view isBezeled]) {
+        NSRect edges = [view alignmentRectForFrame:frame];
+        double text = ceil([[(NSTextField *)view attributedStringValue] size].width);
+        NSTextAlignment alignment = [(NSTextField *)view alignment];
+        if (alignment == NSTextAlignmentRight) return NSMaxX(edges);
+        if (alignment == NSTextAlignmentCenter) return MIN(NSMaxX(edges), NSMidX(edges) + text / 2.0);
+        return MIN(NSMaxX(edges), NSMinX(edges) + text);
+    }
+    if ([view isKindOfClass:[NSButton class]] && ![view isKindOfClass:[NSPopUpButton class]] && [[(NSButton *)view title] length] > 0)
+        frame.size.width = MIN(NSWidth(frame), [view fittingSize].width);
+    return NSMaxX([view alignmentRectForFrame:frame]);
+}
+
+static void LeavesIn(NSView *view, NSView *pane, BOOL appearance, NSMutableArray *out)
 {
     for (NSView *sub in [view subviews]) {
         BOOL restore = [sub isKindOfClass:[NSButton class]] && [[sub identifier] hasPrefix:@"restoreDefault"];
@@ -95,26 +142,38 @@ static void Leaves(NSView *view, NSView *pane, NSMutableArray *out)
         BOOL container = box ? [(NSBox *)sub boxType] != NSBoxSeparator
                              : ([sub isMemberOfClass:[NSView class]] && [[sub subviews] count] > 0);
         if (container) {
-            Leaves(box ? [(NSBox *)sub contentView] : sub, pane, out);
+            LeavesIn(box ? [(NSBox *)sub contentView] : sub, pane, appearance, out);
         } else {
-            NSRect r = [pane convertRect:[sub bounds] fromView:sub];
-            [out addObject:@{@"view": sub, @"minX": @(NSMinX(r)), @"maxX": @(NSMaxX(r))}];
+            NSView *parent = [sub superview];
+            NSRect r = [pane convertRect:[sub frame] fromView:parent];
+            NSRect edges = [pane convertRect:[sub alignmentRectForFrame:[sub frame]] fromView:parent];
+            BOOL elastic = Elastic(sub, appearance);
+            NSRect content = [sub frame];
+            content.size.width = elastic ? 0 : ContentMaxX(sub) - NSMinX(content);
+            double contentMaxX = NSMaxX([pane convertRect:content fromView:parent]);
+            [out addObject:@{@"view": sub, @"minX": @(NSMinX(r)), @"maxX": @(NSMaxX(r)), @"alignMinX": @(NSMinX(edges)),
+                             @"alignMaxX": @(NSMaxX(edges)), @"elastic": @(elastic), @"contentMaxX": @(contentMaxX)}];
         }
     }
 }
 
-// The pane's right edge plus its left inset, in points. 0 for an empty pane.
+static void Leaves(NSView *view, NSView *pane, NSMutableArray *out) { LeavesIn(view, pane, IsAppearance(pane), out); }
+
+// The pane's fixed content's right edge plus its left inset, in points. 0 for a pane without
+// fixed content (Acknowledgements: only its text, which follows the window).
 static double PaneNeed(NSView *pane, double *minOut, double *maxOut)
 {
     NSMutableArray *leaves = [NSMutableArray array];
     [pane layoutSubtreeIfNeeded];
     Leaves(pane, pane, leaves);
-    if ([leaves count] == 0) return 0;
-    double minX = 1e9, maxX = -1e9;
-    for (NSDictionary *leaf in leaves) { minX = MIN(minX, [leaf[@"minX"] doubleValue]); maxX = MAX(maxX, [leaf[@"maxX"] doubleValue]); }
-    if (minOut) *minOut = minX;
+    double minX = 1e9, maxX = 0;
+    for (NSDictionary *leaf in leaves) {
+        minX = MIN(minX, [leaf[@"alignMinX"] doubleValue]);
+        if (![leaf[@"elastic"] boolValue]) maxX = MAX(maxX, [leaf[@"contentMaxX"] doubleValue]);
+    }
+    if (minOut) *minOut = [leaves count] ? minX : 0;
     if (maxOut) *maxOut = maxX;
-    return maxX + minX;
+    return maxX > 0 ? ceil(maxX + minX) : 0;
 }
 
 static double ContentNeed(NSMutableArray *per)
@@ -260,8 +319,28 @@ int main(int argc, const char **argv)
         double nibWidth = NSWidth([[prefs tabView] frame]);
         NSMutableArray *panes = [NSMutableArray array];
         double contentNeed = ContentNeed(panes);
+        // A centred label whose text ends where General's fixed content ends (a column header at
+        // the arrow column): its frame reaches 2 pt further, as a label keeps 2 pt free on each side.
+        NSTextField *insetLabel = nil;
+        NSRect insetFrame = NSZeroRect;
+        if ([mode isEqualToString:@"inset-label"]) {
+            NSView *general = [[[prefs tabView] tabViewItemAtIndex:generalPane] view];
+            double edge = -1;
+            for (NSDictionary *pane in panes)
+                if ([pane[@"pane"] isEqualToString:[[[prefs tabView] tabViewItemAtIndex:generalPane] label]])
+                    edge = [pane[@"rightEdge"] doubleValue];
+            if (edge < 0) return Fail(22, @"no right edge for General");
+            insetLabel = [NSTextField labelWithString:@"Receive"];
+            [insetLabel setAlignment:NSTextAlignmentCenter];
+            [insetLabel setFrame:[insetLabel frameForAlignmentRect:NSMakeRect(edge - 60, 8, 60, 16)]];
+            [insetLabel setAutoresizingMask:NSViewMaxXMargin | NSViewMaxYMargin];
+            [general addSubview:insetLabel];
+            insetFrame = [insetLabel frame];
+            report[@"insetLabelBefore"] = NSStringFromRect(insetFrame);
+            report[@"generalRightEdge"] = @(edge);
+        }
         double toolbarNeed = ToolbarNeed();
-        double expected = MAX(nibWidth, contentNeed);
+        double expected = contentNeed;     // the NIB's width is no floor
         NSRect before = [window frame];
         report[@"nibWidth"] = @(nibWidth);
         report[@"contentNeed"] = @(contentNeed);
@@ -383,6 +462,99 @@ int main(int argc, const char **argv)
                 return Fail(46, [NSString stringWithFormat:@"the items are not centred: %.1f pt left, %.1f pt right", left, right]);
             if (fabs(width - expected) > 0.5)
                 return Fail(47, [NSString stringWithFormat:@"the window is %.1f pt wide, not the %.1f the panes need", width, expected]);
+        } else if ([mode isEqualToString:@"tab-view-follows"]) {
+            // The tab view, and with it every pane, spans the window.
+            NSMutableArray *widths = [NSMutableArray arrayWithObject:@(NSWidth([[prefs tabView] frame]))];
+            for (NSInteger i = 0; i < [[prefs tabView] numberOfTabViewItems]; i++) {
+                ChangePane(i);
+                [widths addObject:@(NSWidth([[[[prefs tabView] tabViewItemAtIndex:i] view] frame]))];
+            }
+            report[@"tabWidths"] = widths;
+            for (NSNumber *w in widths)
+                if (fabs([w doubleValue] - width) > 0.5)
+                    return Fail(48, [NSString stringWithFormat:@"the tab view or a pane is %@ pt wide, the window %.1f: %@", w, width,
+                                     [widths componentsJoinedByString:@" / "]]);
+        } else if ([mode isEqualToString:@"nothing-past-the-window"]) {
+            // No control's frame (arrows hidden or not) reaches past the window's content.
+            for (NSInteger i = 0; i < [[prefs tabView] numberOfTabViewItems]; i++) {
+                ChangePane(i);
+                NSView *pane = [[[prefs tabView] tabViewItemAtIndex:i] view];
+                NSMutableArray *leaves = [NSMutableArray array];
+                Leaves(pane, pane, leaves);
+                for (NSDictionary *leaf in leaves) {
+                    NSView *view = leaf[@"view"];
+                    NSRect r = [[window contentView] convertRect:[view bounds] fromView:view];
+                    if (NSMaxX(r) > width + 0.5 || NSMinX(r) < -0.5)
+                        return Fail(49, [NSString stringWithFormat:@"%@: %@ %@ spans %.1f..%.1f, the window 0..%.1f", [[[prefs tabView] tabViewItemAtIndex:i] label],
+                                         NSStringFromClass([view class]), [view identifier] ?: @"", NSMinX(r), NSMaxX(r), width]);
+                }
+            }
+        } else if ([mode isEqualToString:@"elastic-follows"]) {
+            // What takes any width ends at the window's width less the pane's left inset: the
+            // Hotkeys hint (and its text still fits), the Acknowledgements text, Appearance's
+            // arrow column; on Appearance a row's slider or recorder ends one gap before its
+            // arrow and the right-aligned label under a slider ends where its slider ends, less 4.
+            NSMutableArray *seen = [NSMutableArray array];
+            for (NSInteger i = 0; i < [[prefs tabView] numberOfTabViewItems]; i++) {
+                ChangePane(i);
+                NSView *pane = [[[prefs tabView] tabViewItemAtIndex:i] view];
+                NSString *name = [[[prefs tabView] tabViewItemAtIndex:i] label];
+                BOOL appearance = IsAppearance(pane);
+                double inset = 0;
+                PaneNeed(pane, &inset, NULL);
+                double target = width - inset;
+                NSMutableArray *leaves = [NSMutableArray array];
+                Leaves(pane, pane, leaves);
+                for (NSDictionary *leaf in leaves) {
+                    NSView *view = leaf[@"view"];
+                    if (![leaf[@"elastic"] boolValue] || [view isKindOfClass:[NSBox class]]) continue;
+                    [seen addObject:[NSString stringWithFormat:@"%@:%@", name, NSStringFromClass([view class])]];
+                    BOOL arrow = [[view identifier] hasPrefix:@"restoreDefault"];
+                    if (!appearance || arrow) {
+                        double end = arrow ? [leaf[@"maxX"] doubleValue] : [leaf[@"alignMaxX"] doubleValue];
+                        if (fabs(end - target) > 0.5)
+                            return Fail(50, [NSString stringWithFormat:@"%@: %@ %@ ends at %.1f, not at the window less the inset (%.1f - %.1f = %.1f)",
+                                             name, NSStringFromClass([view class]), [view identifier] ?: @"", end, width, inset, target]);
+                    }
+                    if (Wraps(view) || ([view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view cell] wraps] && !appearance)) {
+                        double needs = ceil([[(NSTextField *)view cell] cellSizeForBounds:NSMakeRect(0, 0, NSWidth([view frame]), CGFLOAT_MAX)].height);
+                        if (needs > NSHeight([view frame]) + 0.5)
+                            return Fail(51, [NSString stringWithFormat:@"%@: the wrapping label needs %.1f pt, it has %.1f", name, needs, NSHeight([view frame])]);
+                    }
+                    if (appearance && !arrow) {
+                        NSButton *rowArrow = nil;
+                        NSSlider *rowSlider = nil;
+                        for (NSView *sibling in [[view superview] subviews]) {
+                            if ([[sibling identifier] hasPrefix:@"restoreDefault"]) rowArrow = (NSButton *)sibling;
+                            if ([sibling isKindOfClass:[NSSlider class]]) rowSlider = (NSSlider *)sibling;
+                        }
+                        if ([view isKindOfClass:[NSTextField class]]) {
+                            // a right-aligned min/max label: its slider is in the row above
+                            NSView *row = [[view superview] superview];
+                            if (rowSlider == nil && [row isKindOfClass:[NSBox class]])
+                                for (NSView *sibling in [[(NSBox *)row contentView] subviews])
+                                    if ([sibling isKindOfClass:[NSSlider class]]) rowSlider = (NSSlider *)sibling;
+                            if (rowSlider == nil || fabs(NSMaxX([view frame]) - (NSMaxX([rowSlider frame]) - 4)) > 0.5)
+                                return Fail(52, [NSString stringWithFormat:@"%@: the right-aligned label %@ ends at %.1f, its slider at %.1f", name,
+                                                 [(NSTextField *)view stringValue], NSMaxX([view frame]), rowSlider ? NSMaxX([rowSlider frame]) : -1]);
+                        } else if (rowArrow == nil || fabs(NSMaxX([view frame]) - (NSMinX([rowArrow frame]) - 4)) > 0.5) {
+                            return Fail(53, [NSString stringWithFormat:@"%@: %@ ends at %.1f, its row's arrow starts at %.1f", name,
+                                             NSStringFromClass([view class]), NSMaxX([view frame]), rowArrow ? NSMinX([rowArrow frame]) : -1]);
+                        }
+                    }
+                }
+            }
+            report[@"elastic"] = seen;
+            if ([seen count] < 8)
+                return Fail(54, [NSString stringWithFormat:@"only %lu controls that follow the window were found: %@", (unsigned long)[seen count], seen]);
+        } else if ([mode isEqualToString:@"inset-label"]) {
+            // Its text fits: only the 2 pt it keeps free reach past the content's edge, so
+            // nothing of it is cut off.
+            report[@"insetLabelAfter"] = NSStringFromRect([insetLabel frame]);
+            if (!NSEqualRects([insetLabel frame], insetFrame))
+                return Fail(39, [NSString stringWithFormat:@"a label whose text ends at the arrows' edge was cut: %@ -> %@ "
+                                 "(its text ended at %.1f)", NSStringFromRect(insetFrame), NSStringFromRect([insetLabel frame]),
+                                 NSMaxX([insetLabel alignmentRectForFrame:insetFrame])]);
         } else if ([mode isEqualToString:@"report"]) {
             // numbers only
         } else {
@@ -436,6 +608,22 @@ class PreferencesWindowWidthRegressionTests(PreferencesNibCase):
 
     def test_a_restore_arrow_reaching_out_widens_the_window(self) -> None:
         self.check("arrow-reaches-out", "a Restore Default arrow, hidden or shown, is cut off or the window is wider than it needs")
+
+    def test_tab_view_and_every_pane_span_the_window(self) -> None:
+        self.check("tab-view-follows", "the tab view or a pane is not as wide as the window")
+
+    def test_no_control_reaches_past_the_window(self) -> None:
+        self.check("nothing-past-the-window", "a control's frame reaches past the window's content")
+
+    def test_no_control_reaches_past_the_window_with_the_xib_titles(self) -> None:
+        self.check("nothing-past-the-window", "a control's frame reaches past the window's content (xib titles)", xib=True)
+
+    def test_controls_that_take_any_width_follow_the_window(self) -> None:
+        self.check("elastic-follows", "a wrapping label, a slider, the arrow column or the Acknowledgements text does not end "
+                   "at the window's width less the pane's inset")
+
+    def test_a_label_reaching_out_only_by_its_inset_keeps_its_frame(self) -> None:
+        self.check("inset-label", "a label whose text ends at the right edge is shortened by the 2 pt its frame keeps free")
 
     def test_window_stays_centred_where_it_was(self) -> None:
         self.check("centred", "the window's centre, bottom edge or height changed")
