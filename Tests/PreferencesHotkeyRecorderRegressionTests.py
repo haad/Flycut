@@ -973,7 +973,8 @@ static int FolderArrows(void)
         NSButton *folder = buttons[key];
         [controller storeSaveLocation:[NSURL fileURLWithPath:@"/private/var/empty/flycut-folder-probe" isDirectory:YES] forButton:folder];
         if (Stored(key) == nil) return 202;
-        if (![[folder title] isEqualToString:@"flycut-folder-probe"]) { fprintf(stderr, "folder button shows %s\\n", [[folder title] UTF8String]); return 203; }
+        // A long name is shortened on the button; VoiceOver reads it whole.
+        if (![[folder accessibilityTitle] isEqualToString:@"flycut-folder-probe"] || ![[folder title] hasPrefix:@"fly"]) { fprintf(stderr, "folder button shows %s\\n", [[folder title] UTF8String]); return 203; }
         if ([arrow isHidden] || ![arrow isEnabled]) { fprintf(stderr, "%s arrow not offered for another folder\\n", [key UTF8String]); return 204; }
     }
     [[pane window] layoutIfNeeded];

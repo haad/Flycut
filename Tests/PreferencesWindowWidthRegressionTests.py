@@ -547,6 +547,210 @@ int main(int argc, const char **argv)
             report[@"elastic"] = seen;
             if ([seen count] < 8)
                 return Fail(54, [NSString stringWithFormat:@"only %lu controls that follow the window were found: %@", (unsigned long)[seen count], seen]);
+        } else if ([mode isEqualToString:@"long-folder-name"]) {
+            // A long folder name for both "Save ... to:" buttons: the window keeps the width it
+            // has with the Desktop, each button shows the name whole when it fits the width the
+            // button has up to its arrow column, else shortened in the middle, and the full path
+            // as its tooltip; VoiceOver reads the full name, and every label and checkbox of
+            // General stays complete.
+            [window close];
+            NSString *name = @"Flycut Clippings Archive 2026";
+            NSString *path = [@"/Volumes/Backup" stringByAppendingPathComponent:name];      // never created
+            for (NSString *key in @[@"saveToLocation", @"autoSaveToLocation"])
+                [[NSUserDefaults standardUserDefaults] setURL:[NSURL fileURLWithPath:path] forKey:key];
+            [controller showPreferencePanel:nil];
+            ChangePane(generalPane);
+            double longWidth = [window contentRectForFrameRect:[window frame]].size.width;
+            report[@"widthWithLongName"] = @(longWidth);
+            if (fabs(longWidth - width) > 0.5)
+                return Fail(60, [NSString stringWithFormat:@"the window is %.1f pt wide with a long folder name, %.1f with the Desktop", longWidth, width]);
+            NSView *general = [[[prefs tabView] tabViewItemAtIndex:generalPane] view];
+            NSMutableArray *leaves = [NSMutableArray array];
+            Leaves(general, general, leaves);
+            for (NSDictionary *leaf in leaves) {
+                NSView *view = leaf[@"view"];
+                if ([view isHidden]) continue;
+                double needs = 0, has = NSWidth([view frame]);
+                NSString *text = nil;
+                if ([view isKindOfClass:[NSTextField class]] && ![(NSTextField *)view isEditable] && ![[(NSTextField *)view cell] wraps]) {
+                    text = [(NSTextField *)view stringValue];
+                    needs = [[(NSTextField *)view cell] cellSizeForBounds:NSMakeRect(0, 0, CGFLOAT_MAX, CGFLOAT_MAX)].width;
+                } else if ([view isKindOfClass:[NSButton class]] && ![view isKindOfClass:[NSPopUpButton class]] && [(NSButton *)view bezelStyle] != NSBezelStyleRounded
+                           && ![[view identifier] hasPrefix:@"restoreDefault"] && [[(NSButton *)view title] length] > 0
+                           && view != [controller valueForKey:@"saveToLocationButton"] && view != [controller valueForKey:@"autoSaveToLocationButton"]) {
+                    text = [(NSButton *)view title];
+                    needs = [view fittingSize].width;
+                }
+                if (text != nil && needs > has + 0.5)
+                    return Fail(65, [NSString stringWithFormat:@"\"%@\" needs %.1f pt, it has %.1f: cut off by the long folder name", text, needs, has]);
+            }
+            // What the button draws. A rounded button draws a cell's middle truncation at the end
+            // ("Flycut Clip..."), and on this macOS it draws its title without
+            // -drawTitle:withFrame:inView:, so the drawn string cannot be caught there: the title
+            // its cell holds is what it draws. That title must be the whole name where it fits,
+            // else the name's start and end around one ellipsis; either way it must fit the cell's
+            // title rect whole (else AppKit cuts it again at the end) and a shortened one must use
+            // the width (two more characters would not fit), and VoiceOver must read the full name
+            // (control and cell). The second name has 60 characters.
+            NSString *sixty = @"Flycut Clippings Archive 2026 - weekly copies of saved items";
+            if ([sixty length] != 60) return Fail(67, @"the 60-character dummy name is not 60 characters long");
+            NSMutableArray *buttons = [NSMutableArray array];
+            for (NSUInteger round = 0; round < 2; round++) {
+                NSString *shownName = round == 0 ? name : sixty;
+                if (round == 1) {
+                    for (NSString *key in @[@"saveToLocation", @"autoSaveToLocation"])
+                        [[NSUserDefaults standardUserDefaults] setURL:[NSURL fileURLWithPath:[@"/Volumes/Backup" stringByAppendingPathComponent:shownName]]
+                                                               forKey:key];
+                    [window close];
+                    [controller showPreferencePanel:nil];
+                    ChangePane(generalPane);
+                    double sixtyWidth = [window contentRectForFrameRect:[window frame]].size.width;
+                    report[@"widthWithSixtyCharacters"] = @(sixtyWidth);
+                    if (fabs(sixtyWidth - width) > 0.5)
+                        return Fail(60, [NSString stringWithFormat:@"the window is %.1f pt wide with a 60-character folder name, %.1f with the Desktop", sixtyWidth, width]);
+                }
+                for (NSString *ivar in @[@"saveToLocationButton", @"autoSaveToLocationButton"]) {
+                    NSButton *button = [controller valueForKey:ivar];
+                    NSString *shown = [button title] ?: @"";
+                    NSRect titleRect = [[button cell] titleRectForBounds:[button bounds]];
+                    double textWidth = [[button attributedTitle] size].width, cellWidth = [[button cell] cellSize].width;
+                    double twoMore = [@"MM" sizeWithAttributes:@{NSFontAttributeName: [button font]}].width;
+                    NSArray *parts = [shown componentsSeparatedByString:@"\u2026"];
+                    [buttons addObject:@{@"button": ivar, @"round": @(round), @"frame": NSStringFromRect([button frame]), @"title": shown,
+                                         @"toolTip": [button toolTip] ?: @"", @"accessibilityTitle": [button accessibilityTitle] ?: @"",
+                                         @"cellWidth": @(cellWidth), @"titleRect": NSStringFromRect(titleRect), @"textWidth": @(textWidth)}];
+                    if (round == 0 && ![shown isEqualToString:name])
+                        return Fail(61, [NSString stringWithFormat:@"%@ shows \"%@\", not \"%@\" whole, %.1f pt wide", ivar, shown, name, NSWidth([button frame])]);
+                    if (round == 1 && ([parts count] != 2 || [parts[0] length] == 0 || [parts[1] length] == 0 || ![shownName hasPrefix:parts[0]] ||
+                                       ![shownName hasSuffix:parts[1]]))
+                        return Fail(61, [NSString stringWithFormat:@"%@ shows \"%@\", not \"%@\" shortened in the middle", ivar, shown, shownName]);
+                    if (textWidth > NSWidth(titleRect) + 0.5 || cellWidth > NSWidth([button frame]) + 0.5)
+                        return Fail(63, [NSString stringWithFormat:@"%@ shows \"%@\": %.1f pt of text in a %.1f pt title rect, its cell needs %.1f "
+                                         "in a %.1f pt frame, so AppKit cuts it again", ivar, shown, textWidth, NSWidth(titleRect), cellWidth,
+                                         NSWidth([button frame])]);
+                    if (round == 1 && cellWidth + twoMore <= NSWidth([button frame]))
+                        return Fail(64, [NSString stringWithFormat:@"%@ is %.1f pt wide showing \"%@\" (cell %.1f): two more characters would fit",
+                                         ivar, NSWidth([button frame]), shown, cellWidth]);
+                    if (![[button accessibilityTitle] isEqualToString:shownName] || ![[[button cell] accessibilityTitle] isEqualToString:shownName])
+                        return Fail(66, [NSString stringWithFormat:@"VoiceOver reads %@ as \"%@\" / \"%@\", not the full name", ivar,
+                                         [button accessibilityTitle], [[button cell] accessibilityTitle]]);
+                    if (round == 0 && ![[button toolTip] isEqualToString:path])
+                        return Fail(62, [NSString stringWithFormat:@"%@'s tooltip is \"%@\", not the folder's path", ivar, [button toolTip]]);
+                }
+            }
+            report[@"folderButtons"] = buttons;
+        } else if ([mode isEqualToString:@"folder-rows"]) {
+            // Both "Save ... to:" buttons keep the left edge they share (the longer label's end plus
+            // the NIB's 8 pt) and end the gap General keeps between a control and its Restore
+            // Default arrow (measured at the "Password data types" field) before their arrow, which
+            // stands in General's arrow column with the number row's and the password fields'.
+            // "Clippings" and "Favorites" have their own line under "Save forgotten items to:", from
+            // its folder button's left edge, one row gap (6 pt) below it, 8 pt apart as in the NIB;
+            // whatever follows starts a section gap (16 pt) below that line. Tab and VoiceOver go
+            // through the two rows as they are seen: button, arrow, button, arrow, Clippings,
+            // Favorites. Folders other than the Desktop show both arrows.
+            [window close];
+            NSString *path = @"/Volumes/Backup/Flycut Clippings Archive 2026";      // never created
+            for (NSString *key in @[@"saveToLocation", @"autoSaveToLocation"])
+                [[NSUserDefaults standardUserDefaults] setURL:[NSURL fileURLWithPath:path] forKey:key];
+            [controller showPreferencePanel:nil];
+            ChangePane(hotkeysPane);
+            ChangePane(generalPane);
+            NSView *pane = [[controller valueForKey:@"savingSectionLabel"] superview];
+            [[window contentView] layoutSubtreeIfNeeded];
+            NSRect (^align)(NSView *) = ^NSRect(NSView *v) { return [pane convertRect:[v alignmentRectForFrame:[v frame]] fromView:[v superview]]; };
+            NSView * (^find)(BOOL (^)(NSView *)) = ^NSView *(BOOL (^match)(NSView *)) {
+                for (NSView *v in [pane subviews]) if (match(v)) return v;
+                return (NSView *)nil;
+            };
+            NSButton *(^arrow)(NSString *) = ^NSButton *(NSString *key) {
+                NSString *identifier = [@"restoreDefault" stringByAppendingString:[[[key substringToIndex:1] uppercaseString] stringByAppendingString:[key substringFromIndex:1]]];
+                return (NSButton *)find(^BOOL(NSView *v) { return [[v identifier] isEqualToString:identifier]; });
+            };
+            NSView *(^label)(NSString *) = ^NSView *(NSString *title) {
+                return find(^BOOL(NSView *v) { return [v isKindOfClass:[NSTextField class]] && [[(NSTextField *)v stringValue] isEqualToString:title]; });
+            };
+            NSButton *saveTo = [controller valueForKey:@"saveToLocationButton"], *autoSave = [controller valueForKey:@"autoSaveToLocationButton"];
+            NSButton *clippings = (NSButton *)find(^BOOL(NSView *v) { return [BoundKeyPath(v) isEqualToString:@"values.saveForgottenClippings"]; });
+            NSButton *favorites = (NSButton *)find(^BOOL(NSView *v) { return [BoundKeyPath(v) isEqualToString:@"values.saveForgottenFavorites"]; });
+            NSView *types = find(^BOOL(NSView *v) { return [v isKindOfClass:[NSTextField class]] && [BoundKeyPath(v) isEqualToString:@"values.skipPboardTypesList"]; });
+            NSView *saveToLabel = label(@"Save from bezel to:"), *autoSaveLabel = label(@"Save forgotten items to:");
+            NSButton *typesArrow = arrow(@"skipPboardTypesList"), *saveToArrow = arrow(@"saveToLocation"), *autoSaveArrow = arrow(@"autoSaveToLocation");
+            if (!saveTo || !autoSave || !clippings || !favorites || !types || !saveToLabel || !autoSaveLabel || !typesArrow || !saveToArrow || !autoSaveArrow)
+                return Fail(70, @"a folder row control, its label, an arrow or the \"Password data types\" field is missing");
+            if ([saveToArrow isHidden] || [autoSaveArrow isHidden])
+                return Fail(70, @"a folder other than the Desktop does not show its Restore Default arrow");
+            double column = NSMinX([typesArrow frame]), gap = column - NSMaxX(align(types));
+            double left = MAX(NSMaxX(align(saveToLabel)), NSMaxX(align(autoSaveLabel))) + 8.0;
+            NSMutableDictionary *rows = [NSMutableDictionary dictionaryWithDictionary:@{@"column": @(column), @"gap": @(gap), @"left": @(left)}];
+            report[@"folderRows"] = rows;
+            for (NSArray *pair in @[@[saveTo, saveToArrow, @"saveToLocationButton"], @[autoSave, autoSaveArrow, @"autoSaveToLocationButton"]]) {
+                NSRect button = align(pair[0]), mark = [pane convertRect:[pair[1] frame] fromView:[pair[1] superview]];
+                rows[pair[2]] = @{@"button": NSStringFromRect(button), @"arrow": NSStringFromRect(mark)};
+                if (fabs(NSMinX(mark) - column) > 0.5)
+                    return Fail(71, [NSString stringWithFormat:@"the %@ arrow starts at x %.1f, General's arrow column at %.1f", pair[2], NSMinX(mark), column]);
+                if (fabs(NSMinX(mark) - NSMaxX(button) - gap) > 0.5)
+                    return Fail(72, [NSString stringWithFormat:@"%@ ends %.1f pt before its arrow, the \"Password data types\" field %.1f pt",
+                                     pair[2], NSMinX(mark) - NSMaxX(button), gap]);
+                if (fabs(NSMinX(button) - left) > 0.5)
+                    return Fail(73, [NSString stringWithFormat:@"%@ starts at x %.1f, not 8 pt after the longer label (%.1f)", pair[2], NSMinX(button), left]);
+            }
+            NSRect button = align(autoSave), first = align(clippings), second = align(favorites);
+            BOOL flipped = [pane isFlipped];
+            double below = flipped ? NSMinY(first) - NSMaxY(button) : NSMinY(button) - NSMaxY(first);
+            rows[@"clippings"] = NSStringFromRect(first);
+            rows[@"favorites"] = NSStringFromRect(second);
+            rows[@"lineBelowButton"] = @(below);
+            if (fabs(NSMinX(first) - NSMinX(button)) > 0.5 || fabs(below - 6.0) > 0.5)
+                return Fail(74, [NSString stringWithFormat:@"\"Clippings\" starts at x %.1f, %.1f pt below the folder button (x %.1f), not at its "
+                                 "left edge one row gap (6 pt) below it", NSMinX(first), below, NSMinX(button)]);
+            if (fabs(NSMidY(second) - NSMidY(first)) > 0.5 || fabs(NSMinX(second) - NSMaxX(first) - 8.0) > 0.5)
+                return Fail(75, [NSString stringWithFormat:@"\"Favorites\" (%@) is not on the line of \"Clippings\" (%@), the NIB's 8 pt after it",
+                                 NSStringFromRect(second), NSStringFromRect(first)]);
+            double nearest = CGFLOAT_MAX;
+            NSString *next = nil;
+            for (NSView *v in [pane subviews]) {
+                if ([v isHiddenOrHasHiddenAncestor] || v == clippings || v == favorites) continue;
+                NSRect r = align(v);
+                if (v == clippings || v == favorites || ![v isKindOfClass:[NSControl class]] || [[v identifier] isEqualToString:@"accessibilityPermissionsRow"])
+                    for (NSView *child in [v subviews])
+                        if ([child isKindOfClass:[NSBox class]]) r = [pane convertRect:[child alignmentRectForFrame:[child frame]] fromView:v];
+                for (NSButton *box in @[clippings, favorites]) {
+                    NSRect b = align(box);
+                    if (NSIntersectsRect(NSInsetRect(r, 0.25, 0.25), b))
+                        return Fail(76, [NSString stringWithFormat:@"\"%@\" (%@) runs into %@ (%@)", [box title], NSStringFromRect(b), v, NSStringFromRect(r)]);
+                    if ([box fittingSize].width > NSWidth([box frame]) + 0.5 || !NSContainsRect([pane bounds], [box frame]))
+                        return Fail(76, [NSString stringWithFormat:@"\"%@\" is cut off or outside the pane: %@", [box title], NSStringFromRect([box frame])]);
+                }
+                double distance = flipped ? NSMinY(r) - NSMaxY(first) : NSMinY(first) - NSMaxY(r);
+                if (distance > -0.5 && distance < nearest) { nearest = distance; next = [v description]; }
+            }
+            rows[@"nextBelow"] = next ?: @"";
+            rows[@"nextBelowGap"] = @(nearest);
+            if (next == nil || fabs(nearest - 16.0) > 0.5)
+                return Fail(77, [NSString stringWithFormat:@"what follows the \"Clippings\" line starts %.1f pt below it, not a section gap (16 pt): %@", nearest, next]);
+            NSArray *order = @[saveTo, saveToArrow, autoSave, autoSaveArrow, clippings, favorites];
+            NSMutableArray *tab = [NSMutableArray array];
+            NSView *v = [[prefs tabView] nextKeyView];
+            for (int i = 0; v != nil && v != [prefs tabView] && i < 500; i++, v = [v nextKeyView])
+                if ([order containsObject:v] && ![tab containsObject:v]) [tab addObject:v];
+            NSMutableArray *spoken = [NSMutableArray array];
+            for (id child in [pane accessibilityChildren]) {
+                id view = [child isKindOfClass:[NSCell class]] ? [(NSCell *)child controlView] : child;
+                if ([order containsObject:view] && ![spoken containsObject:view]) [spoken addObject:view];
+            }
+            NSMutableArray *names = [NSMutableArray array];
+            for (NSArray *list in @[tab, spoken]) {
+                NSMutableArray *n = [NSMutableArray array];
+                for (NSView *x in list) [n addObject:@([order indexOfObject:x])];
+                [names addObject:n];
+            }
+            rows[@"tabOrder"] = names[0];
+            rows[@"voiceOverOrder"] = names[1];
+            if (![tab isEqualToArray:order])
+                return Fail(78, [NSString stringWithFormat:@"Tab goes through the folder rows as %@, not 0..5 (button, arrow, button, arrow, Clippings, Favorites)", names[0]]);
+            if (![spoken isEqualToArray:order])
+                return Fail(79, [NSString stringWithFormat:@"VoiceOver goes through the folder rows as %@, not 0..5 (button, arrow, button, arrow, Clippings, Favorites)", names[1]]);
         } else if ([mode isEqualToString:@"inset-label"]) {
             // Its text fits: only the 2 pt it keeps free reach past the content's edge, so
             // nothing of it is cut off.
@@ -621,6 +825,22 @@ class PreferencesWindowWidthRegressionTests(PreferencesNibCase):
     def test_controls_that_take_any_width_follow_the_window(self) -> None:
         self.check("elastic-follows", "a wrapping label, a slider, the arrow column or the Acknowledgements text does not end "
                    "at the window's width less the pane's inset")
+
+    def test_a_long_folder_name_is_shortened_and_widens_nothing(self) -> None:
+        self.check("long-folder-name", "a folder name widens the window, is shortened although it fits the button up to its "
+                   "arrow column, a 60-character one is not shortened in the middle to that width, or a name lacks its path as "
+                   "tooltip or its full name for VoiceOver, or cuts off a label or checkbox of General")
+
+    def test_a_long_folder_name_is_shortened_with_the_xib_titles(self) -> None:
+        self.check("long-folder-name", "a long folder name widens the window or cuts off a label or checkbox (xib titles)", xib=True)
+
+    def test_folder_buttons_end_at_the_arrow_column_with_their_options_below(self) -> None:
+        self.check("folder-rows", "a folder button does not keep its left edge and end the standard gap before its arrow in "
+                   "General's arrow column, Clippings and Favorites are not on their own line below it, or Tab or VoiceOver "
+                   "do not go through the rows as they are seen")
+
+    def test_folder_buttons_end_at_the_arrow_column_with_the_xib_titles(self) -> None:
+        self.check("folder-rows", "a folder button or its options line is out of place (xib titles)", xib=True)
 
     def test_a_label_reaching_out_only_by_its_inset_keeps_its_frame(self) -> None:
         self.check("inset-label", "a label whose text ends at the right edge is shortened by the 2 pt its frame keeps free")

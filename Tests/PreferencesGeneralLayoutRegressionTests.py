@@ -47,6 +47,9 @@ sys.path.insert(0, str(FIXTURES))
 import GeneralPaneXib  # noqa: E402
 
 HEADING_GAP, ROW_GAP, SECTION_GAP = 8, 6, 16
+# The builders put "Clippings" and "Favorites" on a line of their own under "Save forgotten items
+# to:" (a checkbox line, 16 pt, one row gap down): the pane grows by that much at run time.
+OPTIONS_LINE = ROW_GAP + 16
 
 
 def awake_builders(last: str = "buildGeneralPermissionsPreferenceRow") -> list[str]:
@@ -373,8 +376,8 @@ class PreferencesGeneralLayoutRegressionTests(unittest.TestCase):
                     for s in self.steps(True, order, values, spec=self.short_spec):
                         where = f"XIB 40 pt shorter, {order}, {values}, {s['step']}"
                         self.check_row(s, where)
-                        self.assertEqual((s["paneHeight"], s["row"]["frame"][1]), (self.short_height + 40, 8),
-                                         f"{where}: the pane did not grow by the 40 pt the row needs")
+                        self.assertEqual((s["paneHeight"], s["row"]["frame"][1]), (self.short_height + 40 + OPTIONS_LINE, 8),
+                                         f"{where}: the pane did not grow by the 40 pt the row needs and the options line")
 
     def test_hidden_controls_do_not_hold_the_permissions_row_down(self) -> None:
         for s in self.steps(True, "builders-first", "factory", "hide-last"):
@@ -440,15 +443,15 @@ class PreferencesGeneralLayoutRegressionTests(unittest.TestCase):
                         wrong.append(f"'{p['name']}' -> '{n['name']}': {n['top'] - p['bottom']:g} pt, not {want}")
                 self.assertEqual(wrong, [], f"{where}: views out of their row, gaps off the scheme")
                 self.check_row(s, where)
-                self.assertEqual((s["paneHeight"], s["row"]["frame"][1]), (height, 8),
-                                 f"{where}: the XIB's pane is not as tall as its rows and the permissions row need")
+                self.assertEqual((s["paneHeight"], s["row"]["frame"][1]), (height + OPTIONS_LINE, 8),
+                                 f"{where}: the pane is not as tall as the XIB's rows, the options line and the permissions row need")
 
     def test_masters_nib_keeps_the_permissions_row_in_place(self) -> None:
         for s in self.steps(False, "builders-first", "stored"):
             where = f"master's NIB, {s['step']}"
             self.check_row(s, where)
             self.assertEqual(s["row"]["frame"][1], 8, where)
-            self.assertEqual(s["paneHeight"], 520, f"{where}: the pane changed its height")
+            self.assertEqual(s["paneHeight"], 520 + OPTIONS_LINE, f"{where}: the pane did not grow by the options line alone")
 
 
 if __name__ == "__main__":

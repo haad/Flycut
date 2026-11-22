@@ -1439,6 +1439,89 @@ static BOOL FlycutIsDesktopFolder(NSURL *url)
 	return [[[url path] stringByStandardizingPath] isEqualToString:[FlycutDesktopPath() stringByStandardizingPath]];
 }
 
+// A folder button reaches from its left edge (FlycutAlignFolderButtons) to its
+// Restore Default arrow, which stands in General's arrow column
+// (-buildGeneralRestoreDefaultButtons). Its width comes from the pane's other
+// rows, not from its title: a long folder name never widens Preferences and
+// is shortened in the middle instead (FlycutFolderButtonTitle; the tooltip
+// gives the full path, -updateSaveLocationButtonTitles). Its hugging stays
+// below the priority that pulls it to its label, so a short name does not
+// shrink it.
+static void FlycutLetFolderButtonFillItsRow(NSButton *button)
+{
+	if (button == nil || [button translatesAutoresizingMaskIntoConstraints])
+		return;
+	[button setContentHuggingPriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+}
+
+// "Clippings" and "Favorites" belong to "Save forgotten items to:" and leave
+// its folder button the room up to the arrow column: they get a line of their
+// own below it, starting at the button's left edge, one row gap (6 pt, as
+// between the rows of a section) down, with the NIB's gap between the two.
+// Every constraint that held them on the button's line goes. The pane grows
+// by that line when the rows built after this one find no room
+// (-buildGeneralPermissionsPreferenceRow).
+static void FlycutPutFolderOptionsBelow(NSView *pane, NSButton *button, NSButton *first, NSButton *second)
+{
+	if (button == nil || first == nil || second == nil || [button superview] != pane || [first superview] != pane ||
+	    [second superview] != pane || [button translatesAutoresizingMaskIntoConstraints] ||
+	    [first translatesAutoresizingMaskIntoConstraints] || [second translatesAutoresizingMaskIntoConstraints])
+		return;
+	CGFloat between = 8.0;
+	NSMutableArray *held = [NSMutableArray array];
+	for (NSLayoutConstraint *constraint in [pane constraints]) {
+		id a = [constraint firstItem], b = [constraint secondItem];
+		if (a != first && a != second && b != first && b != second)
+			continue;
+		if (a == second && b == first && [constraint firstAttribute] == NSLayoutAttributeLeading &&
+		    [constraint secondAttribute] == NSLayoutAttributeTrailing && [constraint relation] == NSLayoutRelationEqual)
+			between = [constraint constant];
+		[held addObject:constraint];
+	}
+	[NSLayoutConstraint deactivateConstraints:held];
+	[pane addConstraints:@[
+		[NSLayoutConstraint constraintWithItem:first attribute:NSLayoutAttributeLeading relatedBy:NSLayoutRelationEqual
+		                                toItem:button attribute:NSLayoutAttributeLeading multiplier:1 constant:0],
+		[NSLayoutConstraint constraintWithItem:first attribute:NSLayoutAttributeTop relatedBy:NSLayoutRelationEqual
+		                                toItem:button attribute:NSLayoutAttributeBottom multiplier:1 constant:6],
+		[NSLayoutConstraint constraintWithItem:second attribute:NSLayoutAttributeLeading relatedBy:NSLayoutRelationEqual
+		                                toItem:first attribute:NSLayoutAttributeTrailing multiplier:1 constant:between],
+		[NSLayoutConstraint constraintWithItem:second attribute:NSLayoutAttributeCenterY relatedBy:NSLayoutRelationEqual
+		                                toItem:first attribute:NSLayoutAttributeCenterY multiplier:1 constant:0],
+	]];
+}
+
+// The title a folder button shows for a folder name: the name when the button
+// holds it whole at its width, else as much of its start and its end as fits
+// around an ellipsis, measured with a copy of the button's own cell (font and
+// bezel). A rounded button draws its cell's middle truncation at the end
+// ("Clippings..."), so the title is shortened here instead.
+static NSString *FlycutFolderButtonTitle(NSButton *button, NSString *name)
+{
+	CGFloat widest = NSWidth([button frame]);
+	NSButtonCell *cell = [[[button cell] copy] autorelease];
+	[cell setTitle:name];
+	if (cell == nil || [cell cellSize].width <= widest)
+		return name;
+	// Whole characters only: an emoji or an accented letter stays one.
+	NSMutableArray *characters = [NSMutableArray array];
+	for (NSUInteger i = 0; i < [name length];) {
+		NSRange character = [name rangeOfComposedCharacterSequenceAtIndex:i];
+		[characters addObject:[name substringWithRange:character]];
+		i = NSMaxRange(character);
+	}
+	for (NSUInteger kept = [characters count] - 1; kept > 1; kept--) {
+		NSUInteger head = (kept + 1) / 2, tail = kept - head;
+		NSString *title = [NSString stringWithFormat:@"%@\u2026%@",
+		                   [[characters subarrayWithRange:NSMakeRange(0, head)] componentsJoinedByString:@""],
+		                   [[characters subarrayWithRange:NSMakeRange([characters count] - tail, tail)] componentsJoinedByString:@""]];
+		[cell setTitle:title];
+		if ([cell cellSize].width <= widest)
+			return title;
+	}
+	return @"\u2026";
+}
+
 // The two folder buttons share their left edge (the one further right) and
 // their width (the wider one's), so their arrows stand in one column. Each
 // button's NIB constraint "leading = label.trailing + c" only holds it at
@@ -1618,7 +1701,12 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		observer = [[FlycutRestoreDefaultsObserver alloc] initWithController:self];
 	const CGFloat side = FlycutRestoreArrowSide, gap = FlycutRestoreArrowGap, margin = 16.0;
 	FlycutAlignFolderButtons(pane, saveToLocationButton, autoSaveToLocationButton);
+	FlycutPutFolderOptionsBelow(pane, autoSaveToLocationButton, (NSButton *)FlycutBoundControl(pane, @"saveForgottenClippings", [NSButton class]),
+	                            (NSButton *)FlycutBoundControl(pane, @"saveForgottenFavorites", [NSButton class]));
+	FlycutLetFolderButtonFillItsRow(saveToLocationButton);
+	FlycutLetFolderButtonFillItsRow(autoSaveToLocationButton);
 	NSMutableArray *heldAtMargin = [NSMutableArray array];  // @[arrow, the constraint holding its field at the margin]
+	NSMutableArray *folderArrows = [NSMutableArray array];
 	NSButton *columnArrow = nil;
 	CGFloat columnAnchorMaxX = 0.0;
 	for (NSString *key in [FlycutGeneralRestoreKeys() arrayByAddingObjectsFromArray:FlycutFolderRestoreKeys()]) {
@@ -1629,7 +1717,9 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		NSView *anchor = field;
 		NSButton *button = [self restoreDefaultButtonWithIdentifier:FlycutRestoreDefaultsIdentifier(key)
 		                                        accessibilityLabel:FlycutGeneralRestoreLabel(key)];
-		[pane addSubview:button];
+		// Right after its control among the pane's views, so VoiceOver reads
+		// it there, as it is seen.
+		[pane addSubview:button positioned:NSWindowAbove relativeTo:field];
 
 		if ([anchor translatesAutoresizingMaskIntoConstraints]) {
 			// Frame layout: controls to the right on this line move over, or
@@ -1681,7 +1771,9 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 					break;
 				}
 			}
-			if (margined != nil)
+			if (folder)
+				[folderArrows addObject:button];
+			else if (margined != nil)
 				[heldAtMargin addObject:@[button, margined]];
 			else if (!followed && !folder && NSMaxX([anchor frame]) > columnAnchorMaxX) {
 				columnArrow = button;
@@ -1722,6 +1814,16 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 			                                                 relatedBy:NSLayoutRelationEqual toItem:columnArrow
 			                                                 attribute:NSLayoutAttributeLeading multiplier:1 constant:0]];
 		}
+	}
+	// The folder arrows stand in that column as well (at the right margin
+	// without one), and each folder button reaches its arrow.
+	for (NSButton *button in folderArrows) {
+		if (columnArrow != nil)
+			[pane addConstraint:[NSLayoutConstraint constraintWithItem:button attribute:NSLayoutAttributeLeading relatedBy:NSLayoutRelationEqual
+			                                                    toItem:columnArrow attribute:NSLayoutAttributeLeading multiplier:1 constant:0]];
+		else
+			[pane addConstraint:[NSLayoutConstraint constraintWithItem:pane attribute:NSLayoutAttributeTrailing relatedBy:NSLayoutRelationEqual
+			                                                    toItem:button attribute:NSLayoutAttributeTrailing multiplier:1 constant:margin]];
 	}
 	if ([pane window] != nil)
 		[[NSNotificationCenter defaultCenter] addObserver:observer selector:@selector(valuesChanged:)
@@ -1888,12 +1990,19 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 	return nil;
 }
 
-// A save button shows the name of its stored folder, or of the Desktop.
+// A save button shows the name of its stored folder, or of the Desktop, and
+// its full path as the tooltip. A long name is shortened on the button;
+// VoiceOver reads it whole (control and cell).
 -(void)updateSaveLocationButtonTitles
 {
 	for (NSString *key in FlycutFolderRestoreKeys()) {
 		NSURL *url = [[NSUserDefaults standardUserDefaults] URLForKey:key];
-		[[self saveLocationButtonForKey:key] setTitle:url != nil ? [url lastPathComponent] : [FlycutDesktopPath() lastPathComponent]];
+		NSButton *button = [self saveLocationButtonForKey:key];
+		NSString *name = url != nil ? [url lastPathComponent] : [FlycutDesktopPath() lastPathComponent];
+		[button setTitle:FlycutFolderButtonTitle(button, name)];
+		[button setAccessibilityTitle:name];
+		[[button cell] setAccessibilityTitle:name];
+		[button setToolTip:url != nil ? [url path] : FlycutDesktopPath()];
 	}
 }
 
@@ -2324,14 +2433,14 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 		[prefsPanel setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces];
 	[NSApp activateIgnoringOtherApps: YES];
 
+	// Folder names and Restore Default arrows as they are now, before the
+	// window shows and before its width is worked out from them.
+	[self updateSaveLocationButtonTitles];
+	[self updateRestoreDefaultButtons];
 	// UKPrefsPanel controls the height; the width is worked out here, once
 	// the window is opened. A window that is already open keeps its size.
 	if (![prefsPanel isVisible])
 		[self fitPreferencesWindowWidth];
-	// Folder names and Restore Default arrows as they are now, before the
-	// window shows.
-	[self updateSaveLocationButtonTitles];
-	[self updateRestoreDefaultButtons];
 	BOOL alreadyShown = [prefsPanel isVisible];
 	[prefsPanel makeKeyAndOrderFront:self];
 	// A window that becomes visible makes the first field of its key-view loop
