@@ -66,7 +66,7 @@ Here's a complete list of keys you can use in the Bezel.
 
 **Search Window**
 
-Press the Search Hotkey (Control-Shift-S by default) to open the search window. Type to filter your clipboard history, use the arrow keys to navigate results and press Return to paste the selected item. You can change or clear the shortcut under "Search clipboard hotkey" in Preferences.
+Press the Search Hotkey (Control-Shift-S by default) to open the search window. Type to filter your clipboard history, use the arrow keys to navigate results and press Return to paste the selected item. You can change or clear the shortcut under "Search clipboard hotkey:" in Preferences.
 
 **Text Formatting**
 
@@ -88,7 +88,7 @@ Drag an item out of the list into another app or the Finder to drop its content 
 
 Type to filter both lists. Click the icon again, click outside the list or switch to another app to close it.
 
-"Display in menu" in Preferences sets how many rows the list shows before it scrolls: 20 by default, at most as many as fit on the screen. The list always holds all your clippings.
+"Display in menu:" in Preferences sets how many rows the list shows before it scrolls: 20 by default, at most as many as fit on the screen. The list always holds all your clippings.
 
 You can also Option-Click the Flycut menu icon to disable or reenable clipboard tracking, in case you are copying sensitive information such as passwords.
 

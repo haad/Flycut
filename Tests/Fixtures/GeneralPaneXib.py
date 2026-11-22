@@ -27,7 +27,8 @@ GENERAL = "net.sf.jumpcut.preferences.general.tiff"
 VERTICAL = {"top", "bottom", "centerY", "firstBaseline", "lastBaseline", "height"}
 CLASSES = {"button": "NSButton", "textField": "NSTextField", "popUpButton": "NSPopUpButton", "stepper": "NSStepper"}
 # Unbound labels without an outlet whose title the stack changed: their title in master's NIB.
-NIB_TITLES = {"IZZ-Ep-7nD": "Passwords:"}
+NIB_TITLES = {"IZZ-Ep-7nD": "Passwords:", "418": "Save", "419": "Remember", "420": "Display in menu",
+              "Ubt-DS-zHf": "Favorites"}
 
 
 def _title(cell: ET.Element | None) -> str | None:

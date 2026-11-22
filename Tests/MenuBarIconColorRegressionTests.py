@@ -318,7 +318,7 @@ int main(void)
                 return 30;
             }
         }
-        NSDictionary *stateViews = @{@"Active": @[activeWell, activePreview], @"Paused": @[pausedWell, pausedPreview]};
+        NSDictionary *stateViews = @{@"Active:": @[activeWell, activePreview], @"Paused:": @[pausedWell, pausedPreview]};
         for (NSString *title in stateViews) {
             NSTextField *label = nil;
             for (NSView *child in [colorRow subviews])
@@ -370,7 +370,7 @@ int main(void)
             fprintf(stderr, "the automatic-colour hint is missing\n");
             return 36;
         }
-        NSTextField *rowLabel = FindLabel(panel, @"Bezel width");
+        NSTextField *rowLabel = FindLabel(panel, @"Bezel width:");
         if (rowLabel == nil || [[hint font] pointSize] >= [[rowLabel font] pointSize]) {
             fprintf(stderr, "hint %.1f pt, row label %.1f pt\n", [[hint font] pointSize], [[rowLabel font] pointSize]);
             return 38;
@@ -390,7 +390,7 @@ int main(void)
             }
         }
         NSView *rowContent = [hint superview];
-        NSArray *options = @[FindLabel(colorRow, @"Active"), activeWell, activePreview, FindLabel(colorRow, @"Paused"), pausedWell, pausedPreview];
+        NSArray *options = @[FindLabel(colorRow, @"Active:"), activeWell, activePreview, FindLabel(colorRow, @"Paused:"), pausedWell, pausedPreview];
         CGFloat optionsBottom = CGFLOAT_MAX;
         for (NSView *option in options)
             optionsBottom = MIN(optionsBottom, NSMinY([option convertRect:[option bounds] toView:rowContent]));
@@ -435,7 +435,7 @@ int main(void)
             }
             previousMaxX = NSMaxX(r);
         }
-        NSTextField *activeLabel = FindLabel(colorRow, @"Active");
+        NSTextField *activeLabel = FindLabel(colorRow, @"Active:");
         CGFloat titleStart = NSMinX([checkbox convertRect:[[checkbox cell] titleRectForBounds:[checkbox bounds]] toView:panel]);
         CGFloat activeStart = NSMinX([[activeLabel superview] convertRect:[activeLabel alignmentRectForFrame:[activeLabel frame]] toView:panel]);
         if (fabs(activeStart - titleStart) > 0.5) {
@@ -455,7 +455,7 @@ int main(void)
         // control on General), its preview 4 pt after the well, and the second
         // pair 16 pt after the first; measured by alignment rects.
         {
-            NSTextField *pausedLabel = FindLabel(colorRow, @"Paused");
+            NSTextField *pausedLabel = FindLabel(colorRow, @"Paused:");
             NSArray *line = @[activeLabel, activeWell, activePreview, pausedLabel, pausedWell, pausedPreview];
             const double wanted[] = {8.0, 4.0, 16.0, 8.0, 4.0};
             for (NSUInteger i = 0; i + 1 < [line count]; i++) {

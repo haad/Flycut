@@ -22,9 +22,16 @@ view, after the real -showPreferencePanel: (width fit, toolbar style):
   sliders and hotkey, its checkboxes), 6 pt between rows (the colour options and their hint
   under the colour checkbox, the Hotkeys help text under the recorders), 16 pt below the last.
 
+Every label that names the control after it ends with a colon ("Bezel width:", "Main Hotkey:"),
+as "Save forgotten items to:" did; the control's VoiceOver name (its label, else its title, else
+the label it is linked to) has none, so VoiceOver does not read a colon with the name. Not labels
+in front of a control: checkbox titles, section headings, the words at a slider's ends, hints.
+
 The fixture loads master's compiled MainMenu.nib (FLYCUT_TEST_RESOURCE_BUNDLE), so General's
 check runs on master's constraints, which hold the two controls the same way as MainMenu.xib,
-once with the NIB's checkbox titles and once with the XIB's.
+once with the NIB's titles and once with the XIB's (checkboxes, and the labels in front of
+General's bound controls, as a build from MainMenu.xib titles them). MainMenu.xib's own labels
+are checked in the file itself.
 The drawn result is for the sight test.
 """
 from __future__ import annotations
@@ -40,6 +47,7 @@ from PreferencesNibFixture import ROOT, PreferencesNibCase  # noqa: E402
 # The password checkboxes in front of the list fields, titled as in MainMenu.xib (master's
 # compiled NIB has longer titles, which put the column further right).
 XIB_CHECKBOXES = ("values.skipPboardTypes", "values.skipPasswordLengths")
+GENERAL_TAB, HOTKEYS_TAB = "net.sf.jumpcut.preferences.general.tiff", "net.sf.jumpcut.preferences.hotkey.tiff"
 
 
 def xib_checkbox_titles() -> tuple[str, ...]:
@@ -48,7 +56,63 @@ def xib_checkbox_titles() -> tuple[str, ...]:
         cell, binding = button.find("buttonCell"), button.find("connections/binding[@name='value']")
         if cell is not None and binding is not None and binding.get("keyPath") in XIB_CHECKBOXES:
             pairs.append(f"{binding.get('keyPath')}={cell.get('title')}")
-    return tuple(pairs)
+    return tuple(pairs) + tuple(f"label:{key}={title}" for key, title in xib_bound_control_labels())
+
+
+def _xib_title(view: ET.Element) -> str | None:
+    cell = view.find("textFieldCell")
+    if cell is None:
+        return None
+    if cell.get("title") is not None:
+        return cell.get("title")
+    node = cell.find("string[@key='title']")
+    return node.text if node is not None else None
+
+
+def _xib_is_label(view: ET.Element) -> bool:
+    cell = view.find("textFieldCell")
+    return (view.tag == "textField" and cell is not None and cell.get("editable") != "YES"
+            and view.find("connections/binding[@name='value']") is None)
+
+
+def _xib_frame(view: ET.Element) -> tuple[float, float, float, float] | None:
+    rect = view.find("rect[@key='frame']")
+    return None if rect is None else tuple(float(rect.get(k)) for k in ("x", "y", "width", "height"))
+
+
+def xib_labels_in_front_of_controls(tab: str) -> list[tuple[str, ET.Element]]:
+    """(title, control) for every label of a tab in MainMenu.xib whose nearest sibling to its right,
+    on the label's middle line, is a control (not another label)."""
+    item = next(e for e in ET.parse(ROOT / "English.lproj" / "MainMenu.xib").getroot().iter("tabViewItem")
+                if e.get("identifier") == tab)
+    found = []
+    for subviews in item.iter("subviews"):
+        views = [v for v in subviews if _xib_frame(v) is not None]
+        for label in views:
+            if not _xib_is_label(label):
+                continue
+            lx, ly, lw, lh = _xib_frame(label)
+            mid, right = ly + lh / 2, None
+            for other in views:
+                ox, oy, ow, oh = _xib_frame(other)
+                if other is label or ox < lx + lw - 0.5 or not oy <= mid <= oy + oh:
+                    continue
+                if right is None or ox < _xib_frame(right)[0]:
+                    right = other
+            if right is not None and not _xib_is_label(right):
+                found.append((_xib_title(label) or "", right))
+    return found
+
+
+def xib_bound_control_labels() -> list[tuple[str, str]]:
+    """(key path, title) of General's labels in front of a bound control, as MainMenu.xib has them."""
+    pairs = []
+    for title, control in xib_labels_in_front_of_controls(GENERAL_TAB):
+        for name in ("value", "selectedIndex"):
+            binding = control.find(f"connections/binding[@name='{name}']")
+            if binding is not None:
+                pairs.append((binding.get("keyPath"), title))
+    return pairs
 
 FIXTURE = r'''
 static BOOL gVisible = NO;
@@ -69,11 +133,15 @@ static void FakeClose(NSWindow *self, SEL cmd)
 
 static NSMutableDictionary *report;
 static NSDictionary *xibTitles;
+static NSTextField *LabelInFront(NSView *control, NSArray *views, NSView *root);
 static void SetXibTitles(void)
 {
-    for (NSView *view in [[[controller valueForKey:@"savingSectionLabel"] superview] subviews]) {
+    NSView *pane = [[controller valueForKey:@"savingSectionLabel"] superview];
+    for (NSView *view in [pane subviews]) {
         NSString *title = xibTitles[BoundKeyPath(view) ?: @""];
         if (title != nil && [view isKindOfClass:[NSButton class]]) [(NSButton *)view setTitle:title];
+        NSString *labelTitle = xibTitles[[@"label:" stringByAppendingString:BoundKeyPath(view) ?: @""]];
+        if (labelTitle != nil) [LabelInFront(view, [pane subviews], pane) setStringValue:labelTitle];
     }
 }
 static int Fail(int code, NSString *what)
@@ -110,6 +178,86 @@ static NSButton *Checkbox(NSArray *views, NSString *title)
 static double TextWidth(NSTextField *label) { return ceil([[label attributedStringValue] size].width); }
 static BOOL Near(double a, double b) { return fabs(a - b) <= 0.5; }
 static NSString *Num(double v) { return [NSString stringWithFormat:@"%.1f", v]; }
+
+// A label: a plain text field (not editable, no bezel) that shows.
+static BOOL IsLabelView(NSView *v)
+{
+    return [v isKindOfClass:[NSTextField class]] && ![(NSTextField *)v isEditable] && ![(NSTextField *)v isBezeled] && ![v isHiddenOrHasHiddenAncestor];
+}
+// The nearest text label on a control's left, on the control's line.
+static NSTextField *LabelInFront(NSView *control, NSArray *views, NSView *root)
+{
+    NSRect c = R(control, root);
+    NSTextField *best = nil;
+    for (NSView *v in views) {
+        if (v == control || !IsLabelView(v)) continue;
+        NSRect r = R(v, root);
+        if (NSMaxX(r) > NSMinX(c) + 0.5 || NSMaxY(r) <= NSMinY(c) || NSMinY(r) >= NSMaxY(c)) continue;
+        if (best == nil || NSMaxX(r) > NSMaxX(R(best, root))) best = (NSTextField *)v;
+    }
+    return best;
+}
+// What a label can name: a control that shows (not an arrow, not a label), outside any other control.
+static BOOL IsNamedControl(NSView *v)
+{
+    if ([v isHiddenOrHasHiddenAncestor] || IsArrow(v) || IsLabelView(v)) return NO;
+    for (NSView *up = [v superview]; up != nil; up = [up superview])
+        if ([up isKindOfClass:[NSControl class]] || [up isKindOfClass:NSClassFromString(@"SRRecorderControl")]) return NO;
+    return [v isKindOfClass:[NSControl class]] || [v isKindOfClass:NSClassFromString(@"SRRecorderControl")];
+}
+// The nearest view on a label's right whose line takes in the label's middle: a control, a label or nothing.
+static NSView *RightOf(NSTextField *label, NSArray *views, NSView *root)
+{
+    NSRect l = R(label, root);
+    NSView *best = nil;
+    for (NSView *v in views) {
+        if (v == label || !(IsLabelView(v) || IsNamedControl(v))) continue;
+        NSRect r = R(v, root);
+        if (NSMinX(r) < NSMaxX(l) - 0.5 || NSMidY(l) < NSMinY(r) || NSMidY(l) > NSMaxY(r)) continue;
+        if (best == nil || NSMinX(r) < NSMinX(R(best, root))) best = v;
+    }
+    return best;
+}
+// What VoiceOver says for a control's name: the element it reads (the view, else its cell), its
+// label (AXDescription), else its title (AXTitle), else the text of the label linked as its title.
+static NSString *SpokenName(NSView *control)
+{
+    id element = control, cell = [control respondsToSelector:@selector(cell)] ? [(NSControl *)control cell] : nil;
+    if (![control isAccessibilityElement] && [cell isAccessibilityElement]) element = cell;
+    NSString *name = [element accessibilityLabel];
+    if ([name length] == 0) name = [element accessibilityTitle];
+    if ([name length] == 0) name = [[element accessibilityTitleUIElement] accessibilityValue];
+    return name ?: @"";
+}
+// A label in front of a control ends with one colon, right after its last word, and VoiceOver
+// reads it as that text; the control's spoken name has no colon at all.
+static int CheckNamingLabel(NSTextField *label, NSView *control, NSMutableArray *seen)
+{
+    NSString *text = [label stringValue], *name = SpokenName(control);
+    [seen addObject:[NSString stringWithFormat:@"%@ -> %@ \"%@\"", text, [control className], name]];
+    BOOL one = [text hasSuffix:@":"] && ![text hasSuffix:@"::"] && ![text hasSuffix:@" :"] &&
+               [text rangeOfCharacterFromSet:[NSCharacterSet newlineCharacterSet]].location == NSNotFound;
+    if (!one) return Fail(100, [NSString stringWithFormat:@"label \"%@\" in front of a %@ does not end with one colon", text, [control className]]);
+    id element = NSAccessibilityUnignoredDescendant(label);
+    if (![[element accessibilityRole] isEqualToString:NSAccessibilityStaticTextRole] || ![[element accessibilityValue] isEqual:text])
+        return Fail(101, [NSString stringWithFormat:@"\"%@\" is not static text for VoiceOver (%@ %@)", text, [element accessibilityRole], [element accessibilityValue]]);
+    if ([name length] == 0 || [name rangeOfString:@":"].location != NSNotFound)
+        return Fail(102, [NSString stringWithFormat:@"the %@ after \"%@\" is spoken as \"%@\"", [control className], text, name]);
+    return 0;
+}
+// Every Restore Default arrow of a pane, shown or not, is spoken without a colon.
+static int CheckArrowNames(NSArray *views)
+{
+    int arrows = 0;
+    for (NSView *v in views) {
+        if (!IsArrow(v)) continue;
+        arrows++;
+        NSString *name = [v accessibilityLabel];
+        if ([name length] == 0 || [name rangeOfString:@":"].location != NSNotFound)
+            return Fail(103, [NSString stringWithFormat:@"Restore Default arrow %@ is spoken as \"%@\"", [v identifier], name]);
+    }
+    return arrows > 0 ? 0 : Fail(104, @"no Restore Default arrow found");
+}
 
 static void Show(void)
 {
@@ -165,7 +313,7 @@ static int Appearance(void)
     NSArray *views = Views(root);
     double W = NSWidth([[window contentView] bounds]);
     report[@"width"] = @(W);
-    NSArray *titles = @[@"Bezel transparency", @"Bezel width", @"Bezel height", @"Search clipboard hotkey:"];
+    NSArray *titles = @[@"Bezel transparency:", @"Bezel width:", @"Bezel height:", @"Search clipboard hotkey:"];
     NSArray *arrows = @[@"restoreDefaultBezelAlpha", @"restoreDefaultBezelWidth", @"restoreDefaultBezelHeight", @"restoreDefaultSearchHotkey"];
     NSMutableArray *labels = [NSMutableArray array], *controls = [NSMutableArray array];
     double widest = 0;
@@ -243,7 +391,7 @@ static int Hotkeys(void)
     double W = NSWidth([[window contentView] bounds]);
     report[@"width"] = @(W);
     NSView *recorder = [controller valueForKey:@"mainRecorder"];
-    NSTextField *label = Label(views, @"Main Hotkey");
+    NSTextField *label = Label(views, @"Main Hotkey:");
     NSView *arrow = WithId(views, @"restoreDefaultMainHotkey");
     NSTextField *help = nil;
     for (NSView *v in views) if ([v isKindOfClass:[NSTextField class]] && [[(NSTextField *)v stringValue] hasPrefix:@"To change"]) help = (NSTextField *)v;
@@ -254,7 +402,7 @@ static int Hotkeys(void)
     for (NSView *v in views)
         if ([v isKindOfClass:[NSTextField class]] && ![(NSTextField *)v isEditable] && v != help)
             column = MAX(column, 16 + TextWidth((NSTextField *)v) + 8);
-    int failed = CheckRow(label, recorder, arrow, column, W, root, @"Main Hotkey");
+    int failed = CheckRow(label, recorder, arrow, column, W, root, @"Main Hotkey:");
     if (failed) return failed;
     NSRect h = R(help, root);
     report[@"help"] = NSStringFromRect(h);
@@ -374,11 +522,74 @@ static int TypeScale(void)
     return 0;
 }
 
+// Appearance and Hotkeys (built and laid out in code; the Hotkeys label comes from the NIB): every
+// label whose nearest neighbour on its right is a control names it.
+static int Colons(void)
+{
+    NSArray *panes = @[@(appearancePane), @(hotkeysPane)];
+    NSArray *wanted = @[@[@"Bezel transparency:", @"Bezel width:", @"Bezel height:", @"Search clipboard hotkey:", @"Active:", @"Paused:"],
+                        @[@"Main Hotkey:"]];
+    NSMutableArray *seen = [NSMutableArray array];
+    for (NSUInteger p = 0; p < [panes count]; p++) {
+        NSInteger index = [panes[p] integerValue];
+        ChangePane(index);
+        NSView *root = Root(index);
+        NSArray *views = Views(root);
+        NSMutableSet *named = [NSMutableSet set];
+        for (NSView *v in views) {
+            if (!IsLabelView(v) || [[(NSTextField *)v stringValue] length] == 0) continue;
+            NSView *right = RightOf((NSTextField *)v, views, root);
+            if (right == nil || !IsNamedControl(right)) continue;
+            int failed = CheckNamingLabel((NSTextField *)v, right, seen);
+            if (failed) return failed;
+            [named addObject:[(NSTextField *)v stringValue]];
+        }
+        for (NSString *text in wanted[p])
+            if (![named containsObject:text]) return Fail(105, [NSString stringWithFormat:@"no label \"%@\" in front of a control (found %@)", text, seen]);
+        int failed = CheckArrowNames(views);
+        if (failed) return failed;
+    }
+    report[@"labels"] = seen;
+    return 0;
+}
+
+// General with MainMenu.xib's titles: the labels in front of its bound controls (titled by the
+// XIB in this mode) and in front of the two folder buttons, every arrow, and no label squeezed.
+static int GeneralColons(void)
+{
+    ChangePane(generalPane);
+    NSView *root = Root(generalPane);
+    NSArray *views = Views(root);
+    NSMutableArray *seen = [NSMutableArray array], *controls = [NSMutableArray array];
+    for (NSString *key in xibTitles)
+        if ([key hasPrefix:@"label:values."]) {
+            NSView *control = Bound(views, [key substringFromIndex:[@"label:values." length]]);
+            if (control == nil) return Fail(106, [@"no control bound to " stringByAppendingString:key]);
+            [controls addObject:control];
+        }
+    for (NSString *ivar in @[@"saveToLocationButton", @"autoSaveToLocationButton"]) [controls addObject:[controller valueForKey:ivar]];
+    if ([controls count] < 6) return Fail(107, [NSString stringWithFormat:@"only %lu labelled controls", (unsigned long)[controls count]]);
+    for (NSView *control in controls) {
+        NSTextField *label = LabelInFront(control, views, root);
+        if (label == nil) return Fail(108, [NSString stringWithFormat:@"no label in front of %@", NSStringFromRect(R(control, root))]);
+        int failed = CheckNamingLabel(label, control, seen);
+        if (failed) return failed;
+        NSSize natural = [label fittingSize];
+        CGFloat oneLine = [[label cell] cellSizeForBounds:NSMakeRect(0, 0, CGFLOAT_MAX, CGFLOAT_MAX)].height;
+        CGFloat atWidth = [[label cell] cellSizeForBounds:NSMakeRect(0, 0, NSWidth([label frame]), CGFLOAT_MAX)].height;
+        if (NSWidth([label frame]) + 0.5 < natural.width || atWidth > oneLine + 0.5)
+            return Fail(109, [NSString stringWithFormat:@"label \"%@\" is %@ pt wide, its text needs %@", [label stringValue], Num(NSWidth([label frame])), Num(natural.width)]);
+    }
+    report[@"labels"] = seen;
+    report[@"width"] = @(NSWidth([[window contentView] bounds]));
+    return CheckArrowNames(views);
+}
+
 int main(int argc, const char **argv)
 {
     @autoreleasepool {
         NSString *mode = [NSString stringWithUTF8String:argv[2]];
-        if ([mode isEqualToString:@"general-xib"]) {
+        if ([mode isEqualToString:@"general-xib"] || [mode isEqualToString:@"colons-xib"]) {
             NSMutableDictionary *titles = [NSMutableDictionary dictionary];
             for (int i = 4; i < argc; i++) {
                 NSString *pair = [NSString stringWithUTF8String:argv[i]];
@@ -409,7 +620,8 @@ int main(int argc, const char **argv)
         }
         Show();
         int result = [mode isEqualToString:@"appearance"] ? Appearance() : [mode isEqualToString:@"hotkeys"] ? Hotkeys()
-                   : [mode isEqualToString:@"acknowledgements"] ? Acknowledgements() : [mode hasPrefix:@"general"] ? General() : [mode isEqualToString:@"type-scale"] ? TypeScale() : 2;
+                   : [mode isEqualToString:@"acknowledgements"] ? Acknowledgements() : [mode hasPrefix:@"general"] ? General() : [mode isEqualToString:@"type-scale"] ? TypeScale()
+                   : [mode isEqualToString:@"colons"] ? Colons() : [mode isEqualToString:@"colons-xib"] ? GeneralColons() : 2;
         if (result == 0) Emit(report);
         return result;
     }
@@ -441,6 +653,31 @@ class PreferencesPaneLayoutTests(PreferencesNibCase):
 
     def test_general_controls_of_a_group_share_one_column_with_the_xib_titles(self) -> None:
         self.run_mode("general-xib", "General's grouped controls do not share a column (XIB titles)", xib_checkbox_titles())
+
+    def test_labels_in_front_of_a_control_end_with_a_colon_and_names_have_none(self) -> None:
+        self.run_mode("colons", "a label in front of a control lacks its colon, or VoiceOver reads one in a name")
+
+    def test_general_labels_end_with_a_colon_with_the_xib_titles(self) -> None:
+        self.run_mode("colons-xib", "a General label lacks its colon, or VoiceOver reads one in a name (XIB titles)",
+                      xib_checkbox_titles())
+
+    def test_xib_labels_in_front_of_a_control_end_with_a_colon(self) -> None:
+        for tab, least in ((GENERAL_TAB, 6), (HOTKEYS_TAB, 1)):
+            titles = [title.strip() for title, _ in xib_labels_in_front_of_controls(tab)]
+            self.assertGreaterEqual(len(titles), least, (tab, titles))
+            bad = [t for t in titles if not t.endswith(":") or t.endswith(("::", " :")) or "\n" in t]
+            self.assertEqual(bad, [], f"MainMenu.xib labels in front of a control without one colon at the end ({tab})")
+        self.assertEqual(len(xib_bound_control_labels()), 4, xib_bound_control_labels())
+
+    def test_help_quotes_the_labels_with_their_colons(self) -> None:
+        help_lines = (ROOT / "help.md").read_text(encoding="utf-8").splitlines()
+        for line in ('"Display in menu:" in Preferences sets how many rows the list shows before it scrolls: 20 by '
+                     'default, at most as many as fit on the screen. The list always holds all your clippings.',):
+            self.assertIn(line, help_lines)
+        text = "\n".join(help_lines)
+        self.assertIn('You can change or clear the shortcut under "Search clipboard hotkey:" in Preferences.', text)
+        for old in ('"Display in menu"', '"Search clipboard hotkey"', '"Bezel width"', '"Main Hotkey"', '"Remember"'):
+            self.assertNotIn(old, text)
 
 
 if __name__ == "__main__":

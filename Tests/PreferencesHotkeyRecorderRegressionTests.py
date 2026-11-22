@@ -789,7 +789,7 @@ static int ArrowColumns(void)
     // The column ends as far from the pane's right edge as the row labels start from its left
     // edge, in the pane's own view (where the window's width rule measures it).
     NSView *label = Find(panel, ^BOOL(NSView *view) {
-        return [view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] isEqualToString:@"Bezel width"];
+        return [view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] isEqualToString:@"Bezel width:"];
     });
     NSButton *width = RestoreButton(@"restoreDefaultBezelWidth");
     NSView *item = [[[prefs tabView] tabViewItemAtIndex:appearancePane] view];
@@ -806,7 +806,7 @@ static int ArrowColumns(void)
     NSView *paused = Find(panel, ^BOOL(NSView *view) { return [[view identifier] isEqualToString:@"menuIconPausedPreview"]; });
     NSButton *colors = (NSButton *)Find(panel, ^BOOL(NSView *view) { return [[view identifier] isEqualToString:@"menuIconCustomColorsCheckbox"]; });
     NSView *active = Find(panel, ^BOOL(NSView *view) {
-        return [view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] isEqualToString:@"Active"];
+        return [view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] isEqualToString:@"Active:"];
     });
     if (paused != nil) {
         CGFloat title = NSMinX([colors convertRect:[[colors cell] titleRectForBounds:[colors bounds]] toView:content]);

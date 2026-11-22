@@ -536,6 +536,14 @@ static void FlycutStyleAsHint(NSTextField *field)
 	[field setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
 	[field setTextColor:[NSColor secondaryLabelColor]];
 }
+
+// A label in front of a control names it and ends with a colon, as in macOS
+// forms ("Bezel width:", "Save forgotten items to:"). The control's VoiceOver
+// name is the same words without the colon, so it is not read with the name.
+static NSString *FlycutSpokenName(NSString *label)
+{
+	return [label stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@": "]];
+}
 static const CGFloat FlycutLabelGap = 8.0;
 static const CGFloat FlycutSectionGap = 16.0;
 static const CGFloat FlycutRowGap = 6.0;
@@ -953,8 +961,8 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
     [row addSubview:menuIconCustomColorsCheckbox];
     CGFloat titleX = rowLabelX + NSMinX([[menuIconCustomColorsCheckbox cell] titleRectForBounds:[menuIconCustomColorsCheckbox bounds]]);
 
-    NSTextField *activeLabel = [NSTextField labelWithString:@"Active"];
-    NSTextField *pausedLabel = [NSTextField labelWithString:@"Paused"];
+    NSTextField *activeLabel = [NSTextField labelWithString:@"Active:"];
+    NSTextField *pausedLabel = [NSTextField labelWithString:@"Paused:"];
     for (NSTextField *label in @[activeLabel, pausedLabel]) {
         [label setFont:checkboxFont];
         [label setTextColor:checkboxTitleColor];
@@ -1291,7 +1299,7 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 	newControl.numberOfTickMarks=ticks;
 	[newControl setMinValue:min];
 	[newControl setMaxValue:max];
-	FlycutSetAccessibilityLabel(newControl, title);
+	FlycutSetAccessibilityLabel(newControl, FlycutSpokenName(title));
 
 	[self setBinding:@"value" forKey:keyPath andOrAction:action on:newControl];
 
@@ -1299,7 +1307,7 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 
 	NSString *restoreIdentifier = [@"restoreDefault" stringByAppendingString:[[[keyPath substringToIndex:1] uppercaseString] stringByAppendingString:[keyPath substringFromIndex:1]]];
 	NSButton *restoreButton = [self restoreDefaultButtonWithIdentifier:restoreIdentifier
-	                                               accessibilityLabel:[@"Restore default " stringByAppendingString:[title lowercaseString]]];
+	                                               accessibilityLabel:[@"Restore default " stringByAppendingString:[FlycutSpokenName(title) lowercaseString]]];
 	[restoreButton setFrame:NSMakeRect(0, 0, FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
 	[newRow addSubview:restoreButton];
 
@@ -1381,7 +1389,7 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 	[*recorder setFrame:NSMakeRect(0, 0, 150, 22)];
 	[*recorder setDelegate:self];
 	[*recorder setAccessibilityElement:YES];
-	[*recorder setAccessibilityLabel:[title stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@": "]]];
+	[*recorder setAccessibilityLabel:FlycutSpokenName(title)];
 	[*recorder setAccessibilityHelp:FlycutHotkeyRecorderHelp];
 	[newRow addSubview:*recorder];
 	CGFloat recorderMidY = NSMidY([*recorder frame]);
@@ -1393,7 +1401,7 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 	[label release];
 
 	NSButton *restoreButton = [self restoreDefaultButtonWithIdentifier:@"restoreDefaultSearchHotkey"
-	                                               accessibilityLabel:[@"Restore default " stringByAppendingString:[[title lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@": "]]]];
+	                                               accessibilityLabel:[@"Restore default " stringByAppendingString:[FlycutSpokenName(title) lowercaseString]]];
 	[restoreButton setFrame:NSMakeRect(0, recorderMidY - FlycutRestoreArrowSide / 2.0, FlycutRestoreArrowSide, FlycutRestoreArrowSide)];
 	[newRow addSubview:restoreButton];
 
@@ -2463,8 +2471,12 @@ static NSTextField *FlycutLabelAligned(NSArray *views, NSTextAlignment alignment
 			help = (NSTextField *)view;
 	CGFloat left = FlycutPaneMargin, arrowX = width - FlycutPaneMargin - FlycutRestoreArrowSide, column = left;
 	for (NSTextField *label in labels) {
-		// The NIB's title is "Main Hotkey" with a line break, two lines high.
+		// One line that ends with a colon, like every label in front of a
+		// control. A NIB compiled from an older MainMenu.xib titles the
+		// bezel's row "Main Hotkey" with a line break and no colon.
 		NSString *text = [[label stringValue] stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+		if (![text hasSuffix:@":"])
+			text = [text stringByAppendingString:@":"];
 		if (![text isEqualToString:[label stringValue]])
 			[label setStringValue:text];
 		// The NIB sets 10 pt for the labels and the help text.
@@ -2517,7 +2529,7 @@ static NSTextField *FlycutLabelAligned(NSArray *views, NSTextAlignment alignment
 	NSRect screenFrame = [[NSScreen mainScreen] frame];
 
 	int nextYMax = -1;
-	NSView *row = [self preferencePanelSliderRowForText:@"Bezel transparency"
+	NSView *row = [self preferencePanelSliderRowForText:@"Bezel transparency:"
 											 withTicks:16
 											   minText:@"Lighter"
 											   maxText:@"Darker"
@@ -2529,7 +2541,7 @@ static NSTextField *FlycutLabelAligned(NSArray *views, NSTextAlignment alignment
 	[appearancePanel addSubview:row];
 	nextYMax = row.frame.origin.y;
 
-	row = [self preferencePanelSliderRowForText:@"Bezel width"
+	row = [self preferencePanelSliderRowForText:@"Bezel width:"
 									  withTicks:50
 										minText:@"Smaller"
 										maxText:@"Bigger"
@@ -2541,7 +2553,7 @@ static NSTextField *FlycutLabelAligned(NSArray *views, NSTextAlignment alignment
 	[appearancePanel addSubview:row];
 	nextYMax = row.frame.origin.y;
 
-	row = [self preferencePanelSliderRowForText:@"Bezel height"
+	row = [self preferencePanelSliderRowForText:@"Bezel height:"
 									  withTicks:50
 										minText:@"Smaller"
 										maxText:@"Bigger"
