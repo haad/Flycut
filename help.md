@@ -121,4 +121,6 @@ A setting that differs from its factory value shows a small round arrow next to 
 
 The two "Save … to:" buttons show the name of their folder; a long name is shortened in the middle ("…"). Point at a button to see the folder's full path.
 
+Command-W closes Preferences, like its close button. While a hotkey field is waiting for a new shortcut, Command-W becomes that shortcut instead.
+
 To change Remember, Display in menu or Favorites, click the number and type a new one (up to three digits). A typed number is applied when you press Return or Tab, click into another field, switch to another pane or close Preferences; Escape brings back the previous one. A number outside the allowed range becomes the nearest allowed one: Remember and Favorites take 10 to 999, Display in menu 5 up to the Remember number.

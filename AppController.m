@@ -2426,6 +2426,27 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	[[prefsPanel contentView] layoutSubtreeIfNeeded];
 }
 
+// Command-W closes the front window on the Mac, from the Close item of an
+// app's File menu. Flycut has no main menu (it lives in the menu bar), so no
+// Close command reaches its windows: the search window and the clipping list
+// handle their own Command keys, and Preferences does it here. Its controls
+// get the key first, as from a menu, so a hotkey recorder that is recording
+// takes Command-W as its new hotkey; otherwise the window closes as with its
+// close button. A main menu with File > Close would reach every window, but
+// ShortcutRecorder's validator reads the main menu and would then refuse
+// Command-W as a hotkey.
+static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
+{
+	NSEventModifierFlags flags = [event modifierFlags] & (NSEventModifierFlagCommand | NSEventModifierFlagShift |
+	                                                      NSEventModifierFlagOption | NSEventModifierFlagControl);
+	if ([event window] != preferences || flags != NSEventModifierFlagCommand ||
+	    ![[event charactersIgnoringModifiers] isEqualToString:@"w"])
+		return event;
+	if (![preferences performKeyEquivalent:event])
+		[preferences performClose:nil];
+	return nil;
+}
+
 -(IBAction) showPreferencePanel:(id)sender
 {
     [self cancelPendingPasteCompletion];
@@ -2441,6 +2462,13 @@ static NSTabView *FlycutPreferencesTabView(NSView *view)
 	// the window is opened. A window that is already open keeps its size.
 	if (![prefsPanel isVisible])
 		[self fitPreferencesWindowWidth];
+	static id closeKeyMonitor = nil;
+	if (closeKeyMonitor == nil) {
+		NSWindow *preferences = prefsPanel;
+		closeKeyMonitor = [[NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
+			return FlycutPreferencesCloseKey(preferences, event);
+		}] retain];
+	}
 	BOOL alreadyShown = [prefsPanel isVisible];
 	[prefsPanel makeKeyAndOrderFront:self];
 	// A window that becomes visible makes the first field of its key-view loop
