@@ -45,6 +45,9 @@ typedef NS_ENUM(NSInteger, FlycutList) {
 
     BOOL disableStore;
 	BOOL inhibitAutosaveClippings;
+	// The latest copies from the clipboard in the history, with their generations
+	// (-addClipping:...fromClipboardGeneration:).
+	NSMutableArray *recentClipboardRows;
 
 	//Preferences
 	BOOL issuedRememberResizeWarning;
@@ -54,6 +57,14 @@ typedef NS_ENUM(NSInteger, FlycutList) {
 -(int)indexOfClipping:(NSString*)contents ofType:(NSString*)type fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL;
 -(bool)addClipping:(NSString*)contents ofType:(NSString*)type fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelectorclippingAddedSelector;
 -(bool)addImageClipping:(NSData *)imageData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL imageType:(NSString *)imageType target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector;
+// A copy from the clipboard, with the clipboard generation it was copied in. It goes in below
+// every history row of a copy of a newer generation, never above (a copy whose row went in
+// after newer copies: a catch-up read that took longer than opening the bezel, the list or the
+// search window waited for it, and whose commit came after them), and not at all when one of
+// those newer rows holds the same text or image, or, with "Remove duplicates", a row above its
+// place does. Otherwise as the variants without a generation.
+-(bool)addClipping:(NSString*)contents ofType:(NSString*)type withRichData:(NSDictionary *)richData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector fromClipboardGeneration:(NSInteger)generation;
+-(bool)addImageClipping:(NSData *)imageData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL imageType:(NSString *)imageType target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector fromClipboardGeneration:(NSInteger)generation;
 -(FlycutClipping *)clippingAtIndex:(int)index;
 -(BOOL)shouldSkip:(NSString *)contents ofType:(NSString *)type fromAvailableTypes:(NSArray<NSString *> *)availableTypes;
 -(bool)addClipping:(NSString*)contents ofType:(NSString*)type withRichData:(NSDictionary *)richData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector;

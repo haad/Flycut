@@ -265,6 +265,70 @@ static const NSInteger FlycutDisplayNumLowest = 5;
 
 @end
 
+// How long opening the bezel, the search window or the menu-bar list waits for a copy's
+// rich text or image to be read (-captureClipboardChangeNow).
+static const NSTimeInterval kClipboardCatchUpWait = 0.2;
+
+@implementation FCClipboardCatchUp
+{
+	dispatch_group_t reads;
+	dispatch_queue_t lock;
+	NSMutableArray *handedOver;
+	BOOL waitEnded;
+}
+
++ (FCClipboardCatchUp *)catchUp
+{
+	FCClipboardCatchUp *catchUp = [[[self alloc] init] autorelease];
+	catchUp->reads = dispatch_group_create();
+	catchUp->lock = dispatch_queue_create("com.Flycut.clipboardCatchUp", DISPATCH_QUEUE_SERIAL);
+	catchUp->handedOver = [[NSMutableArray alloc] init];
+	return catchUp;
+}
+
+- (void)dealloc
+{
+	dispatch_release(reads);
+	dispatch_release(lock);
+	[handedOver release];
+	[super dealloc];
+}
+
+- (void)readStarted
+{
+	dispatch_group_enter(reads);
+}
+
+- (void)readEndedWithCommit:(dispatch_block_t)commit
+{
+	__block BOOL later = NO;
+	dispatch_sync(lock, ^{
+		if ( waitEnded )
+			later = YES;
+		else if ( commit != nil )
+			[handedOver addObject:[[commit copy] autorelease]];
+	});
+	if ( later && commit != nil )
+		dispatch_async(dispatch_get_main_queue(), commit);
+	dispatch_group_leave(reads);
+}
+
+- (void)waitUntil:(dispatch_time_t)deadline
+{
+	dispatch_group_wait(reads, deadline);
+	__block NSArray *commits = nil;
+	dispatch_sync(lock, ^{
+		waitEnded = YES;
+		commits = [handedOver copy];
+		[handedOver removeAllObjects];
+	});
+	for ( dispatch_block_t commit in commits )
+		commit();
+	[commits release];
+}
+
+@end
+
 @interface FCPasteTransaction : NSObject {
 @private
 	NSRunningApplication *_targetApplication;
@@ -365,6 +429,7 @@ static const NSInteger FlycutDisplayNumLowest = 5;
 - (NSArray *)snapshotPasteboardItems;
 - (void)restorePasteboardForCancelledTransaction:(FCPasteTransaction *)transaction;
 - (BOOL)pasteboardIsOwnedByTransaction:(FCPasteTransaction *)transaction;
+- (void)captureClipboardChangeNow;
 - (void)hideSearchWindowPreservingPasteTransaction;
 - (BOOL)postCommandVToProcessIdentifier:(pid_t)processIdentifier;
 -(void)configureStatusItemInteraction;
@@ -3514,6 +3579,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
     NSArray *availableTypes = [jcPasteboard types];
     NSInteger blockedGeneration = [pbBlockCount integerValue];
     NSUInteger captureEpoch = clipboardCaptureEpoch;
+    // A catch-up poll (-captureClipboardChangeNow) waits for this poll's reads, a bounded time.
+    FCClipboardCatchUp *catchUp = clipboardCatchUp;
     if ( type == nil && imageType == nil )
         return;
 
@@ -3523,10 +3590,39 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
             currRunningApp = currApp;
 
     if ( type != nil ) {
-        // Reading remote clipboard data can block. Keep it off the main thread;
-        // transfer activity must not change the user's explicit paused state.
-        dispatch_async(clipboardReadQueue, ^{
+        // Reading remote clipboard data can block, so it runs on clipboardReadQueue;
+        // transfer activity must not change the user's explicit paused state. A
+        // catch-up poll reads the plain text at once on this thread, as the paste's
+        // clipboard snapshot reads text here too. A copy of plain text alone is committed
+        // at once, so it is in the history before the user chooses. Formatting (RTF,
+        // HTML) can be large or come from a slow provider: a formatted copy is read on
+        // the queue, and its row goes in complete, with the formatting, when that read ends.
+        // Every read of the copy is checked (FCClipboardStillHoldsCopy): one that spans a
+        // clipboard change drops the copy.
+        BOOL catchingUpText = catchUp != nil;
+        NSDictionary *(^readRichText)(BOOL *) = ^NSDictionary *(BOOL *changed) {
+            NSMutableDictionary *richData = nil;
+            for ( NSString *richType in [NSArray arrayWithObjects:NSPasteboardTypeRTF, NSPasteboardTypeHTML, nil] ) {
+                // Types come from the snapshot of the generation detected above.
+                if ( [availableTypes containsObject:richType] ) {
+                    NSData *data = [jcPasteboard dataForType:richType];
+                    if ( !FCClipboardStillHoldsCopy([jcPasteboard changeCount], pasteboardGeneration, changed) )
+                        return nil;
+                    // Cap the size so one giant rich clipping can't bloat the saved store.
+                    if ( nil != data && [data length] > 0 && [data length] <= 1048576 ) {
+                        if ( nil == richData )
+                            richData = [NSMutableDictionary dictionaryWithCapacity:2];
+                        [richData setObject:data forKey:richType];
+                    }
+                }
+            }
+            return richData;
+        };
+        void (^readText)(void) = ^{
+            BOOL changed = NO;
             NSString *contents = [jcPasteboard stringForType:type];
+            if ( !FCClipboardStillHoldsCopy([jcPasteboard changeCount], pasteboardGeneration, &changed) )
+                return;
             BOOL contentShouldBeSkipped = contents == nil;
             if (!contentShouldBeSkipped)
                 contentShouldBeSkipped = [flycutOperator shouldSkip:contents ofType:type fromAvailableTypes:availableTypes];
@@ -3536,24 +3632,16 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
             // before the generation is sampled below, so a clipboard change during these
             // reads discards the whole capture and rich data of concealed/transient
             // clippings is never stored.
-            NSMutableDictionary *richData = nil;
-            if ( !contentShouldBeSkipped && [[NSUserDefaults standardUserDefaults] boolForKey:@"preserveTextFormatting"] ) {
-                for ( NSString *richType in [NSArray arrayWithObjects:NSPasteboardTypeRTF, NSPasteboardTypeHTML, nil] ) {
-                    // Types come from the snapshot of the generation detected above.
-                    if ( [availableTypes containsObject:richType] ) {
-                        NSData *data = [jcPasteboard dataForType:richType];
-                        // Cap the size so one giant rich clipping can't bloat the saved store.
-                        if ( nil != data && [data length] > 0 && [data length] <= 1048576 ) {
-                            if ( nil == richData )
-                                richData = [NSMutableDictionary dictionaryWithCapacity:2];
-                            [richData setObject:data forKey:richType];
-                        }
-                    }
-                }
-            }
-            NSInteger pasteboardGenerationAfterRead = [jcPasteboard changeCount];
+            // A catch-up poll reads them on the queue (below).
+            BOOL readsRichText = !contentShouldBeSkipped && [[NSUserDefaults standardUserDefaults] boolForKey:@"preserveTextFormatting"]
+                && ( [availableTypes containsObject:NSPasteboardTypeRTF] || [availableTypes containsObject:NSPasteboardTypeHTML] );
+            NSDictionary *richDataRead = ( readsRichText && !catchingUpText ) ? readRichText(&changed) : nil;
+            if ( changed )
+                return;
+            NSInteger generationAfterRead = [jcPasteboard changeCount];
 
-            dispatch_async(dispatch_get_main_queue(), ^{
+            // The copy's one commit, complete: its text with the formatting read for it.
+            void (^commitText)(NSDictionary *, NSInteger) = ^(NSDictionary *richData, NSInteger pasteboardGenerationAfterRead) {
                 BOOL revealPasteboardTypes = [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
                 if (!FCShouldCommitClipboardRead(
                         pasteboardGeneration,
@@ -3588,9 +3676,38 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                                     fromApp:[currRunningApp localizedName]
                            withAppBundleURL:currRunningApp.bundleURL.path
                                      target:self
-                     clippingAddedSelector:@selector(clippingWasAdded)];
+                     clippingAddedSelector:@selector(clippingWasAdded)
+                   fromClipboardGeneration:pasteboardGeneration];
+            };
+            if ( !catchingUpText ) {
+                dispatch_async(dispatch_get_main_queue(), ^{ commitText(richDataRead, generationAfterRead); });
+                return;
+            }
+            if ( !readsRichText ) {
+                commitText(nil, generationAfterRead);
+                return;
+            }
+            // A formatted copy never gets a row of its text alone: its formatting is read first,
+            // on the queue. The row goes in complete only if the clipboard still holds the copy
+            // when that read ends: at once when it ends within the wait, else when it ends, below
+            // every row of a newer copy. A choice in the bezel, the list or the search window, or
+            // a newer copy, while it is read or before the queue gets to it, drops the copy: it
+            // gets no row, as on master, never one of its text alone or with the formatting of
+            // what the clipboard holds then. Pause, Diagnostics and Flycut's own writes apply as
+            // for every commit.
+            [catchUp readStarted];
+            dispatch_async(clipboardReadQueue, ^{
+                BOOL changedBeforeEnd = NO;
+                NSDictionary *richData = FCClipboardStillHoldsCopy([jcPasteboard changeCount], pasteboardGeneration, &changedBeforeEnd)
+                    ? readRichText(&changedBeforeEnd) : nil;
+                // Unchanged after every read: the generation after the read is the copy's.
+                [catchUp readEndedWithCommit:changedBeforeEnd ? nil : ^{ commitText(richData, pasteboardGeneration); }];
             });
-        });
+        };
+        if ( catchingUpText )
+            readText();
+        else
+            dispatch_async(clipboardReadQueue, readText);
     }
 
     if ( imageType != nil ) {
@@ -3603,10 +3720,17 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
             // Diagnostics record only the copy's type, so they never start a download;
             // the still then goes to the image job below, which records its type.
             BOOL haveDirectGIF = [imageType isEqualToString:@"com.compuserve.gif"];
+            BOOL looksForGIF = !haveDirectGIF && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"]
+                 && ![[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
             NSURL *gifURL = nil;
-            if ( !haveDirectGIF && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"]
-                 && ![[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"] )
+            // The GIF's address is in the clipboard's HTML. A catch-up poll reads no rich text
+            // on the main thread, so it looks for the address in the image read below.
+            if ( looksForGIF && catchUp == nil ) {
+                BOOL changed = NO;
                 gifURL = [self animatedGifURLFromPasteboard];
+                if ( !FCClipboardStillHoldsCopy([jcPasteboard changeCount], pasteboardGeneration, &changed) )
+                    return;
+            }
 
             if ( gifURL != nil ) {
                 // Skip the still entirely; the async download adds the animated GIF on success.
@@ -3614,19 +3738,40 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
             } else {
                 NSString *captureType = imageType;
                 BOOL textTypeRecordsDiagnostics = type != nil;
-                dispatch_async(clipboardReadQueue, ^{
+                void (^readImage)(void) = ^{
+                    BOOL changed = NO;
+                    if ( looksForGIF && catchUp != nil ) {
+                        NSURL *foundURL = [self animatedGifURLFromPasteboard];
+                        if ( !FCClipboardStillHoldsCopy([jcPasteboard changeCount], pasteboardGeneration, &changed) ) {
+                            [catchUp readEndedWithCommit:nil];
+                            return;
+                        }
+                        if ( foundURL != nil ) {
+                            // As above: the download adds the animated GIF, not the still.
+                            [catchUp readEndedWithCommit:^{
+                                [self downloadAndCaptureGIFFromURL:foundURL fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path pasteboardGeneration:pasteboardGeneration];
+                            }];
+                            return;
+                        }
+                    }
                     NSData *imageData = [[jcPasteboard dataForType:captureType] copy];
                     NSInteger pasteboardGenerationAfterRead = [jcPasteboard changeCount];
+                    if ( !FCClipboardStillHoldsCopy(pasteboardGenerationAfterRead, pasteboardGeneration, &changed) ) {
+                        [imageData release];
+                        [catchUp readEndedWithCommit:nil];
+                        return;
+                    }
                     int maxSizeKB = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"maxImageSizeKB"];
                     if (maxSizeKB <= 0) maxSizeKB = 10240;
                     if (imageData == nil || [imageData length] == 0 || [imageData length] > (NSUInteger)maxSizeKB * 1024) {
                         [imageData release];
+                        [catchUp readEndedWithCommit:nil];
                         return;
                     }
 
-                    dispatch_async(dispatch_get_main_queue(), ^{
+                    void (^commitImage)(void) = ^{
                         BOOL revealPasteboardTypes = [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
-                        if (FCShouldCommitClipboardRead(
+                        BOOL current = FCShouldCommitClipboardRead(
                                 pasteboardGeneration,
                                 pasteboardGenerationAfterRead,
                                 blockedGeneration,
@@ -3636,7 +3781,19 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                             )
                             // Also bound to the generation whose types were checked (the
                             // clipboard must still hold it) and to image capture being on.
-                            && [self isImageCaptureCurrentForGeneration:pasteboardGeneration]) {
+                            && [self isImageCaptureCurrentForGeneration:pasteboardGeneration];
+                        // The read ended with the copy still on the clipboard (one that spans a
+                        // change got no further), but its commit ran after the clipboard changed (a
+                        // newer copy, or a choice in the bezel, the list or the search window): the
+                        // image goes into the history all the same, as a formatted copy's row does,
+                        // below every row of a newer copy (the clipboard stays as it is), unless
+                        // capture was paused, image capture turned off or the copy was Flycut's own
+                        // write.
+                        BOOL overtaken = !current
+                            && FCShouldCommitClipboardRead(pasteboardGeneration, pasteboardGenerationAfterRead, blockedGeneration,
+                                                           captureEpoch, clipboardCaptureEpoch, [flycutOperator storeDisabled])
+                            && [[NSUserDefaults standardUserDefaults] boolForKey:@"captureImages"];
+                        if (current || overtaken) {
                             if (revealPasteboardTypes) {
                                 // Diagnostics record the type instead of the payload, once per copy.
                                 if (!textTypeRecordsDiagnostics)
@@ -3647,17 +3804,52 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                                                          target:self
                                          clippingAddedSelector:@selector(clippingWasAdded)];
                             } else {
-                                [flycutOperator addImageClipping:imageData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path imageType:captureType target:self clippingAddedSelector:@selector(clippingWasAdded)];
+                                [flycutOperator addImageClipping:imageData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path imageType:captureType target:self clippingAddedSelector:@selector(clippingWasAdded) fromClipboardGeneration:pasteboardGeneration];
                             }
                         } else {
                             DLog(@"Image: Blocked, paused, or changed during read");
                         }
                         [imageData release];
-                    });
-                });
+                    };
+                    if ( catchUp != nil )
+                        [catchUp readEndedWithCommit:commitImage];
+                    else
+                        dispatch_async(dispatch_get_main_queue(), commitImage);
+                };
+                // Image data can be large or come from a slow provider: always on the queue.
+                [catchUp readStarted];
+                dispatch_async(clipboardReadQueue, readImage);
             }
         }
     }
+}
+
+// The poll runs once a second, so a copy made just before the bezel, the search window or the
+// menu-bar list opens is not in the history yet. Choosing a clipping there puts it on the
+// clipboard, Flycut never captures its own write, and the copy was lost. Take it in first, so
+// that it is the newest row the user picks from. Only a change no poll has seen yet is read,
+// never Flycut's own write; the pause, the filters and Diagnostics apply as for every poll.
+// Rows go in complete only. On this thread only plain text is read, as the paste's clipboard
+// snapshot reads text here too: a copy of plain text alone is committed at once. A formatted
+// copy and an image can be large or come from a slow provider (another device, an app that
+// renders a promise): they are read on clipboardReadQueue as by every poll, and opening waits
+// for them at most kClipboardCatchUpWait. A read that takes longer commits the complete row
+// when it ends, below every row of a newer copy, never above. A read that spans a clipboard
+// change is never trusted (FCClipboardStillHoldsCopy): when a choice here or a newer copy
+// replaced the copy while it was read, the read answers with that data or none, so the copy
+// gets no row, as on master. An animated GIF's download, started when its address is read, is
+// dropped like every download if the clipboard changed before it ends.
+- (void)captureClipboardChangeNow
+{
+	NSInteger generation = [jcPasteboard changeCount];
+	if ( [pbCount integerValue] == generation || [pbBlockCount integerValue] == generation )
+		return;
+	FCClipboardCatchUp *catchUp = [[FCClipboardCatchUp catchUp] retain];
+	clipboardCatchUp = catchUp;
+	[self pollPB:nil];
+	clipboardCatchUp = nil;
+	[catchUp waitUntil:dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kClipboardCatchUpWait * NSEC_PER_SEC))];
+	[catchUp release];
 }
 
 - (void)cancelBezelSelection
@@ -3911,6 +4103,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 - (void)hitMainHotKey:(SGHotKey *)hotKey
 {
 	if ( ! isBezelDisplayed ) {
+		// A copy made just before is the newest row, not lost to the paste.
+		[self captureClipboardChangeNow];
 		// Opening the bezel starts a new selection, which may be pasted once.
 		bezelSelectionFinished = NO;
 		// A newly opened selection owns its own eventual paste.  It must never inherit a
@@ -4187,6 +4381,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 
 - (void)listControllerDidOpen:(FlycutListController *)controller
 {
+	// A copy made just before the list opened is its newest row, not lost to a choice in it.
+	[self captureClipboardChangeNow];
 	// The status menu's freeze: no capture while the list is open (see -pollPB:).
 	[self menuWillOpen:jcMenu];
 	[[statusItem button] setHighlighted:YES];
@@ -4451,7 +4647,7 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
             if ( captureEpoch == clipboardCaptureEpoch && ! [pbCount isEqualTo:pbBlockCount] && !revealPasteboardTypes
                  && [self isImageCaptureCurrentForGeneration:generation]
                  && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"] ) {
-                [flycutOperator addImageClipping:gifData fromApp:appName withAppBundleURL:bundleURL imageType:@"com.compuserve.gif" target:self clippingAddedSelector:@selector(clippingWasAdded)];
+                [flycutOperator addImageClipping:gifData fromApp:appName withAppBundleURL:bundleURL imageType:@"com.compuserve.gif" target:self clippingAddedSelector:@selector(clippingWasAdded) fromClipboardGeneration:generation];
             }
             [gifData release];
         });
@@ -4763,6 +4959,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 
 - (void)showSearchWindow
 {
+	// A copy made just before is in the results, not lost to the paste.
+	[self captureClipboardChangeNow];
 	// Capture the user's current application before Flycut activates its search window.
 	// A search selection must use the same immutable PID/focus transaction as the bezel
 	// and menu paste paths rather than posting a delayed global Cmd-V.

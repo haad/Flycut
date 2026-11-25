@@ -80,8 +80,12 @@
 }
 
 -(bool) addClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger) timestamp withRichData:(NSDictionary *)richData{
+    return nil != [self insertClipping:clipping ofType:type fromAppLocalizedName:appLocalizedName fromAppBundleURL:bundleURL atTimestamp:timestamp withRichData:richData atIndex:0];
+}
+
+-(FlycutClipping *) insertClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger) timestamp withRichData:(NSDictionary *)richData atIndex:(int)index{
     if ([clipping length] == 0) {
-        return NO;
+        return nil;
     }
     // Clipping object
     FlycutClipping * newClipping;
@@ -94,16 +98,20 @@
 											  withTimestamp:timestamp];
 	[newClipping setRichData:richData];
 
-	[self addClipping:newClipping];
+	[self insertClipping:newClipping atIndex:index];
 
-	[newClipping release];
-	return YES;
+	return [newClipping autorelease];
 }
 
 -(bool) addImageClippingWithHash:(NSString *)hash imageSize:(NSSize)size imageType:(NSString *)imageType fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger)timestamp
 {
+    return nil != [self insertImageClippingWithHash:hash imageSize:size imageType:imageType fromAppLocalizedName:appLocalizedName fromAppBundleURL:bundleURL atTimestamp:timestamp atIndex:0];
+}
+
+-(FlycutClipping *) insertImageClippingWithHash:(NSString *)hash imageSize:(NSSize)size imageType:(NSString *)imageType fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger)timestamp atIndex:(int)index
+{
     if (!hash || [hash length] == 0)
-        return NO;
+        return nil;
 
     FlycutClipping *newClipping = [[FlycutClipping alloc] initWithImageHash:hash
                                                              withImageSize:size
@@ -112,9 +120,8 @@
                                                        withAppLocalizedName:appLocalizedName
                                                            withAppBundleURL:bundleURL
                                                               withTimestamp:timestamp];
-    [self addClipping:newClipping];
-    [newClipping release];
-    return YES;
+    [self insertClipping:newClipping atIndex:index];
+    return [newClipping autorelease];
 }
 
 -(bool) removeDuplicates{

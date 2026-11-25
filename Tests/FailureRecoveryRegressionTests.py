@@ -78,6 +78,8 @@ void FCFixtureBeep(void) { }   // NSBeep, built with -DNSBeep=FCFixtureBeep: nev
 @property(copy) NSString *selected;
 @end
 @implementation RecoveryOperator
+// Capture is not under test here: the catch-up poll when the bezel opens finds it paused.
+- (BOOL)storeDisabled { return YES; }
 - (BOOL)setStackPositionToFirstItem { return YES; }
 - (NSString *)getPasteFromStackPosition { return self.selected; }
 - (BOOL)restoreStashedStore { return NO; }

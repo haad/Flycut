@@ -90,6 +90,10 @@
 -(bool) addClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger) timestamp;
 -(bool) addImageClippingWithHash:(NSString *)hash imageSize:(NSSize)size imageType:(NSString *)imageType fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger)timestamp;
 -(bool) addClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger) timestamp withRichData:(NSDictionary *)richData;
+// As the two above, at this position (0 = newest). They return the new clipping (nil for empty
+// text or no hash), which the store holds unless the limit dropped it at once.
+-(FlycutClipping *) insertClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger) timestamp withRichData:(NSDictionary *)richData atIndex:(int)index;
+-(FlycutClipping *) insertImageClippingWithHash:(NSString *)hash imageSize:(NSSize)size imageType:(NSString *)imageType fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger)timestamp atIndex:(int)index;
 -(void) addClipping:(FlycutClipping*) clipping;
 -(void) insertClipping:(FlycutClipping*) clipping atIndex:(int) index;
 

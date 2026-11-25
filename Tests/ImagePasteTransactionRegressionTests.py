@@ -106,6 +106,8 @@ static FlycutClipping *ImageClipping(NSString *hash, NSString *type) {
 @property(retain) NSMutableArray *clippings;
 @end
 @implementation ImageOperator
+// Capture is not under test here: the catch-up poll when the bezel opens finds it paused.
+- (BOOL)storeDisabled { return YES; }
 - (BOOL)setStackPositionToFirstItem { return YES; }
 - (BOOL)restoreStashedStore { return NO; }
 - (FlycutClipping *)clippingAtStackPosition { return [self.clippings count] ? self.clippings[0] : nil; }

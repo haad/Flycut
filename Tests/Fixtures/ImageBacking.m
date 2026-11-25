@@ -420,6 +420,7 @@ static void FixtureBeep(void) { fixtureBeeps++; }
     id listController;   // -clippingWasAdded tells the menu-bar list; this harness has none
     NSUInteger clipboardCaptureEpoch;
     dispatch_queue_t clipboardReadQueue;
+    FCClipboardCatchUp *clipboardCatchUp;   // nil: no catch-up poll here
     FixturePasteboard *jcPasteboard;
     NSNumber *pbCount;
     NSNumber *pbBlockCount;

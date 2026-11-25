@@ -23,6 +23,7 @@
 @class SGHotKey;
 @class FlycutClipping;
 @class FlycutListController;
+@class FCClipboardCatchUp;
 
 @interface AppController : NSResponder <NSMenuDelegate, NSApplicationDelegate, FlycutStoreDelegate, FlycutOperatorDelegate, BezelWindowDelegate> {
     BezelWindow					*bezel;
@@ -82,6 +83,7 @@
     // the outlet stays because loading the nib sets it.
     IBOutlet NSSearchField *searchBox;
     dispatch_queue_t clipboardReadQueue;
+    FCClipboardCatchUp *clipboardCatchUp; // -captureClipboardChangeNow waits for this poll's reads
     NSEvent *menuOpenEvent;
     IBOutlet NSSlider * heightSlider;
     IBOutlet NSSlider * widthSlider;

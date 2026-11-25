@@ -555,12 +555,81 @@
 
 -(bool)addClipping:(NSString*)contents ofType:(NSString*)type withRichData:(NSDictionary *)richData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector
 {
+	return [self addClipping:contents ofType:type withRichData:richData fromApp:appName withAppBundleURL:bundleURL
+					  target:selectorTarget clippingAddedSelector:clippingAddedSelector fromClipboardGeneration:-1];
+}
+
+// Where a copy of this clipboard generation goes in the history: below every row that a copy
+// of a newer generation put there, else on top. -1 when one of those newer rows holds the same
+// text (or, without text, the same image): that newer copy stands for this one.
+-(int)historyPositionForClipboardGeneration:(NSInteger)generation text:(NSString *)text imageHash:(NSString *)hash
+{
+	if ( generation < 0 )
+		return 0;
+	NSArray *rows = [[self historyStore] clippingsSnapshot];
+	int position = 0;
+	for ( NSArray *recent in recentClipboardRows ) {
+		if ( [[recent objectAtIndex:1] integerValue] <= generation )
+			continue;
+		FlycutClipping *newer = [recent objectAtIndex:0];
+		NSUInteger index = [rows indexOfObjectIdenticalTo:newer];
+		if ( NSNotFound == index )
+			continue;
+		if ( nil != text ? ( ! [newer isImageClipping] && [[newer contents] isEqualToString:text] )
+						 : ( [newer isImageClipping] && [[newer imageHash] isEqualToString:hash] ) )
+			return -1;
+		if ( (int)index + 1 > position )
+			position = (int)index + 1;
+	}
+	// With "Remove duplicates" the insert first takes an equal row out of the history
+	// (-[FlycutStore insertClipping:atIndex:]); one above this place would move the new row one
+	// too low, below an older row, and leave the top. That row (one a paste moved to the top, say)
+	// stands for the copy: it stays where it is, and the copy adds nothing.
+	if ( [[self historyStore] removeDuplicates] )
+		for ( int i = 0 ; i < position && i < (int)[rows count] ; i++ ) {
+			FlycutClipping *above = [rows objectAtIndex:i];
+			if ( nil != text ? ( ! [above isImageClipping] && [[above contents] isEqualToString:text] )
+							 : ( [above isImageClipping] && [[above imageHash] isEqualToString:hash] ) )
+				return -1;
+		}
+	return position;
+}
+
+// Which history row holds a copy of this clipboard generation, for the rule above. Only the
+// latest copies count: a read ends late by a few seconds at most.
+-(void)rememberClipping:(FlycutClipping *)clipping fromClipboardGeneration:(NSInteger)generation
+{
+	if ( generation < 0 || nil == clipping )
+		return;
+	if ( nil == recentClipboardRows )
+		recentClipboardRows = [[NSMutableArray alloc] init];
+	[recentClipboardRows insertObject:[NSArray arrayWithObjects:clipping, [NSNumber numberWithInteger:generation], nil] atIndex:0];
+	while ( [recentClipboardRows count] > 16 )
+		[recentClipboardRows removeLastObject];
+}
+
+// Those rows are remembered only while they are in the history: a row the user deleted, or a
+// cleared history, is not kept in memory.
+-(void)forgetClipboardRowsNoLongerInHistory
+{
+	NSArray *rows = [[self historyStore] clippingsSnapshot];
+	for ( NSInteger i = (NSInteger)[recentClipboardRows count] - 1 ; i >= 0 ; i-- )
+		if ( NSNotFound == [rows indexOfObjectIdenticalTo:[[recentClipboardRows objectAtIndex:(NSUInteger)i] objectAtIndex:0]] )
+			[recentClipboardRows removeObjectAtIndex:(NSUInteger)i];
+}
+
+-(bool)addClipping:(NSString*)contents ofType:(NSString*)type withRichData:(NSDictionary *)richData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector fromClipboardGeneration:(NSInteger)generation
+{
 	// A copy always goes into the history, also while the bezel shows the favorites.
 	// Then the history is stashed and clippingStore IS the favorites store (see
 	// -saveEngine), and its selection is the stashed one that comes back with it.
 	FlycutStore *history = ( NULL != stashedStore ) ? stashedStore : clippingStore;
 	int *selection = ( history == clippingStore ) ? &stackPosition : &stashedStackPosition;
-	if ( [history jcListCount] == 0 || ! [contents isEqualToString:[history clippingContentsAtPosition:0]]) {
+	// On top, or below the rows of newer copies (see -historyPositionForClipboardGeneration:).
+	int position = [self historyPositionForClipboardGeneration:generation text:contents imageHash:nil];
+	if ( position < 0 )
+		return NO;
+	if ( position >= [history jcListCount] || ! [contents isEqualToString:[history clippingContentsAtPosition:position]]) {
 		// Remember which clipping the stack position points at, so the selection can follow it
 		// across the insert.  Retained because the store may drop clippings while inserting.
 		//
@@ -572,12 +641,15 @@
 		if ( *selection > 0 && *selection < [history jcListCount] )
 			anchor = [[history clippingAtPosition:*selection] retain];
 
-		bool success = [history addClipping:contents
-									 ofType:type
-					   fromAppLocalizedName:appName
-						   fromAppBundleURL:bundleURL
-								atTimestamp:[[NSDate date] timeIntervalSince1970]
-							   withRichData:richData];
+		FlycutClipping *added = [history insertClipping:contents
+												 ofType:type
+								   fromAppLocalizedName:appName
+									   fromAppBundleURL:bundleURL
+											atTimestamp:[[NSDate date] timeIntervalSince1970]
+										   withRichData:richData
+												atIndex:position];
+		bool success = nil != added;
+		[self rememberClipping:added fromClipboardGeneration:generation];
 
 		// Follow the clipping rather than the position.  This used to be stackPosition = 0,
 		// which moved a selection the user was making in the bezel onto the clipping that had
@@ -596,15 +668,22 @@
 
 		return success;
     }
-	// The newest clipping already holds this text, so it is not added again. Keep
-	// the formatting of this latest copy instead (none for a plain-text copy), so
-	// pasting the clipping matches what was copied last.
-	if ( [history setRichData:richData forClippingAtPosition:0] )
+	// The clipping there (the newest one, or the one below the rows of newer copies) already
+	// holds this text, so it is not added again. Keep the formatting of this latest copy
+	// instead (none for a plain-text copy), so pasting the clipping matches what was copied last.
+	[self rememberClipping:[history clippingAtPosition:position] fromClipboardGeneration:generation];
+	if ( [history setRichData:richData forClippingAtPosition:position] )
 		[self actionAfterListModification];
 	return  NO;
 }
 
 -(bool)addImageClipping:(NSData *)imageData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL imageType:(NSString *)imageType target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector
+{
+    return [self addImageClipping:imageData fromApp:appName withAppBundleURL:bundleURL imageType:imageType
+                           target:selectorTarget clippingAddedSelector:clippingAddedSelector fromClipboardGeneration:-1];
+}
+
+-(bool)addImageClipping:(NSData *)imageData fromApp:(NSString *)appName withAppBundleURL:(NSString *)bundleURL imageType:(NSString *)imageType target:(id)selectorTarget clippingAddedSelector:(SEL)clippingAddedSelector fromClipboardGeneration:(NSInteger)generation
 {
     if (!imageData || [imageData length] == 0)
         return NO;
@@ -620,10 +699,16 @@
     // Into the history, also while the bezel shows the favorites (see -addClipping:).
     FlycutStore *history = ( NULL != stashedStore ) ? stashedStore : clippingStore;
     int *selection = ( history == clippingStore ) ? &stackPosition : &stashedStackPosition;
-    if ([history jcListCount] > 0) {
-        FlycutClipping *topClipping = [history clippingAtPosition:0];
-        if ([topClipping isImageClipping] && [[topClipping imageHash] isEqualToString:hash])
+    // On top, or below the rows of newer copies (see -historyPositionForClipboardGeneration:).
+    int position = [self historyPositionForClipboardGeneration:generation text:nil imageHash:hash];
+    if (position < 0)
+        return NO;
+    if (position < [history jcListCount]) {
+        FlycutClipping *there = [history clippingAtPosition:position];
+        if ([there isImageClipping] && [[there imageHash] isEqualToString:hash]) {
+            [self rememberClipping:there fromClipboardGeneration:generation];
             return NO;
+        }
     }
 
     // Only bytes that decode as an image become an image clipping; anything else
@@ -654,12 +739,15 @@
     if ( *selection > 0 && *selection < [history jcListCount] )
         anchor = [[history clippingAtPosition:*selection] retain];
 
-    bool success = [history addImageClippingWithHash:hash
-                                          imageSize:pixelSize
-                                          imageType:imageType
-                               fromAppLocalizedName:appName
-                                   fromAppBundleURL:bundleURL
-                                        atTimestamp:[[NSDate date] timeIntervalSince1970]];
+    FlycutClipping *added = [history insertImageClippingWithHash:hash
+                                                       imageSize:pixelSize
+                                                       imageType:imageType
+                                            fromAppLocalizedName:appName
+                                                fromAppBundleURL:bundleURL
+                                                     atTimestamp:[[NSDate date] timeIntervalSince1970]
+                                                         atIndex:position];
+    bool success = nil != added;
+    [self rememberClipping:added fromClipboardGeneration:generation];
     int followed = ( nil != anchor ) ? [history indexOfClipping:anchor] : -1;
     *selection = ( followed >= 0 ) ? followed : 0;
     [anchor release];
@@ -787,6 +875,7 @@
 	inhibitAutosaveClippings = YES; // Avoid saving things that the user explicitly deletes.
 	[clippingStore clearItem:stackPosition];
 	inhibitAutosaveClippings = NO;
+	[self forgetClipboardRowsNoLongerInHistory];
 	[self actionAfterListModification];
 
     return YES;
@@ -818,6 +907,7 @@
 -(void)clearList
 {
     [clippingStore clearList];
+    [self forgetClipboardRowsNoLongerInHistory];
     [self actionAfterListModification];
 }
 
@@ -1112,6 +1202,7 @@
 	inhibitAutosaveClippings = YES; // Never export what the user explicitly deletes.
 	[[self storeForList:list] clearItem:index];
 	inhibitAutosaveClippings = NO;
+	[self forgetClipboardRowsNoLongerInHistory];
 	[self actionAfterListModification];
 	return YES;
 }
