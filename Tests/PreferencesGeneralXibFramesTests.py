@@ -8,12 +8,13 @@ changed constant) leaves the frames where they were, so this checks them.
 
 Without Xcode the test loads master's compiled MainMenu.nib (FLYCUT_TEST_RESOURCE_BUNDLE, a
 built Flycut.app; it skips without one) and lays this tree's XIB onto its General pane with
-Tests/Fixtures/GeneralPaneXib.py: the XIB's titles, fonts and vertical constraints, the views
-the NIB lacks, and the pane height. Then the pane is laid out alone, as Xcode does it: no
+Tests/Fixtures/GeneralPaneXib.py: the XIB's titles, fonts and vertical constraints, its
+horizontal constraints where they differ from the NIB's, the views the NIB lacks, and the pane
+height. Then the pane is laid out alone, as Xcode does it: no
 builder of -awakeFromNib runs, no Restore Default arrow, no permissions row. For every view of
 the General box's content view the XIB's frame must be the laid-out frame (within 0.5 pt), on
-both axes: x and width come from the NIB's horizontal constraints, so the test also checks that
-those are the XIB's own. The metrics are this Mac's (control sizes of macOS 27); an Xcode on an
+both axes. The test also checks that the horizontal constraints laid out are exactly the XIB's
+and the views' own size constraints the XIB's. The metrics are this Mac's (control sizes of macOS 27); an Xcode on an
 older macOS may still show a view off by a point or two.
 """
 from __future__ import annotations

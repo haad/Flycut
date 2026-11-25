@@ -7,11 +7,14 @@ before -awakeFromNib's builders run:
 
 - each XIB view is found in the NIB by its binding and class, its outlet, its title and exact
   class, or, for the unbound labels the stack retitled, its title in master's NIB (NIB_TITLES);
-  a bound checkbox the NIB lacks is created; a NIB view the XIB lacks is removed;
+  a bound checkbox the NIB lacks is created and bound like the XIB's (to the defaults
+  controller the NIB's checkboxes use), an unbound label the NIB lacks is created; a NIB view
+  the XIB lacks is removed;
 - buttons and unbound labels get the XIB's title, every view the XIB's font;
-- every constraint of the box's content view on a vertical attribute is replaced by the XIB's,
-  and the XIB's other constraints on created views are added (the NIB keeps its horizontal
-  constraints and each view's own size constraints: the stack does not change them);
+- every constraint of the box's content view on a vertical attribute is replaced by the XIB's;
+  of the other (horizontal) constraints the NIB keeps those the XIB has too, and the others
+  give way to the XIB's (each view's own size constraints stay the NIB's: the stack does not
+  change them);
 - the tab view, the General pane and its box get the XIB's tab view height.
 
 Checked when this was written: master's own XIB applied to master's NIB gives every view of
@@ -130,6 +133,31 @@ static BOOL GPXIsVertical(NSLayoutAttribute a)
            a == NSLayoutAttributeFirstBaseline || a == NSLayoutAttributeLastBaseline || a == NSLayoutAttributeHeight;
 }
 
+static NSString *GPXAttributeName(NSLayoutAttribute a)
+{
+    for (NSString *name in @[@"top", @"bottom", @"leading", @"trailing", @"centerY", @"centerX", @"firstBaseline",
+                             @"lastBaseline", @"height", @"width"])
+        if (GPXAttribute(name) == a) return name;
+    return nil;
+}
+
+// A loaded constraint is the XIB's constraint c: same items (by XIB id), attributes, relation,
+// multiplier, constant and priority.
+static BOOL GPXSameConstraint(NSLayoutConstraint *k, NSDictionary *c, NSView *content, NSDictionary *idOf)
+{
+    NSString *(^name)(id) = ^NSString *(id item) {
+        if (item == nil) return nil;
+        return item == content ? @"SUPER" : idOf[[NSValue valueWithPointer:item]];
+    };
+    NSString *rel = [k relation] == NSLayoutRelationGreaterThanOrEqual ? @"greaterThanOrEqual"
+                  : ([k relation] == NSLayoutRelationLessThanOrEqual ? @"lessThanOrEqual" : @"equal");
+    BOOL sameSecond = c[@"second"] == nil ? [k secondItem] == nil
+                    : ([name([k secondItem]) isEqualToString:c[@"second"]] && [GPXAttributeName([k secondAttribute]) isEqualToString:c[@"sa"]]);
+    return [name([k firstItem]) isEqualToString:c[@"first"]] && [GPXAttributeName([k firstAttribute]) isEqualToString:c[@"fa"]] &&
+           sameSecond && [rel isEqualToString:c[@"rel"]] && fabs([k constant] - [c[@"c"] doubleValue]) < 0.01 &&
+           fabs([k multiplier] - [c[@"m"] doubleValue]) < 0.0001 && fabs([k priority] - [c[@"prio"] doubleValue]) < 0.1;
+}
+
 static NSView *GPXFind(NSView *content, id controller, NSDictionary *v, NSSet *taken)
 {
     Class cls = NSClassFromString(v[@"cls"]);
@@ -168,6 +196,10 @@ static NSArray *GPXApply(NSView *content, NSTabView *tabs, id controller, NSDict
     NSMutableDictionary *byId = [NSMutableDictionary dictionary];
     NSMutableSet *taken = [NSMutableSet set];
     NSMutableArray *created = [NSMutableArray array];
+    id defaultsController = nil;      // what the NIB's checkboxes are bound to
+    for (NSView *view in [content subviews])
+        if ([[view infoForBinding:NSValueBinding] objectForKey:NSObservedObjectKey] != nil && defaultsController == nil)
+            defaultsController = [[view infoForBinding:NSValueBinding] objectForKey:NSObservedObjectKey];
     for (NSDictionary *v in spec[@"views"]) {
         NSView *view = GPXFind(content, controller, v, taken);
         if (view == nil && [v[@"cls"] isEqualToString:@"NSButton"] && [v[@"bind"] isKindOfClass:[NSString class]]) {
@@ -175,8 +207,18 @@ static NSArray *GPXApply(NSView *content, NSTabView *tabs, id controller, NSDict
             [checkbox setTranslatesAutoresizingMaskIntoConstraints:NO];
             [checkbox setIdentifier:[@"xib-" stringByAppendingString:v[@"id"]]];
             [content addSubview:checkbox];
+            if (defaultsController) [checkbox bind:NSValueBinding toObject:defaultsController withKeyPath:v[@"bind"] options:nil];
             [created addObject:v[@"id"]];
             view = checkbox;
+        }
+        if (view == nil && [v[@"cls"] isEqualToString:@"NSTextField"] && ![v[@"bind"] isKindOfClass:[NSString class]] &&
+            [v[@"title"] isKindOfClass:[NSString class]]) {
+            NSTextField *label = [NSTextField labelWithString:v[@"title"]];
+            [label setTranslatesAutoresizingMaskIntoConstraints:NO];
+            [label setIdentifier:[@"xib-" stringByAppendingString:v[@"id"]]];
+            [content addSubview:label];
+            [created addObject:v[@"id"]];
+            view = label;
         }
         if (view == nil) { [problems addObject:[@"not found: " stringByAppendingString:v[@"id"]]]; continue; }
         byId[v[@"id"]] = view;
@@ -202,8 +244,25 @@ static NSArray *GPXApply(NSView *content, NSTabView *tabs, id controller, NSDict
     [content removeConstraints:gone];
     NSMutableArray *added = [NSMutableArray array];
     NSMutableArray *wanted = [NSMutableArray arrayWithArray:spec[@"vertical"]];
-    for (NSDictionary *c in spec[@"other"])
-        if ([created containsObject:c[@"first"]] || [created containsObject:c[@"second"] ?: @""]) [wanted addObject:c];
+    // Horizontal: the NIB keeps the constraints the XIB has too; the others give way to the XIB's.
+    NSMutableDictionary *idOf = [NSMutableDictionary dictionary];
+    for (NSString *vid in byId) idOf[[NSValue valueWithPointer:byId[vid]]] = vid;
+    NSMutableArray *horizontal = [NSMutableArray array];
+    for (NSLayoutConstraint *k in [content constraints])
+        if ([k isMemberOfClass:[NSLayoutConstraint class]] && !GPXIsVertical([k firstAttribute]) && !GPXIsVertical([k secondAttribute]))
+            [horizontal addObject:k];
+    NSMutableSet *kept = [NSMutableSet set];
+    for (NSDictionary *c in spec[@"other"]) {
+        NSLayoutConstraint *same = nil;
+        for (NSLayoutConstraint *k in horizontal)
+            if (![kept containsObject:[NSValue valueWithPointer:k]] && GPXSameConstraint(k, c, content, idOf)) { same = k; break; }
+        if (same) [kept addObject:[NSValue valueWithPointer:same]];
+        else [wanted addObject:c];
+    }
+    NSMutableArray *replaced = [NSMutableArray array];
+    for (NSLayoutConstraint *k in horizontal)
+        if (![kept containsObject:[NSValue valueWithPointer:k]]) [replaced addObject:k];
+    [content removeConstraints:replaced];
     for (NSDictionary *c in wanted) {
         NSView *first = [c[@"first"] isEqualToString:@"SUPER"] ? content : byId[c[@"first"]];
         NSView *second = c[@"second"] == nil ? nil : ([c[@"second"] isEqualToString:@"SUPER"] ? content : byId[c[@"second"]]);

@@ -386,6 +386,7 @@ static const NSInteger FlycutDisplayNumLowest = 5;
 -(IBAction)setPausedMenuIconColor:(id)sender;
 -(NSBox *)preferencePanelMenuIconColorRowWithFrameMaxY:(int)frameMaxY;
 -(void)buildGeneralPermissionsPreferenceRow;
+-(void)buildGeneralPasswordOptionStates;
 -(NSString *)bezelCounterString;
 @end
 
@@ -612,6 +613,7 @@ static const CGFloat FlycutSliderEndLabelGap = 2.0;
 	[self buildGeneralRestoreDefaultButtons];
 	[self buildGeneralPermissionsPreferenceRow];
 	[self buildGeneralAccessibilityLabels];
+	[self buildGeneralPasswordOptionStates];
 	[self loadHotkeyRecorderCombos];
 
 	// Initialize the FlycutOperator
@@ -1427,6 +1429,23 @@ static NSString *FlycutRestoreDefaultsIdentifier(NSString *key)
 	return [@"restoreDefault" stringByAppendingString:[[[key substringToIndex:1] uppercaseString] stringByAppendingString:[key substringFromIndex:1]]];
 }
 
+// The switches a password list field depends on: it is greyed out (disabled) unless all are
+// on, and so is its Restore Default arrow (see -buildGeneralPasswordOptionStates).
+static NSArray *FlycutRestoreDefaultSwitches(NSString *key)
+{
+	if ([key isEqualToString:@"skipPasswordLengthsList"]) return @[@"skipPasswordFields", @"skipPasswordLengths"];
+	if ([key isEqualToString:@"skipPboardTypesList"]) return @[@"skipPboardTypes"];
+	return @[];
+}
+
+static BOOL FlycutRestoreDefaultSwitchesOn(NSString *key)
+{
+	for (NSString *name in FlycutRestoreDefaultSwitches(key))
+		if (![[NSUserDefaults standardUserDefaults] boolForKey:name])
+			return NO;
+	return YES;
+}
+
 static NSString *FlycutRestoreDefaultsKey(NSString *identifier)
 {
 	if ([identifier isEqualToString:@"restoreDefaultMainHotkey"]) return @"ShortcutRecorder mainHotkey";
@@ -1568,6 +1587,9 @@ static NSString *FlycutFolderButtonTitle(NSButton *button, NSString *name)
 // + c", the other one starts where it starts instead of after its own label
 // (General: the Save pop-up with the Remember field, the data types field with
 // the lengths field). Nothing pulls on the labels or on the controls' widths.
+// Rows whose labels start at different x belong to different groups and keep
+// their own columns (the data types field once its row stands in the
+// "Skip by data type:" group to the right of that label).
 static void FlycutAlignControlsOnOneColumn(NSView *pane, NSView *first, NSView *second)
 {
 	NSMutableArray *ties = [NSMutableArray array];
@@ -1585,11 +1607,14 @@ static void FlycutAlignControlsOnOneColumn(NSView *pane, NSView *first, NSView *
 		[ties addObject:tie];
 	}
 	[pane layoutSubtreeIfNeeded];
-	CGFloat ends[2];
+	CGFloat ends[2], starts[2];
 	for (NSUInteger i = 0; i < 2; i++) {
 		NSView *label = [ties[i] secondItem];
 		ends[i] = NSMaxX([label alignmentRectForFrame:[label frame]]) + [ties[i] constant];
+		starts[i] = NSMinX([label alignmentRectForFrame:[label frame]]);
 	}
+	if (fabs(starts[0] - starts[1]) > 0.5)
+		return;
 	NSUInteger anchor = ends[1] > ends[0] ? 1 : 0;
 	NSLayoutConstraint *moved = ties[1 - anchor];
 	[moved setActive:NO];
@@ -1730,8 +1755,9 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 	for (NSString *key in numbers)
 		FlycutSetAccessibilityLabel(FlycutBoundControl(pane, key, [NSTextField class]), numbers[key]);
 	// The two list fields get names of their own. The checkbox in front of each
-	// is a sub-option of "Don't save passwords" in MainMenu.xib ("by data type:",
-	// "by length & complexity:"), which alone does not say what the field holds.
+	// ("Password types:" under "Skip by data type:", "by length & complexity:"
+	// under "Don't save passwords" in MainMenu.xib) alone does not say what the
+	// field holds.
 	NSDictionary *fields = @{@"skipPboardTypesList": @"Password data types",
 	                         @"skipPasswordLengthsList": @"Password lengths"};
 	for (NSString *key in fields)
@@ -1740,6 +1766,36 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		NSString *keyPath = [[view infoForBinding:NSSelectedIndexBinding] objectForKey:NSObservedKeyPathKey];
 		if ([view isKindOfClass:[NSPopUpButton class]] && [keyPath isEqualToString:@"values.savePreference"])
 			FlycutSetAccessibilityLabel((NSPopUpButton *)view, @"Save");
+	}
+}
+
+// "Don't save passwords" (skipPasswordFields) turns only the length &
+// complexity check on and off (-[FlycutOperator shouldSkip:ofType:...]); the
+// data-type filters apply on their own, so that turning it off never starts
+// saving what the source app marked as confidential. The pane shows that:
+// while it is off, "by length & complexity:" and its field are greyed out,
+// and the rows of "Skip by data type:" stay as they are. A list field is also
+// greyed out while its own checkbox is off, as its list does nothing then.
+// Bound in code, through the defaults controller the NIB binds the checkboxes
+// to, so the states also hold with a NIB compiled before this change.
+-(void)buildGeneralPasswordOptionStates
+{
+	NSView *pane = [savingSectionLabel superview];
+	NSControl *master = FlycutBoundControl(pane, @"skipPasswordFields", [NSButton class]);
+	id defaults = [[master infoForBinding:NSValueBinding] objectForKey:NSObservedObjectKey];
+	if (defaults == nil)
+		return;
+	NSArray *dependencies = @[@[@"skipPasswordLengths", [NSButton class], @[@"skipPasswordFields"]],
+	                          @[@"skipPasswordLengthsList", [NSTextField class], FlycutRestoreDefaultSwitches(@"skipPasswordLengthsList")],
+	                          @[@"skipPboardTypesList", [NSTextField class], FlycutRestoreDefaultSwitches(@"skipPboardTypesList")]];
+	for (NSArray *dependency in dependencies) {
+		NSControl *control = FlycutBoundControl(pane, dependency[0], dependency[1]);
+		NSArray *switches = dependency[2];
+		for (NSUInteger i = 0; control != nil && i < [switches count]; i++) {
+			// "enabled", "enabled2", ...: AppKit enables the control only while all are on.
+			NSString *binding = i == 0 ? NSEnabledBinding : [NSString stringWithFormat:@"%@%lu", NSEnabledBinding, (unsigned long)i + 1];
+			[control bind:binding toObject:defaults withKeyPath:[@"values." stringByAppendingString:switches[i]] options:nil];
+		}
 	}
 }
 
@@ -1874,6 +1930,11 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		[[binding objectForKey:NSObservedObjectKey] addObserver:observer
 		                                              forKeyPath:[binding objectForKey:NSObservedKeyPathKey]
 		                                                 options:0 context:NULL];
+		// So do the switches that grey the field and its arrow out.
+		for (NSString *name in FlycutRestoreDefaultSwitches(key))
+			[[binding objectForKey:NSObservedObjectKey] addObserver:observer
+			                                              forKeyPath:[@"values." stringByAppendingString:name]
+			                                                 options:0 context:NULL];
 	}
 	// A field at the margin ends under the right-most number field instead
 	// (only ever shorter), so its arrow stands in that field's arrow column.
@@ -2135,7 +2196,9 @@ static BOOL FlycutKeyComboIsRegistered(KeyCombo current, NSString *key)
 	for (NSButton *button in buttons) {
 		BOOL atDefault = [self restoreDefaultValueIsDefaultForIdentifier:[button identifier]];
 		[button setHidden:atDefault];
-		[button setEnabled:!atDefault];
+		// Next to a greyed-out field the arrow is greyed out too: it would reset a list that does
+		// nothing.
+		[button setEnabled:!atDefault && FlycutRestoreDefaultSwitchesOn(FlycutRestoreDefaultsKey([button identifier]))];
 	}
 }
 

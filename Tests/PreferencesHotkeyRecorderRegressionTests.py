@@ -298,6 +298,8 @@ static int RestoreButtons(void)
 static int RegisteredTable(void)
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    // A list field's arrow is greyed out with the field: the lengths checkbox is off by default.
+    [defaults setBool:YES forKey:@"skipPasswordLengths"];
     NSDictionary *table = @{
         @"ShortcutRecorder mainHotkey": @{@"keyCode": @11, @"modifierFlags": @(NSEventModifierFlagCommand | NSEventModifierFlagControl)},
         @"ShortcutRecorder searchHotkey": @{@"keyCode": @5, @"modifierFlags": @(NSEventModifierFlagControl | NSEventModifierFlagOption)},
@@ -520,6 +522,8 @@ static int GeneralRestore(void)
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     FCRememberOperator *op = Operator(80, 60, @"Resize");
+    // A list field's arrow is greyed out with the field: the lengths checkbox is off by default.
+    [defaults setBool:YES forKey:@"skipPasswordLengths"];
     NSDictionary *custom = @{@"rememberNum": @80, @"displayNum": @12, @"favoritesRememberNum": @80,
                              @"skipPboardTypesList": @"PasswordPboardType", @"skipPasswordLengthsList": @"12, 20"};
     for (NSString *key in custom) SetUserValue(key, custom[key]);
@@ -916,6 +920,8 @@ static int LiveArrow(void)
 static int RestoreRemoves(void)
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    // A list field's arrow is greyed out with the field: the lengths checkbox is off by default.
+    [defaults setBool:YES forKey:@"skipPasswordLengths"];
     NSDictionary *sliders = @{@"restoreDefaultBezelAlpha": @"bezelAlpha", @"restoreDefaultBezelWidth": @"bezelWidth", @"restoreDefaultBezelHeight": @"bezelHeight"};
     for (NSString *identifier in sliders) {
         NSString *key = sliders[identifier];

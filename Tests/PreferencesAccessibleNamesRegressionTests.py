@@ -15,7 +15,7 @@ label shown next to the control (the nearest static text or checkbox to its left
 same line, the search window's title, the table's column header). The search window
 is built without a NIB.
 The two password list fields are the exception: the checkbox in front of each is a
-sub-option of "Don't save passwords" in MainMenu.xib ("by data type:", "by length &
+checkbox in MainMenu.xib ("Password types:", "by length &
 complexity:"), which does not say what the field holds, so the fields have fixed names,
 also when the checkboxes carry the xib's titles.
 Nothing is ordered on screen; this is not a live VoiceOver run.
@@ -310,7 +310,7 @@ class PreferencesAccessibleNamesRegressionTests(PreferencesNibCase):
         self.check("general", "General pane")
 
     def test_password_list_fields_keep_their_names_with_the_xib_titles(self) -> None:
-        # MainMenu.xib titles the checkboxes in front of the two fields "by data type:" and
+        # MainMenu.xib titles the checkboxes in front of the two fields "Password types:" and
         # "by length & complexity:"; a NIB compiled from it must not turn the fields' names
         # into those fragments.
         titles = xib_checkbox_titles()

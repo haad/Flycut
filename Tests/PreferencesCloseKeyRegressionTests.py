@@ -118,10 +118,12 @@ int main(int argc, const char **argv)
                                  gCloses, (unsigned long)[gKeyMonitors count], handled]);
             if (!handled) return Fail(22, @"Preferences closed, but the key went on to beep");
         } else if ([mode isEqualToString:@"closes-from-a-field"]) {
-            // The focus in a text field (the field editor is the first responder).
+            // The focus in a text field (the field editor is the first responder). A greyed-out
+            // field (the lengths list while its checkbox is off) takes no focus.
             NSTextField *field = nil;
             for (NSView *view in [[[controller valueForKey:@"savingSectionLabel"] superview] subviews])
-                if ([view isKindOfClass:[NSTextField class]] && [(NSTextField *)view isEditable]) field = (NSTextField *)view;
+                if ([view isKindOfClass:[NSTextField class]] && [(NSTextField *)view isEditable] && [(NSTextField *)view isEnabled])
+                    field = (NSTextField *)view;
             if (field == nil || ![window makeFirstResponder:field] || ![[window firstResponder] isKindOfClass:[NSText class]])
                 return Fail(23, @"no editable General field takes the focus");
             Deliver(CommandW(), window, NULL);
