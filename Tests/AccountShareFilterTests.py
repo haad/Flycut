@@ -70,6 +70,9 @@ class AccountShareFilterTests(unittest.TestCase):
     def test_fixed_never_share_list(self) -> None:
         self.run_case("never-shared-types")
 
+    def test_files_copied_in_finder_are_never_shared(self) -> None:
+        self.run_case("file-copies")
+
     def test_ordinary_copies_may_be_shared_and_settings_stay_untouched(self) -> None:
         self.run_case("ordinary")
 

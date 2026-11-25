@@ -76,6 +76,7 @@ static NSArray *DefaultAccounts(void) {
 }
 - (void)copyText:(NSString *)text;
 - (void)copyText:(NSString *)text withTypes:(NSArray *)markers;
+- (void)copyText:(NSString *)text afterUnreadableType:(NSString *)type;
 - (void)copyImage;
 @end
 @implementation FCMemoryPasteboard
@@ -134,6 +135,12 @@ static NSArray *DefaultAccounts(void) {
 - (void)copyText:(NSString *)text withTypes:(NSArray *)markers {
     [self copyText:text];
     for (NSString *marker in markers) { values[marker] = [NSData dataWithBytes:"1" length:1]; [self addType:marker]; }
+}
+// A file copy whose first type was declared and never provided (its data reads as nil),
+// with its name as text.
+- (void)copyText:(NSString *)text afterUnreadableType:(NSString *)type {
+    changeCount++; [types release]; types = [@[type, NSPasteboardTypeString] retain];
+    [values removeAllObjects]; values[NSPasteboardTypeString] = text;
 }
 // A picture only (no text type).
 - (void)copyImage {
@@ -901,6 +908,40 @@ static int RunKeptPasteboard(void) {
     Return(b);
     f += Check([OnPasteboard(b) isEqualToString:@"example-83 theta"],
                "a copy of the history's newest text is replaced too: the history holds it");
+    // (g) A file copied in Finder: its name is text, but the history cannot give the file back.
+    [b.pasteboard copyText:@"example-84 own.txt" withTypes:@[@"public.file-url"]];
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    f += Check(ArrivesWhileAway(a, b, @"example-85 iota"), "a ninth copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-84 own.txt"] && [[b.pasteboard types] containsObject:@"public.file-url"],
+               "a file copied in Finder is not replaced");
+    // ... also when the file's data cannot be read: its types say file, not plain text.
+    [b.pasteboard copyText:@"example-90 own.txt" afterUnreadableType:@"public.file-url"];
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    f += Check([b.pasteboard dataForType:@"public.file-url"] == nil && [Top(b) isEqualToString:@"example-90 own.txt"],
+               "B takes the unreadable file copy's name into the history");
+    f += Check(ArrivesWhileAway(a, b, @"example-91 mu"), "another copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-90 own.txt"]
+               && [[[b.pasteboard types] firstObject] isEqualToString:@"public.file-url"],
+               "an unreadable file copy is not replaced");
+    // (h) Formatted text: only plain text is replaced.
+    [b.pasteboard copyText:@"example-86 own" withTypes:@[@"public.rtf"]];
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    f += Check(ArrivesWhileAway(a, b, @"example-87 kappa"), "a tenth copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-86 own"] && [[b.pasteboard types] containsObject:@"public.rtf"],
+               "formatted text is not replaced");
+    // (i) A formatted clipping Flycut put there from its list is not plain text either.
+    [b.controller addClipToPasteboard:@"example-88 own" withRichData:@{@"public.rtf": [NSData data]}];
+    [b.controller pollPB:nil];
+    [b.controller drainCaptures];
+    f += Check(ArrivesWhileAway(a, b, @"example-89 lambda"), "an eleventh copy reaches B while away");
+    Return(b);
+    f += Check([OnPasteboard(b) isEqualToString:@"example-88 own"], "a formatted clipping from the list is not replaced");
     [a.service stop];
     [b.service stop];
     return f;

@@ -47,8 +47,12 @@ HELP_SENTENCES = (
     'at once (a click on "Send" or "Receive" in that moment is undone); if that happens when Flycut starts, sharing '
     'begins once the list can be read again, for example when you switch back to the account.',
     'When you switch to an account that takes in copies, the newest text that arrived while you were away is on its '
-    'clipboard, ready to paste, if that clipboard still holds what Flycut keeps: the last copy it took into the '
-    'history or a clipping you pasted from Flycut.',
+    'clipboard, ready to paste, if that clipboard still holds plain text Flycut keeps: the last copy it took into '
+    'the history or a clipping you pasted from Flycut, without formatting.',
+    'formatted text, a picture and files copied in Finder. Files copied in Finder are not shared at all, not even '
+    'their names.',
+    'A copy that waited for more than a day is dropped, and of the copies from one account only the newest ten '
+    'wait; an older one is dropped when an eleventh arrives.',
     'The copies for an account wait in a hidden folder in /Users/Shared, in one subfolder per account it receives '
     'from; another account can only add its own copies there, and Time Machine skips the folder. Any other '
     'account on this Mac can see that the folder exists and which accounts may add copies to it, but not the '

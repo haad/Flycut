@@ -398,6 +398,8 @@ static void FixtureBeep(void) { fixtureBeeps++; }
 #import "ClipboardGenerationPolicy.h"
 #endif
 #import "FlycutAccountShareService.h"
+// -pollPB: and -addClipToPasteboard: ask it; sharing is not under test here.
+static __attribute__((unused)) BOOL FlycutTypesAreOnlyPlainText(NSArray *types) { (void)types; return NO; }
 #if __has_include("AppControllerTypes.inc")
 #include "AppControllerTypes.inc"
 #endif

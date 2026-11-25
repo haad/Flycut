@@ -11,6 +11,8 @@
 
 #import <Cocoa/Cocoa.h>
 #import "FlycutAccountShareService.h"
+// -pollPB: and -addClipToPasteboard: ask it; sharing is not under test here.
+static __attribute__((unused)) BOOL FlycutTypesAreOnlyPlainText(NSArray *types) { (void)types; return NO; }
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

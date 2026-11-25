@@ -1386,6 +1386,17 @@ static CGFloat FlycutRestoreArrowFieldsMaxX(NSView *pane)
 		|| [flycutOperator storeDisabled]];
 }
 
+// A shared copy replaces only plain text on return: the history gives back the
+// text, never a file, a picture or the formatting. A source app's name tag counts
+// as plain text.
+static BOOL FlycutTypesAreOnlyPlainText(NSArray *types)
+{
+	NSSet *plain = [NSSet setWithArray:@[NSPasteboardTypeString, @"public.utf16-external-plain-text",
+	                                    @"public.utf16-plain-text", @"public.plain-text", @"NSStringPboardType",
+	                                    @"org.nspasteboard.source"]];
+	return [types count] > 0 && [[NSSet setWithArray:types] isSubsetOfSet:plain];
+}
+
 // What is on the pasteboard when Flycut starts was never captured (-pollPB:
 // starts after it), so a shared copy may only replace an empty pasteboard.
 -(void)noteAccountSharePasteboardAtLaunch
@@ -4455,8 +4466,10 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                 // the history holds it all the same.
                 FlycutClipping *newest = [[flycutOperator clippingsInList:FlycutListHistory matching:nil] firstObject];
                 if ( added || [[newest contents] isEqualToString:contents] ) {
-                    // In the history now: a shared copy may replace it on return.
-                    accountShareKeptGeneration = pasteboardGeneration;
+                    // In the history now: a shared copy may replace it on return if it
+                    // is plain text alone (FlycutTypesAreOnlyPlainText).
+                    if ( FlycutTypesAreOnlyPlainText(availableTypes) )
+                        accountShareKeptGeneration = pasteboardGeneration;
                     // A text copy made here, not paused, not diagnostics: offer it to the other
                     // accounts. The service skips it while this session is not on the console;
                     // FlycutOperator decides whether it may leave the account at all.
@@ -5284,9 +5297,9 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
             [self clearPasteTransactionIfCurrent:transaction];
         }
     }
-    else
-        // A clipping from Flycut's lists: a shared copy may replace it on return
-        // (a cancelled paste's restored clipboard is not marked).
+    else if ( FlycutTypesAreOnlyPlainText(pbTypes) )
+        // A clipping from Flycut's lists, without formatting: a shared copy may
+        // replace it on return (a cancelled paste's restored clipboard is not marked).
         accountShareKeptGeneration = declaredCount;
     [transaction release];
 }

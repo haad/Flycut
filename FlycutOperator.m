@@ -594,6 +594,9 @@ static NSString *const FlycutFactorySkipPasswordLengthsList = @"12, 20, 32";
 		return NO;
 	if ( [[NSSet setWithArray:availableTypes] intersectsSet:[NSSet setWithArray:[FlycutOperator neverSharedTypes]]] )
 		return NO;
+	// A file copied in Finder: its name is no text the user copied, and the file cannot go along.
+	if ( [availableTypes containsObject:@"public.file-url"] || [availableTypes containsObject:@"NSFilenamesPboardType"] )
+		return NO;
 	return ![self shouldSkip:contents ofType:type fromAvailableTypes:availableTypes forcingPasswordProtection:YES];
 }
 

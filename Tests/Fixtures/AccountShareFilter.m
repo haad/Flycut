@@ -246,6 +246,22 @@ static int RunOrdinary(void) {
     return f;
 }
 
+// A file copied in Finder gives its name as text too; neither the name nor the file is shared.
+static int RunFileCopies(void) {
+    int f = 0;
+    FlycutOperator *op = Operator(@{});
+    f += Check(!MayShare(op, @"example-06 zeta.txt", @[@"public.file-url", @"public.utf8-plain-text"]),
+               "a file copied in Finder is not shared, not even its name");
+    f += Check(!MayShare(op, @"example-06 zeta.txt", @[@"NSFilenamesPboardType", @"public.utf8-plain-text"]),
+               "nor one listed the older way");
+    op = Operator(AllOff());
+    f += Check(!MayShare(op, @"example-06 zeta.txt", @[@"public.file-url", @"public.utf8-plain-text"]),
+               "with the local filters off neither");
+    f += Check(MayShare(op, @"example-06 zeta", @[@"public.utf8-plain-text", @"public.url"]),
+               "a web address is no file and may be shared");
+    return f;
+}
+
 static int RunLocalUnchanged(void) {
     int f = 0;
     FlycutOperator *op = Operator(@{});
@@ -267,6 +283,7 @@ int main(int argc, const char **argv) {
                                 @"forced-length": [NSValue valueWithPointer:RunForcedLength],
                                 @"never-shared-types": [NSValue valueWithPointer:RunNeverSharedTypes],
                                 @"ordinary": [NSValue valueWithPointer:RunOrdinary],
+                                @"file-copies": [NSValue valueWithPointer:RunFileCopies],
                                 @"local-unchanged": [NSValue valueWithPointer:RunLocalUnchanged]};
         NSValue *run = [modes objectForKey:[NSString stringWithUTF8String:argv[1]]];
         if (run == nil) return 3;
