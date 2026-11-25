@@ -4461,12 +4461,16 @@ static const NSTimeInterval kPlainPasteReadTimeout = 3.0;
 {
 	(void)hotKey;
 	if ( isBezelDisplayed || isSearchWindowDisplayed || [listController isOpen] ) {
+		NSLog(@"Paste as plain text: Flycut's bezel, search window or list is open");
 		NSBeep();
 		return;
 	}
 	// A new paste supersedes the delayed steps of an older one, and an earlier plain-text
 	// paste gives the clipboard back before it is looked at.
 	[self cancelPendingPasteCompletion];
+	// A copy made just before is in the history first, as for the bezel and the list; what
+	// goes back after the paste is then a copy a poll decided on.
+	[self captureClipboardChangeNow];
 	NSMutableArray *itemTypes = [NSMutableArray array];
 	for ( NSPasteboardItem *item in [jcPasteboard pasteboardItems] )
 		[itemTypes addObject:[item types] ?: @[]];
@@ -4577,6 +4581,7 @@ static const NSTimeInterval kPlainPasteReadTimeout = 3.0;
 	if ( [self liveModifierFlags] & FlycutHotkeyModifierMask ) {
 		if ( [[NSProcessInfo processInfo] systemUptime] >= [transaction modifierReleaseDeadline] ) {
 			NSLog(@"Paste as plain text cancelled: the hotkey's modifier keys stayed down");
+			NSBeep();
 			[self clearPasteTransactionIfCurrent:transaction];
 			return;
 		}

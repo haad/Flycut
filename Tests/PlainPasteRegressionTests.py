@@ -247,6 +247,7 @@ static NSString *const Concealed = @"org.nspasteboard.ConcealedType";
 @property NSInteger heldReads;
 @property NSInteger modifierReads;
 @property NSInteger modifierReadsAtPost;
+@property NSUInteger addedAtPost;
 @property BOOL accessibilityDenied;
 @property double targetReadDelay;  // < 0: the target never reads
 @property(copy) NSString *pastedText;
@@ -315,6 +316,7 @@ static NSString *const Concealed = @"org.nspasteboard.ConcealedType";
     self.typesAtPost = [jcPasteboard types];
     self.changeCountAtPost = [jcPasteboard changeCount];
     self.modifierReadsAtPost = self.modifierReads;
+    self.addedAtPost = [((PlainOperator *)flycutOperator).added count];
     if (self.targetReadDelay >= 0) [self performSelector:@selector(targetReads) withObject:nil afterDelay:self.targetReadDelay];
     return YES;
 }
@@ -549,10 +551,12 @@ int main(int argc, const char **argv) { @autoreleasepool {
     if ([mode isEqual:@"poll-skips-own-write"]) {
         Spin(0.2);
         if (![[board types] containsObject:Transient]) return 30;  // precondition: the plain text is placed
+        NSInteger readsBefore = board.stringReads;   // the catch-up poll's read of the copy, if any
+        NSUInteger addedBefore = [op.added count];   // and the copy it took in
         [c pollPB:nil];
         Spin(0.4);
-        if (board.stringReads != 0) { fprintf(stderr, "Flycut read its own plain-text item %ld times\n", (long)board.stringReads); return 31; }
-        if ([op.added count] != 0) return 32;
+        if (board.stringReads != readsBefore) { fprintf(stderr, "Flycut read its own plain-text item %ld times\n", (long)(board.stringReads - readsBefore)); return 31; }
+        if ([op.added count] != addedBefore) return 32;
         return 0;
     }
     if ([mode isEqual:@"held-too-long"]) {
@@ -561,6 +565,8 @@ int main(int argc, const char **argv) { @autoreleasepool {
         Spin(3.2);
         if (c.posts != 0) return 41;
         if (![[board representations] isEqual:original] || [c ownsTransaction]) { fprintf(stderr, "not restored after the hotkey was held too long\n"); return 42; }
+        // The dropped paste says so: one log line (checked by the test) and the alert sound.
+        if (beeps != 1) { fprintf(stderr, "%d beeps after the hotkey was held too long\n", beeps); return 43; }
         return 0;
     }
     if ([mode isEqual:@"newer-copy"]) {
@@ -671,7 +677,9 @@ int main(int argc, const char **argv) { @autoreleasepool {
     if ([mode isEqual:@"held"] && c.modifierReadsAtPost != 11) { fprintf(stderr, "posted after %ld modifier reads\n", (long)c.modifierReadsAtPost); return 84; }
     if (![[board representations] isEqual:original]) { fprintf(stderr, "clipboard not restored: %s\n", [[[board types] description] UTF8String]); return 85; }
     if (board.changeCount != before + 2 || [c ownsTransaction]) return 86;
-    if (board.stringReads != 0) return 87;  // Flycut never read the plain text it offered
+    // Flycut never read the plain text it offered; the one read of an unseen copy is the
+    // catch-up poll's, before the plain text took its place.
+    if (board.stringReads != ([mode isEqual:@"unseen-copy"] ? 1 : 0)) return 87;
     [c pollPB:nil];
     Spin(0.4);
     if ([mode isEqual:@"own-write-unseen"]) {
@@ -679,9 +687,11 @@ int main(int argc, const char **argv) { @autoreleasepool {
         if ([op.added count] != 0) { fprintf(stderr, "Flycut's own paste became a clipping again\n"); return 92; }
         if ([c blockedGeneration] != board.changeCount) return 93;
     } else if ([mode isEqual:@"unseen-copy"]) {
-        // The copy right before the hotkey had not been captured yet; it is captured once now.
+        // The copy right before the hotkey had not been captured yet: it is in the history
+        // before the paste (the catch-up poll), once, and what goes back is not added again.
+        if (c.addedAtPost != 1) { fprintf(stderr, "%lu clippings added before the paste\n", (unsigned long)c.addedAtPost); return 94; }
         if (![op.added isEqual:@[Secret]]) { fprintf(stderr, "added %s\n", [[op.added description] UTF8String]); return 88; }
-        if ([c blockedGeneration] == board.changeCount) return 89;
+        if ([c blockedGeneration] != board.changeCount) return 89;
     } else {
         if ([op.added count] != 0) { fprintf(stderr, "the restored clipboard became a new clipping\n"); return 90; }
         if (!op.paused && [c blockedGeneration] != board.changeCount) return 91;
@@ -792,7 +802,8 @@ class PlainPasteRegressionTests(unittest.TestCase):
         self.check('held')
 
     def test_held_modifiers_cancel_after_a_limit_and_restore(self):
-        self.check('held-too-long')
+        run = self.check('held-too-long')
+        self.assertIn("Paste as plain text cancelled: the hotkey's modifier keys stayed down", run.stderr)
 
     def test_restore_waits_for_the_target_apps_read(self):
         self.check('read-late')
@@ -816,7 +827,7 @@ class PlainPasteRegressionTests(unittest.TestCase):
     def test_flycut_never_reads_or_captures_its_own_plain_text(self):
         self.check('poll-skips-own-write')
 
-    def test_an_uncaptured_copy_is_captured_once_after_the_restore(self):
+    def test_an_uncaptured_copy_is_in_the_history_before_the_paste_and_once(self):
         self.check('unseen-copy')
 
     def test_flycuts_own_paste_is_not_captured_after_the_restore(self):
@@ -847,7 +858,8 @@ class PlainPasteRegressionTests(unittest.TestCase):
         self.check('quit-during-borrow')
 
     def test_nothing_while_the_bezel_is_open(self):
-        self.check('bezel-open')
+        run = self.check('bezel-open')
+        self.assertIn("Paste as plain text: Flycut's bezel, search window or list is open", run.stderr)
 
     def test_nothing_when_flycut_itself_is_frontmost(self):
         self.check('flycut-frontmost')
