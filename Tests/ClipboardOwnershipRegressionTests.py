@@ -4,6 +4,8 @@ import unittest
 from PasteNativeTestSupport import build_fixture, run_fixture
 FIXTURE = r'''
 #include "PasteTestEnvironmentImplementation.h"
+// A beep is counted on stderr, not played: the executable's own NSBeep wins at link time.
+void NSBeep(void) { fprintf(stderr, "FCTEST-BEEP\n"); }
 #import "AppController.h"
 #import "FlycutListPanel.h"
 @interface AppController (OwnershipTest)

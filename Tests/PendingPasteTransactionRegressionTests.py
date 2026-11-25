@@ -9,6 +9,7 @@ import unittest
 FIXTURE = r'''
 #include "PasteTestEnvironmentImplementation.h"
 #import <Cocoa/Cocoa.h>
+void FCFixtureBeep(void) { }   // NSBeep, built with -DNSBeep=FCFixtureBeep: never played
 #import "AppController.h"
 #import "FlycutListPanel.h"
 
@@ -457,7 +458,7 @@ class PendingPasteTransactionRegressionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from PasteNativeTestSupport import build_fixture
-        cls.binary = build_fixture(FIXTURE, "PendingPasteFixture")
+        cls.binary = build_fixture(FIXTURE, "PendingPasteFixture", ("-DNSBeep=FCFixtureBeep",))
 
     def _run_fixture(self, mode):
         from PasteNativeTestSupport import run_fixture

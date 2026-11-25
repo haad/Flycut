@@ -13,6 +13,7 @@ from PasteNativeTestSupport import build_fixture, run_fixture
 FIXTURE = r'''
 #include "PasteTestEnvironmentImplementation.h"
 #import "AppController.h"
+void FCFixtureBeep(void) { }   // NSBeep, built with -DNSBeep=FCFixtureBeep: never played
 @interface AppController (FailureRecoveryTesting)
 - (void)cancelPendingPasteCompletion;
 @end
@@ -200,7 +201,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
 class FailureRecoveryRegressionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.binary = build_fixture(FIXTURE, 'FailureRecoveryFixture')
+        cls.binary = build_fixture(FIXTURE, 'FailureRecoveryFixture', ('-DNSBeep=FCFixtureBeep',))
 
     def check_mode(self, mode):
         result = run_fixture(self.binary, mode)

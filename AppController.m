@@ -3017,6 +3017,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	if ( ![self pasteTransactionIsCurrent:transaction] )
 		return;
 	if (![self pasteboardIsOwnedByTransaction:transaction]) {
+		NSLog(@"Paste cancelled because the clipboard no longer holds the chosen clipping");
+		NSBeep();
 		[self clearPasteTransactionIfCurrent:transaction];
 		return;
 	}
@@ -3033,6 +3035,7 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 		 frontmostProcessIdentifier == flycutProcessIdentifier);
 	if ( !focusStillBelongsToTransaction ) {
 		NSLog(@"Paste cancelled because focus left the original transaction before activation");
+		NSBeep();
 		[self finishPasteTransactionKeepingSelection:transaction];
 		return;
 	}
@@ -3047,6 +3050,7 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 				 afterDelay:0.05];
 	} else {
 		NSLog(@"Could not reactivate the application selected for paste");
+		NSBeep();
 		[self finishPasteTransactionKeepingSelection:transaction];
 	}
 }
@@ -3056,6 +3060,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	if ( ![self pasteTransactionIsCurrent:transaction] )
 		return;
 	if (![self pasteboardIsOwnedByTransaction:transaction]) {
+		NSLog(@"Paste cancelled because the clipboard no longer holds the chosen clipping");
+		NSBeep();
 		[self clearPasteTransactionIfCurrent:transaction];
 		return;
 	}
@@ -3069,8 +3075,10 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 		targetProcessIdentifier == [frontmostApplication processIdentifier];
 	if ( targetIsFrontmost ) {
 		// Use the same immutable local PID for validation and posting.
-		if ( ![self postCommandVToProcessIdentifier:targetProcessIdentifier] )
+		if ( ![self postCommandVToProcessIdentifier:targetProcessIdentifier] ) {
 			NSLog(@"Paste could not be posted; the selection stays on the clipboard");
+			NSBeep();
+		}
 		[self finishPasteTransactionKeepingSelection:transaction];
 		return;
 	}
@@ -3088,6 +3096,7 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	}
 
 	NSLog(@"Paste cancelled because the original target did not become frontmost");
+	NSBeep();
 	[self finishPasteTransactionKeepingSelection:transaction];
 }
 
@@ -3179,6 +3188,12 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	NSLog(@"pasteFromStack called");
 	FCPasteTransaction *transaction = [currentPasteTransaction retain];
 	if (transaction == nil || [transaction selectionStarted]) {
+		// A started selection confirmed again drops nothing; without a transaction there is no
+		// target to paste into.
+		if (transaction == nil) {
+			NSLog(@"pasteFromStack: no paste target was remembered for this selection - nothing pasted");
+			NSBeep();
+		}
 		[transaction release];
 		return;
 	}
@@ -3216,6 +3231,7 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 		}
 	} else {
 		NSLog(@"No content found in stack position");
+		NSBeep();
 		if ( transaction == nil || [self pasteTransactionIsCurrent:transaction] )
 			[self hideApp];
 		[self clearPasteTransactionIfCurrent:transaction];
@@ -4132,7 +4148,9 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	}
 
 	bool pasted = [self pasteClipping:clipping fromList:list];
-	if ( ! pasted ) {
+	// A listed clipping that could not be placed (an image whose file is gone) was reported
+	// where it failed.
+	if ( ! pasted && [flycutOperator indexOfClipping:clipping inList:list] < 0 ) {
 		NSLog(@"List selection: the clipping is no longer listed - nothing pasted");
 		NSBeep(); // Pasting some other clipping would be worse than pasting nothing at all.
 	}
@@ -4214,8 +4232,16 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
         }
         NSInteger originalCount = [jcPasteboard changeCount];
         NSArray *snapshot = [self snapshotPasteboardItems];
-        if ([jcPasteboard changeCount] != originalCount ||
-            ![self pasteTransactionIsCurrent:transaction]) {
+        if (![self pasteTransactionIsCurrent:transaction]) {
+            // A newer selection took over while the clipboard was being saved; that one
+            // pastes, so this is no failure and does not beep.
+            NSLog(@"Paste cancelled because a newer selection replaced it");
+            [transaction release];
+            return;
+        }
+        if ([jcPasteboard changeCount] != originalCount) {
+            NSLog(@"Paste cancelled because the clipboard changed while it was being saved");
+            NSBeep();
             [self clearPasteTransactionIfCurrent:transaction];
             [transaction release];
             return;
@@ -4240,8 +4266,16 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
     for ( NSString *richType in richData )
         [jcPasteboard setData:[richData objectForKey:richType] forType:richType];
     [self setPBBlockCount:@(declaredCount)];
-    if (!written || [jcPasteboard changeCount] != declaredCount)
-        [self clearPasteTransactionIfCurrent:transaction];
+    if (!written || [jcPasteboard changeCount] != declaredCount) {
+        // A paste says so and beeps. A plain copy (a list row with "Menu selection
+        // pastes" off) has no transaction: it is only logged.
+        if (transaction != nil) {
+            NSLog(@"Paste cancelled because the clipboard could not be written");
+            NSBeep();
+            [self clearPasteTransactionIfCurrent:transaction];
+        } else
+            NSLog(@"Could not write the clipboard");
+    }
     [transaction release];
 }
 
@@ -4278,6 +4312,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
     }
     if (fileURL == nil && imageData == nil) {
         // Nothing can be placed, so this selection must not paste whatever is there now.
+        NSLog(@"Paste cancelled because the image is no longer stored");
+        NSBeep();
         [self clearPasteTransactionIfCurrent:transaction];
         [transaction release];
         return NO;
@@ -4285,8 +4321,16 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
     if (transaction != nil) {
         NSInteger originalCount = [jcPasteboard changeCount];
         NSArray *snapshot = [self snapshotPasteboardItems];
-        if ([jcPasteboard changeCount] != originalCount ||
-            ![self pasteTransactionIsCurrent:transaction]) {
+        if (![self pasteTransactionIsCurrent:transaction]) {
+            // A newer selection took over while the clipboard was being saved; that one
+            // pastes, so this is no failure and does not beep.
+            NSLog(@"Paste cancelled because a newer selection replaced it");
+            [transaction release];
+            return NO;
+        }
+        if ([jcPasteboard changeCount] != originalCount) {
+            NSLog(@"Paste cancelled because the clipboard changed while it was being saved");
+            NSBeep();
             [self clearPasteTransactionIfCurrent:transaction];
             [transaction release];
             return NO;
@@ -4316,7 +4360,14 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
     }
     [self setPBBlockCount:@(declaredCount)];
     if (!written || [jcPasteboard changeCount] != declaredCount) {
-        [self clearPasteTransactionIfCurrent:transaction];
+        // A paste says so and beeps. A plain copy (a list row with "Menu selection
+        // pastes" off) has no transaction: it is only logged.
+        if (transaction != nil) {
+            NSLog(@"Paste cancelled because the clipboard could not be written");
+            NSBeep();
+            [self clearPasteTransactionIfCurrent:transaction];
+        } else
+            NSLog(@"Could not write the clipboard");
         written = NO;
     }
     [transaction release];
@@ -4814,8 +4865,11 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	}
 
 	if (selectedRow < [searchResults count]) {
-		if (selectedRow >= (NSInteger)[searchResultClippings count])
+		if (selectedRow >= (NSInteger)[searchResultClippings count]) {
+			NSLog(@"Search window: the chosen row is no longer listed - nothing pasted");
+			NSBeep();
 			return;
+		}
 		FlycutClipping *selectedClipping = [searchResultClippings objectAtIndex:selectedRow];
 		int position = -1;
 		for (int index = 0; index < [flycutOperator jcListCount]; index++) {
@@ -4826,6 +4880,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 		}
 		// Evicted/reloaded identities must never redirect to another visible row.
 		if (position < 0) {
+			NSLog(@"Search window: the chosen clipping is no longer in the history - nothing pasted");
+			NSBeep();
 			[self cancelPendingPasteCompletion];
 			return;
 		}
@@ -4842,9 +4898,13 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 						 afterDelay:0.3];
 			} else {
 				NSLog(@"Search-window paste cancelled because no current target transaction exists");
+				NSBeep();
 			}
 		}
 		[transaction release];
+	} else {
+		NSLog(@"Search window: no clipping matches the search - nothing pasted");
+		NSBeep();
 	}
 }
 

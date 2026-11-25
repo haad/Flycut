@@ -45,6 +45,7 @@ FIXTURES = ROOT / "Tests" / "Fixtures"
 FIXTURE = r'''
 #import <Cocoa/Cocoa.h>
 #import <objc/runtime.h>
+void FCFixtureBeep(void) { }   // NSBeep, built with -DNSBeep=FCFixtureBeep: never played
 #import <string.h>
 #import "FixtureIsolation.h"
 #import "AppController.h"
@@ -493,7 +494,7 @@ class BezelPinRegressionTests(unittest.TestCase):
         source.write_text(FIXTURE)
         sources = fixture_sources()
         command = ["/usr/bin/xcrun", "clang", "-fno-objc-arc", "-fobjc-weak", "-fblocks", "-fmodules",
-                   "-DFLYCUT_MAC=1", "-mmacosx-version-min=13.5", "-arch", "arm64",
+                   "-DFLYCUT_MAC=1", "-DNSBeep=FCFixtureBeep", "-mmacosx-version-min=13.5", "-arch", "arm64",
                    "-include", str(ROOT / "Flycut_Prefix.pch")]
         for include in sorted({ROOT, FIXTURES, *(p.parent for p in sources)}):
             command += ["-I", str(include)]

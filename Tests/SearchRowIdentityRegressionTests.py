@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Displayed search rows retain identity across in-flight store mutations."""
+"""Displayed search rows retain identity across in-flight store mutations; a Return that pastes
+nothing (the row is gone, nothing matches, no paste target) beeps once."""
 import unittest
 from PasteNativeTestSupport import build_fixture, run_fixture
 
 FIXTURE = r'''
 #include "PasteTestEnvironmentImplementation.h"
+static int beeps;
+void FCTestNSBeep(void) { beeps++; }
 #import "AppController.h"
 @interface FCSearchOperator : NSObject
 @property(retain) NSMutableArray *clippings;
@@ -80,13 +83,16 @@ int main(int argc, const char **argv) { @autoreleasepool {
     FCSearchOperator *op = [FCSearchOperator new];
     op.clippings = [NSMutableArray arrayWithArray:@[clip(@"same title\nA"),clip(@"same title\nB"),clip(@"other")]];
     FCSearchController *controller = [FCSearchController new];
-    [controller prepare:op query:[mode isEqual:@"filtered"] ? @"same" : @""];
+    [controller prepare:op query:[mode isEqual:@"filtered"] ? @"same" : [mode isEqual:@"no-match"] ? @"no such clipping" : @""];
     [controller updateSearchResults];
     if ([mode isEqual:@"deleted"]) [op.clippings removeObjectAtIndex:1];
     else [op.clippings insertObject:clip(@"same title\nin-flight arrival") atIndex:0];
     [controller searchWindowItemSelected:nil];
-    BOOL correct = [mode isEqual:@"deleted"] ? controller.placed == nil : [controller.placed isEqual:@"same title\nB"];
+    BOOL nothing = [mode isEqual:@"deleted"] || [mode isEqual:@"no-match"];
+    BOOL correct = nothing ? controller.placed == nil : [controller.placed isEqual:@"same title\nB"];
     if (!correct) { fprintf(stderr,"selected displayed identity B redirected: %s\n",[controller.placed UTF8String]); return 11; }
+    // This fixture opens no paste transaction, so a placed row ends with that line and its beep.
+    if (beeps != 1) { fprintf(stderr,"%d beep(s) for mode %s\n",beeps,argv[1]); return 12; }
     printf("PASS search identity %s\n", argv[1]);
     [controller release]; [op release];
     return 0;
@@ -95,7 +101,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
 class SearchRowIdentityRegressionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.binary = build_fixture(FIXTURE, 'SearchRowIdentityFixture')
+        cls.binary = build_fixture(FIXTURE, 'SearchRowIdentityFixture', ('-DNSBeep=FCTestNSBeep',))
     def check_mode(self, mode):
         run = run_fixture(self.binary, mode)
         self.assertEqual(run.returncode, 0, run.stdout+run.stderr)
@@ -105,5 +111,7 @@ class SearchRowIdentityRegressionTests(unittest.TestCase):
         self.check_mode('filtered')
     def test_deleted_identity_does_not_fall_back_to_same_looking_title(self):
         self.check_mode('deleted')
+    def test_return_without_a_matching_row_pastes_nothing_and_beeps(self):
+        self.check_mode('no-match')
 if __name__ == '__main__':
     unittest.main()

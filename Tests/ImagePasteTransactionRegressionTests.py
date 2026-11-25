@@ -201,7 +201,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
     if ([mode isEqual:@"capture-follows-selection"]) return CaptureFollowsSelection();
 
     NSData *png = [@"png bytes" dataUsingEncoding:NSUTF8StringEncoding];
-    if (![mode isEqual:@"missing-data"]) memoryStore.images[@"A"] = png;
+    if (![mode isEqual:@"missing-data"] && ![mode isEqual:@"menu-missing-data"]) memoryStore.images[@"A"] = png;
     memoryStore.images[@"B"] = [@"other png" dataUsingEncoding:NSUTF8StringEncoding];
     ImageBoard *board = [[ImageBoard new] autorelease];
     [board declareTypes:nil owner:nil]; [board setString:@"original" forType:NSPasteboardTypeString];
@@ -213,7 +213,11 @@ int main(int argc, const char **argv) { @autoreleasepool {
     c.target = [[ImageTarget new] autorelease];
     [c prepare:board operator:op];
 
-    if ([mode isEqual:@"menu-image-deleted"]) {
+    if ([mode isEqual:@"menu-missing-data"]) {
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"menuSelectionPastes"];
+        // The row is still listed; its image file is gone.
+        [(id<FlycutListControllerDelegate>)c listController:nil didChooseClipping:op.clippings[0] inList:FlycutListHistory];
+    } else if ([mode isEqual:@"menu-image-deleted"]) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"menuSelectionPastes"];
         // A row of the menu-bar list stands for its clipping.
         FlycutClipping *clicked = [[op.clippings[0] retain] autorelease];
@@ -256,8 +260,14 @@ int main(int argc, const char **argv) { @autoreleasepool {
                 [[board dataForType:NSPasteboardTypePNG] isEqual:png]); return 83;
         }
     } else if ([mode isEqual:@"missing-data"]) {
-        if (c.posts != 0 || ![[board stringForType:NSPasteboardTypeString] isEqual:@"original"]) return 51;
+        // ... and says so: one log line and one beep.
+        if (c.posts != 0 || ![[board stringForType:NSPasteboardTypeString] isEqual:@"original"] || beeps != 1) return 51;
         if ([c ownsTransaction] || c.hides != 1) return 52;
+    } else if ([mode isEqual:@"menu-missing-data"]) {
+        // Said once: one beep, not a second one for "no longer listed".
+        if (c.posts != 0 || ![[board stringForType:NSPasteboardTypeString] isEqual:@"original"] || beeps != 1) {
+            fprintf(stderr, "a listed row without its image: posts=%ld beeps=%d\n", (long)c.posts, beeps); return 63;
+        }
     } else if ([mode isEqual:@"menu-image-deleted"]) {
         if (c.posts != 0 || [board dataForType:NSPasteboardTypePNG] != nil) {
             fprintf(stderr, "a deleted image menu row pasted a different image\n"); return 61;
@@ -316,6 +326,9 @@ class ImagePasteTransactionRegressionTests(unittest.TestCase):
 
     def test_missing_image_data_tears_down_without_pasting(self):
         self.check_mode('missing-data')
+
+    def test_listed_image_row_without_its_image_says_so_once(self):
+        self.check_mode('menu-missing-data')
 
     def test_deleted_image_menu_row_does_not_fall_back_to_another_image(self):
         self.check_mode('menu-image-deleted')
