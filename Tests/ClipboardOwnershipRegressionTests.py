@@ -5,13 +5,45 @@ from PasteNativeTestSupport import build_fixture, run_fixture
 FIXTURE = r'''
 #include "PasteTestEnvironmentImplementation.h"
 #import "AppController.h"
+#import "FlycutListPanel.h"
 @interface AppController (OwnershipTest)
 - (void)rememberFrontmostApplicationForPaste;
 - (void)cancelPendingPasteCompletion;
 - (void)processBezelKeyDown:(NSEvent *)event;
 @end
+// An item as a source app can leave it: a type declared without data (an emptied
+// password marker, a promise never kept), so -dataForType: answers nil for it.
+@interface DeclaredItem : NSObject
+@property(copy) NSString *string;
+@property(copy) NSArray *emptyTypes;
+@end
+@implementation DeclaredItem
+- (NSArray *)types {
+    NSMutableArray *types=[NSMutableArray array];
+    if (self.string) [types addObject:NSPasteboardTypeString];
+    [types addObjectsFromArray:self.emptyTypes]; return types;
+}
+- (NSData *)dataForType:(NSString *)type {
+    return [type isEqual:NSPasteboardTypeString] ? [self.string dataUsingEncoding:NSUTF8StringEncoding] : nil;
+}
+- (NSString *)stringForType:(NSString *)type { return [type isEqual:NSPasteboardTypeString] ? self.string : nil; }
+@end
+// A file copy as seen in use: public.file-url, its first type, declared through a provider
+// that never provides, so -dataForType: answers nil for it. A real NSPasteboardItem; no
+// pasteboard server is involved.
+@interface FileURLPromiser : NSObject <NSPasteboardItemDataProvider>
+@property NSInteger requests;
+@end
+@implementation FileURLPromiser
+- (void)pasteboard:(NSPasteboard *)pasteboard item:(NSPasteboardItem *)item provideDataForType:(NSPasteboardType)type {
+    (void)pasteboard; (void)item; (void)type; self.requests++;   // provides nothing
+}
+@end
 @interface MemoryBoard : NSObject
 @property(retain) NSString *value;
+@property(copy) NSArray *emptyTypes;
+@property(retain) NSPasteboardItem *unreadableFileItem;   // the file copy above, as the only item
+@property NSInteger snapshotReads;                        // -pasteboardItems calls
 @property NSInteger changeCount;
 @property(copy) NSData *opaqueData;
 @property BOOL writeFails;
@@ -20,13 +52,19 @@ FIXTURE = r'''
 @implementation MemoryBoard
 - (NSArray *)pasteboardItems {
     if (self.changesDuringSnapshot) { self.changeCount++; self.value=@"external copy"; }
+    self.snapshotReads++;
+    if (self.unreadableFileItem) return @[self.unreadableFileItem];
+    if ([self.emptyTypes count]) {
+        DeclaredItem *item=[[DeclaredItem new] autorelease]; item.string=self.value; item.emptyTypes=self.emptyTypes;
+        return @[item];
+    }
     if (!self.value) return @[];
     NSPasteboardItem *item = [[[NSPasteboardItem alloc] init] autorelease];
     [item setString:self.value forType:NSPasteboardTypeString];
     if (self.opaqueData) [item setData:self.opaqueData forType:@"test.opaque-format"];
     return @[item];
 }
-- (NSInteger)declareTypes:(id)types owner:(id)owner { self.changeCount++; self.value=nil; self.opaqueData=nil; return self.changeCount; }
+- (NSInteger)declareTypes:(id)types owner:(id)owner { self.changeCount++; self.value=nil; self.opaqueData=nil; self.emptyTypes=nil; self.unreadableFileItem=nil; return self.changeCount; }
 - (NSInteger)clearContents { return [self declareTypes:nil owner:nil]; }
 - (BOOL)setString:(NSString *)value forType:(id)type { if (self.writeFails) return NO; self.value = [[value copy] autorelease]; return YES; }
 - (NSString *)stringForType:(id)type { return self.value; }
@@ -69,6 +107,9 @@ FIXTURE = r'''
 // clippings are plain text, so there is none.
 - (NSDictionary *)getRichDataFromStackPosition { return nil; }
 - (NSDictionary *)getRichDataFromIndex:(int)index { (void)index; return nil; }
+// The menu-bar list addresses its rows by clipping; this fixture lists one history clipping.
+- (int)indexOfClipping:(FlycutClipping *)clipping inList:(FlycutList)list { return (clipping && list == FlycutListHistory) ? 0 : -1; }
+- (bool)favoritesStoreIsSelected { return NO; }
 @end
 @interface OwnerController : AppController
 @property(retain) OwnerTarget *target;
@@ -118,6 +159,17 @@ int main(int argc, const char **argv) { @autoreleasepool {
     MemoryBoard *board=[MemoryBoard new]; board.value=@"original";
     if ([mode isEqual:@"empty-cancel"]) board.value=nil;
     if ([mode isEqual:@"opaque-cancel"]) board.opaqueData=[@"opaque bytes" dataUsingEncoding:NSUTF8StringEncoding];
+    // A clipboard whose only type was declared without data (an emptied password marker):
+    // it holds no text and cannot be saved for a restore.
+    if ([mode hasPrefix:@"unsaved"]) { board.value=nil; board.emptyTypes=@[@"org.nspasteboard.ConcealedType"]; }
+    if ([mode isEqual:@"unsaved-beside-text"]) board.value=@"original";
+    FileURLPromiser *promiser=[[FileURLPromiser new] autorelease];
+    if ([mode hasPrefix:@"file-url-unreadable"]) {
+        NSPasteboardItem *item=[[[NSPasteboardItem alloc] init] autorelease];
+        if (![item setDataProvider:promiser forTypes:@[NSPasteboardTypeFileURL]]) return 38;
+        if (![[[item types] firstObject] isEqual:NSPasteboardTypeFileURL] || [item dataForType:NSPasteboardTypeFileURL]) return 39;
+        board.value=nil; board.unreadableFileItem=item;
+    }
     board.writeFails=[mode isEqual:@"write-failed"];
     board.changesDuringSnapshot=[mode isEqual:@"snapshot-changed"];
     OwnerOperator *op=[OwnerOperator new]; op.selected=[NSMutableString stringWithString:@"selected"];
@@ -127,7 +179,12 @@ int main(int argc, const char **argv) { @autoreleasepool {
     OwnerTarget *otherApp=[[OwnerTarget new] autorelease]; otherApp.pid=5151;
     c.otherAppFrontmostAfterActivation=[mode isEqual:@"focus-left-after-activation"];
     if (c.otherAppFrontmostAfterActivation) c.frontmostOverride=otherApp;
-    if ([mode hasPrefix:@"copy-only"]) {
+    NSInteger placed=-1;
+    if ([mode isEqual:@"unsaved-list"]) {
+        // A row of the menu-bar list with "Menu selection pastes" on.
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"menuSelectionPastes"];
+        [(id<FlycutListControllerDelegate>)c listController:nil didChooseClipping:[op clippingAtStackPosition] inList:FlycutListHistory];
+    } else if ([mode hasPrefix:@"copy-only"]) {
         // Bezel copy-only action: the clipping goes to the clipboard and no paste follows.
         [c hitMainHotKey:nil];
         [c processBezelKeyDown:BezelKey(@"\x03", 8)];
@@ -139,7 +196,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
             [c hitMainHotKey:nil];
         } else return 3;
     } else {
-        [c hitMainHotKey:nil]; [c metaKeysReleased];
+        [c hitMainHotKey:nil]; [c metaKeysReleased]; placed=board.changeCount;
         if ([mode isEqual:@"focus-left"]) c.frontmostOverride=otherApp; // before the 0.5 s completion
         if ([mode isEqual:@"superseded"]) // a new selection after the bezel hid, before the post
             [c performSelector:@selector(hitMainHotKey:) withObject:nil afterDelay:0.3];
@@ -185,12 +242,38 @@ int main(int argc, const char **argv) { @autoreleasepool {
         }
     } else if ([mode isEqual:@"copy-only-release"]) {
         if (c.posts!=1 || ![c.postedText isEqual:@"selected"] || ![board.value isEqual:@"selected"] || [c ownsTransaction]) return 32;
+    } else if ([mode hasPrefix:@"file-url-unreadable"]) {
+        // The paste goes ahead without a restore point; a cancel then writes nothing back.
+        if (board.snapshotReads==0) { fprintf(stderr,"the clipboard before the paste was never read\n"); return 37; }
+        if ([mode hasSuffix:@"cancel"]) {
+            if (c.postAttempts || ![board.value isEqual:@"selected"] || board.changeCount!=placed || [c ownsTransaction]) {
+                fprintf(stderr,"cancel over an unreadable file copy: attempts=%ld value=%s changes=%ld placed=%ld\n",
+                    (long)c.postAttempts,[board.value UTF8String],(long)board.changeCount,(long)placed); return 36;
+            }
+        } else if (c.posts!=1 || ![c.postedText isEqual:@"selected"] || ![board.value isEqual:@"selected"] || [c ownsTransaction]) {
+            fprintf(stderr,"an unreadable file copy blocked the paste: posts=%ld value=%s\n",
+                (long)c.posts,[board.value UTF8String]); return 35;
+        }
+    } else if ([mode isEqual:@"unsaved-cancel"]) {
+        // Without a restore point a cancel leaves the selection, as without the transaction.
+        if (c.postAttempts || ![board.value isEqual:@"selected"] || board.changeCount!=placed || [c ownsTransaction]) {
+            fprintf(stderr,"cancel after an unsaved clipboard: attempts=%ld value=%s changes=%ld placed=%ld\n",
+                (long)c.postAttempts,[board.value UTF8String],(long)board.changeCount,(long)placed); return 34;
+        }
+    } else if ([mode hasPrefix:@"unsaved"]) {
+        if (c.posts!=1 || ![c.postedText isEqual:@"selected"] || ![board.value isEqual:@"selected"] || [c ownsTransaction]) {
+            fprintf(stderr,"a clipboard that cannot be saved blocked the paste: posts=%ld value=%s\n",
+                (long)c.posts,[board.value UTF8String]); return 33;
+        }
     } else if (c.posts!=1 || ![c.postedText isEqual:@"selected"]) return 24;
     printf("PASS clipboard ownership %s\n",argv[1]);
     [c release]; [op release]; [board release];
     return 0;
 } }
 '''
+# Logged once when the clipboard before a paste cannot be saved; it names no content.
+UNSAVED_LOG = ('Paste: the clipboard before it could not be saved, '
+               'so a cancelled paste leaves the selection on the clipboard')
 class ClipboardOwnershipRegressionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -198,6 +281,29 @@ class ClipboardOwnershipRegressionTests(unittest.TestCase):
     def check_mode(self, mode):
         run = run_fixture(self.binary, mode)
         self.assertEqual(run.returncode, 0, run.stdout+run.stderr)
+        return run
+    # A type declared without data (an emptied password marker) left the old clipboard
+    # unsaveable, and the selection was neither written nor pasted.
+    def test_a_clipboard_that_cannot_be_saved_does_not_block_the_paste(self):
+        run = self.check_mode('unsaved-paste')
+        self.assertEqual(run.stderr.count(UNSAVED_LOG), 1, run.stderr)
+    def test_a_list_row_pastes_over_a_clipboard_that_cannot_be_saved(self):
+        run = self.check_mode('unsaved-list')
+        self.assertEqual(run.stderr.count(UNSAVED_LOG), 1, run.stderr)
+    def test_text_beside_a_type_without_data_does_not_block_the_paste(self):
+        self.check_mode('unsaved-beside-text')
+    def test_cancel_after_an_unsaved_clipboard_keeps_the_selection(self):
+        self.check_mode('unsaved-cancel')
+    # Seen in use: a file copy whose public.file-url data read as nil was the snapshot's
+    # first and only read, and every selection pasted nothing.
+    def test_an_unreadable_file_copy_does_not_block_the_paste(self):
+        run = self.check_mode('file-url-unreadable-paste')
+        self.assertEqual(run.stderr.count(UNSAVED_LOG), 1, run.stderr)
+    def test_cancel_over_an_unreadable_file_copy_attempts_no_restore(self):
+        self.check_mode('file-url-unreadable-cancel')
+    def test_a_saved_clipboard_logs_nothing_about_saving(self):
+        run = self.check_mode('cancel')
+        self.assertNotIn(UNSAVED_LOG, run.stderr)
     def test_empty_clipboard_is_restored_on_cancel(self):
         self.check_mode('empty-cancel')
     def test_opaque_clipboard_representation_survives_cancel(self):

@@ -4151,12 +4151,19 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
         }
         NSInteger originalCount = [jcPasteboard changeCount];
         NSArray *snapshot = [self snapshotPasteboardItems];
-        if (snapshot == nil || [jcPasteboard changeCount] != originalCount ||
+        if ([jcPasteboard changeCount] != originalCount ||
             ![self pasteTransactionIsCurrent:transaction]) {
             [self clearPasteTransactionIfCurrent:transaction];
             [transaction release];
             return;
         }
+        // A clipboard with a type declared without data (a password manager's emptied
+        // marker, a promise its app never kept) cannot be saved. Refusing the paste for
+        // it wrote nothing, so every paste failed until the next copy. The paste goes
+        // ahead without a restore point instead: a cancel leaves the selection on the
+        // clipboard, as it did before paste transactions existed.
+        if (snapshot == nil)
+            NSLog(@"Paste: the clipboard before it could not be saved, so a cancelled paste leaves the selection on the clipboard");
         [transaction setPreviousPasteboardItems:snapshot];
         [transaction setSelectedPayload:pbFullText];
         pbFullText = [transaction selectedPayload];
@@ -4177,7 +4184,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 
 // Returns YES when the image (or the GIF's file reference) was placed on the pasteboard.
 // Inside a paste transaction the placement is owned exactly like text: the previous
-// clipboard is snapshotted first and the written representation becomes the payload.
+// clipboard is snapshotted first (without a restore point when it cannot be) and the
+// written representation becomes the payload.
 -(BOOL)addImageClipToPasteboard:(FlycutClipping *)clipping
 {
     NSString *type = [clipping type];
@@ -4214,12 +4222,14 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
     if (transaction != nil) {
         NSInteger originalCount = [jcPasteboard changeCount];
         NSArray *snapshot = [self snapshotPasteboardItems];
-        if (snapshot == nil || [jcPasteboard changeCount] != originalCount ||
+        if ([jcPasteboard changeCount] != originalCount ||
             ![self pasteTransactionIsCurrent:transaction]) {
             [self clearPasteTransactionIfCurrent:transaction];
             [transaction release];
             return NO;
         }
+        if (snapshot == nil) // as for text: paste without a restore point
+            NSLog(@"Paste: the clipboard before it could not be saved, so a cancelled paste leaves the selection on the clipboard");
         [transaction setPreviousPasteboardItems:snapshot];
         if (fileURL != nil) {
             [transaction setSelectedPayloadType:NSPasteboardTypeFileURL];

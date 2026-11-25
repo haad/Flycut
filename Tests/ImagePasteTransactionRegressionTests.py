@@ -6,6 +6,9 @@ import unittest
 from PasteNativeTestSupport import build_fixture, run_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+# Logged once when the clipboard before a paste cannot be saved; it names no content.
+UNSAVED_LOG = ('Paste: the clipboard before it could not be saved, '
+               'so a cancelled paste leaves the selection on the clipboard')
 
 FIXTURE = r'''
 #include "PasteTestEnvironmentImplementation.h"
@@ -21,21 +24,33 @@ FIXTURE = r'''
 static int beeps;
 void FCTestNSBeep(void) { beeps++; }
 
+// An item with a type declared without data (an emptied password marker): -dataForType:
+// answers nil for it, so the clipboard cannot be saved for a restore.
+@interface DeclaredItem : NSObject
+@property(copy) NSArray *emptyTypes;
+@end
+@implementation DeclaredItem
+- (NSArray *)types { return self.emptyTypes; }
+- (NSData *)dataForType:(NSString *)type { return nil; }
+@end
+
 // In-memory, generation-counted board with arbitrary representations.
 @interface ImageBoard : NSObject
 @property NSInteger changeCount;
 @property(retain) NSMutableDictionary *representations;
+@property(copy) NSArray *emptyTypes;
 @end
 @implementation ImageBoard
 - (id)init { if ((self = [super init])) _representations = [NSMutableDictionary new]; return self; }
 - (NSArray *)pasteboardItems {
+    if ([self.emptyTypes count]) { DeclaredItem *item = [[DeclaredItem new] autorelease]; item.emptyTypes = self.emptyTypes; return @[item]; }
     if ([self.representations count] == 0) return @[];
     NSPasteboardItem *item = [[[NSPasteboardItem alloc] init] autorelease];
     for (NSString *type in self.representations) [item setData:self.representations[type] forType:type];
     return @[item];
 }
 - (NSArray *)types { return [self.representations allKeys]; }
-- (NSInteger)declareTypes:(id)types owner:(id)owner { self.changeCount++; [self.representations removeAllObjects]; return self.changeCount; }
+- (NSInteger)declareTypes:(id)types owner:(id)owner { self.changeCount++; [self.representations removeAllObjects]; self.emptyTypes = nil; return self.changeCount; }
 - (NSInteger)clearContents { return [self declareTypes:nil owner:nil]; }
 - (BOOL)setData:(NSData *)data forType:(NSString *)type { if (!data) return NO; self.representations[type] = [[data copy] autorelease]; return YES; }
 - (NSData *)dataForType:(NSString *)type { return self.representations[type]; }
@@ -190,6 +205,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
     memoryStore.images[@"B"] = [@"other png" dataUsingEncoding:NSUTF8StringEncoding];
     ImageBoard *board = [[ImageBoard new] autorelease];
     [board declareTypes:nil owner:nil]; [board setString:@"original" forType:NSPasteboardTypeString];
+    if ([mode hasPrefix:@"unsaved"]) { [board declareTypes:nil owner:nil]; board.emptyTypes = @[@"org.nspasteboard.ConcealedType"]; }
     ImageOperator *op = [[ImageOperator new] autorelease];
     NSString *type = [mode isEqual:@"bezel-gif"] ? @"com.compuserve.gif" : NSPasteboardTypePNG;
     op.clippings = [NSMutableArray arrayWithObject:ImageClipping(@"A", type)];
@@ -207,7 +223,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
     } else {
         [c hitMainHotKey:nil];
         [c metaKeysReleased];
-        if ([mode isEqual:@"escape"]) [c processBezelKeyDown:Escape()];
+        if ([mode isEqual:@"escape"] || [mode isEqual:@"unsaved-escape"]) [c processBezelKeyDown:Escape()];
         if ([mode isEqual:@"external"]) { [board declareTypes:nil owner:nil]; [board setString:@"external copy" forType:NSPasteboardTypeString]; }
     }
     [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.8]];
@@ -227,6 +243,18 @@ int main(int argc, const char **argv) { @autoreleasepool {
         if ([c ownsTransaction]) return 33;
     } else if ([mode isEqual:@"external"]) {
         if (c.posts != 0 || ![[board stringForType:NSPasteboardTypeString] isEqual:@"external copy"]) return 41;
+    } else if ([mode isEqual:@"unsaved-image"]) {
+        // A clipboard that cannot be saved does not block the image paste.
+        if (c.posts != 1 || ![c.postedImage isEqual:png] || ![[board dataForType:NSPasteboardTypePNG] isEqual:png]) {
+            fprintf(stderr, "a clipboard that cannot be saved blocked the image paste: posts=%ld\n", (long)c.posts); return 81;
+        }
+        if ([c ownsTransaction]) return 82;
+    } else if ([mode isEqual:@"unsaved-escape"]) {
+        // Without a restore point Escape leaves the image on the clipboard.
+        if (c.posts != 0 || ![[board dataForType:NSPasteboardTypePNG] isEqual:png] || [c ownsTransaction]) {
+            fprintf(stderr, "Escape after an unsaved clipboard: posts=%ld image=%d\n", (long)c.posts,
+                [[board dataForType:NSPasteboardTypePNG] isEqual:png]); return 83;
+        }
     } else if ([mode isEqual:@"missing-data"]) {
         if (c.posts != 0 || ![[board stringForType:NSPasteboardTypeString] isEqual:@"original"]) return 51;
         if ([c ownsTransaction] || c.hides != 1) return 52;
@@ -265,6 +293,7 @@ class ImagePasteTransactionRegressionTests(unittest.TestCase):
     def check_mode(self, mode):
         run = run_fixture(self.binary, mode)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        return run
 
     def test_bezel_image_selection_pastes_through_the_transaction(self):
         self.check_mode('bezel-image')
@@ -277,6 +306,13 @@ class ImagePasteTransactionRegressionTests(unittest.TestCase):
 
     def test_external_copy_after_image_placement_is_never_pasted_or_overwritten(self):
         self.check_mode('external')
+
+    def test_a_clipboard_that_cannot_be_saved_does_not_block_an_image_paste(self):
+        run = self.check_mode('unsaved-image')
+        self.assertEqual(run.stderr.count(UNSAVED_LOG), 1, run.stderr)
+
+    def test_escape_after_an_unsaved_clipboard_keeps_the_image(self):
+        self.check_mode('unsaved-escape')
 
     def test_missing_image_data_tears_down_without_pasting(self):
         self.check_mode('missing-data')

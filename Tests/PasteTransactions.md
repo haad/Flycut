@@ -32,6 +32,9 @@ open Settings or terminate another application.
   external copies are not overwritten when their changed generation is observed.
 - **Rollback:** a cancellation (Escape, a superseding selection) or a failed clipboard
   write restores the previous clipboard, and only while the transaction still owns it.
+  A clipboard that cannot be saved (a type declared without data) does not stop the
+  paste; it goes ahead without a restore point, so a cancellation then leaves the
+  selected clipping on the clipboard.
   A paste that is not delivered (refused post, failed activation, focus change) and
   the bezel's copy-only action leave the selected clipping on the clipboard.
 
