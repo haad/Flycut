@@ -23,6 +23,9 @@ from PasteNativeTestSupport import build_fixture, run_fixture
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SECRET = "FCPlainPasteMarker-7f3a"
+# Logged once when the clipboard cannot be saved for the restore; it names no content.
+UNSAVED_PLAIN_LOG = ('Paste as plain text: the clipboard could not be saved, '
+                     'so the plain text stays on the clipboard')
 
 POLICY_FIXTURE = r'''
 #import <AppKit/AppKit.h>
@@ -330,6 +333,16 @@ static void SpinUntil(BOOL (^done)(void), double limit) {
 
 static NSData *Bytes(NSString *s) { return [s dataUsingEncoding:NSUTF8StringEncoding]; }
 
+// A promise its app never keeps: the type is declared, but no data ever comes (as a password
+// manager leaves its marker when it empties the clipboard).
+@interface EmptyPromise : NSObject <NSPasteboardItemDataProvider>
+@end
+@implementation EmptyPromise
+- (void)pasteboard:(NSPasteboard *)pasteboard item:(NSPasteboardItem *)item provideDataForType:(NSPasteboardType)type {
+    (void)pasteboard; (void)item; (void)type;
+}
+@end
+
 static NSUInteger registrations, unregistrations;
 static NSInteger registeredCode = -2;
 static UInt32 registeredModifiers;
@@ -443,7 +456,11 @@ int main(int argc, const char **argv) { @autoreleasepool {
     else if ([mode isEqual:@"plain-only"]) original = @{NSPasteboardTypeString: Bytes(Secret)};
     else if ([mode isEqual:@"plain-only-concealed"]) original = @{NSPasteboardTypeString: Bytes(Secret), Concealed: [NSData data]};
     else if ([mode isEqual:@"concealed-formatted"]) original = @{NSPasteboardTypeString: Bytes(Secret), NSPasteboardTypeHTML: html, Concealed: [NSData data]};
+    if ([mode isEqual:@"unsaved-no-text"]) original = @{};
     if ([mode isEqual:@"empty"]) [board clearContents]; else [board copyRepresentations:original];
+    // A clipboard Flycut cannot save for the restore: a type declared without data next to
+    // the formatted text (unsaved-formatted) or alone (unsaved-no-text).
+    if ([mode hasPrefix:@"unsaved"]) [[board.items lastObject] setDataProvider:[[EmptyPromise new] autorelease] forTypes:@[Concealed]];
     PlainOperator *op = [[PlainOperator new] autorelease];
     op.paused = [mode isEqual:@"paused"] || [mode isEqual:@"resume-during-borrow"] || [mode isEqual:@"resume-before-hotkey"];
     PlainController *c = [[PlainController new] autorelease];
@@ -487,6 +504,35 @@ int main(int argc, const char **argv) { @autoreleasepool {
             return 11;
         }
         if (![[board representations] isEqual:([mode isEqual:@"empty"] ? @{} : original)]) return 12;
+        return 0;
+    }
+    if ([mode isEqual:@"unsaved-no-text"]) {
+        Spin(0.5);
+        if (beeps != 1 || c.posts != 0 || board.changeCount != before || [c ownsTransaction]) {
+            fprintf(stderr, "beeps %d posts %ld, generation %ld -> %ld\n", beeps, (long)c.posts, (long)before, (long)board.changeCount);
+            return 125;
+        }
+        return 0;
+    }
+    if ([mode isEqual:@"unsaved-formatted"]) {
+        SpinUntil(^BOOL { return c.pastedText != nil; }, 2.0);
+        Spin(3.4);  // past the read grace and the restore timeout
+        if (beeps != 0 || c.posts != 1 || ![c.pastedText isEqual:Secret]) {
+            fprintf(stderr, "beeps %d posts %ld, the target read %s\n", beeps, (long)c.posts, c.pastedText ? "other text" : "nothing");
+            return 120;
+        }
+        NSArray *expected = @[NSPasteboardTypeString, Transient, Concealed];
+        if (!SameSet(c.typesAtPost, expected) || c.changeCountAtPost != before + 1) return 121;
+        // What was there could not be saved, so nothing goes back: the plain text stays.
+        if (board.changeCount != before + 1 || !SameSet([board types], expected) || [c ownsTransaction]) {
+            fprintf(stderr, "after the paste: %s, generation %ld -> %ld\n", [[[board types] description] UTF8String],
+                (long)before, (long)board.changeCount);
+            return 122;
+        }
+        if (![[[[board pasteboardItems] firstObject] stringForType:NSPasteboardTypeString] isEqual:Secret]) return 123;
+        [c pollPB:nil];
+        Spin(0.4);
+        if ([op.added count] != 0 || [c blockedGeneration] != board.changeCount) return 124;  // never captured
         return 0;
     }
     if ([mode isEqual:@"plain-only"] || [mode isEqual:@"plain-only-concealed"]) {
@@ -697,6 +743,7 @@ class PlainPasteRegressionTests(unittest.TestCase):
         self.assertEqual(run.returncode, 0, output)
         # Clipboard contents never reach a log line.
         self.assertNotIn(SECRET, output)
+        return run
 
     def check_policy(self, mode):
         run = subprocess.run([str(self.policy), mode], cwd=ROOT, text=True, capture_output=True, timeout=30)
@@ -708,6 +755,19 @@ class PlainPasteRegressionTests(unittest.TestCase):
 
     def test_formatted_text_is_pasted_as_plain_text_and_the_clipboard_comes_back(self):
         self.check('formatted')
+
+    # A type declared without data (an emptied password marker) next to the formatted text:
+    # the clipboard cannot be saved for the restore, and the paste was refused.
+    def test_a_clipboard_that_cannot_be_saved_still_pastes_its_plain_text(self):
+        run = self.check('unsaved-formatted')
+        self.assertEqual(run.stderr.count(UNSAVED_PLAIN_LOG), 1, run.stderr)
+
+    def test_a_type_without_data_alone_is_no_text(self):
+        self.check('unsaved-no-text')
+
+    def test_a_saved_clipboard_logs_nothing_about_saving(self):
+        run = self.check('formatted')
+        self.assertNotIn(UNSAVED_PLAIN_LOG, run.stderr)
 
     def test_plain_text_alone_is_pasted_without_touching_the_clipboard(self):
         self.check('plain-only')
@@ -841,7 +901,9 @@ class PlainPasteRegressionTests(unittest.TestCase):
         self.assertEqual(paragraphs[1],
                          'For formatted text, Flycut puts the plain text on the clipboard for the paste and then puts back what '
                          'you had copied: right after the app has read the plain text, or after three seconds if no app reads '
-                         'it. If you copy something else in the meantime, your new copy stays. Neither the plain text nor what '
+                         'it. If you copy something else in the meantime, your new copy stays. If what you had copied cannot be '
+                         'read back in full (an app left a format on the clipboard without its data), the plain text is pasted '
+                         'and stays on the clipboard. Neither the plain text nor what '
                          'Flycut puts back is added to your clipboard history; a copy you made just before is added once, as '
                          'usual. Text without formatting, such as a password from a password manager, is pasted as it is, and '
                          'the clipboard is not touched. If the clipboard holds no text (a picture, files from the Finder, or '

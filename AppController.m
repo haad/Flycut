@@ -4500,25 +4500,43 @@ static const NSTimeInterval kPlainPasteReadTimeout = 3.0;
 }
 
 // Puts the clipboard's plain text alone on the pasteboard, after a snapshot of every item
-// for the restore (#7's snapshot, which refuses a representation it cannot read back).
+// for the restore (#7's snapshot, which refuses a representation it cannot read back). A
+// clipboard that cannot be saved that way (a type declared without data, such as a password
+// manager's emptied marker) still gives its plain text: it is pasted and stays.
 - (BOOL)placePlainTextForTransaction:(FCPasteTransaction *)transaction
 {
 	NSInteger originalCount = [jcPasteboard changeCount];
 	BOOL concealed = [[jcPasteboard types] containsObject:FlycutConcealedPasteboardType];
 	NSArray *snapshot = [self snapshotPasteboardItems];
-	if ( snapshot == nil || [jcPasteboard changeCount] != originalCount || ![self pasteTransactionIsCurrent:transaction] )
-		return NO;
 	// The text the pasteboard's string read gives: its first item with text.
 	NSString *text = nil;
-	for ( NSDictionary *representations in snapshot ) {
-		NSData *data = [representations objectForKey:NSPasteboardTypeString];
+	for ( id item in snapshot ?: [jcPasteboard pasteboardItems] ) {
+		NSData *data = snapshot != nil ? [item objectForKey:NSPasteboardTypeString] : [item dataForType:NSPasteboardTypeString];
 		if ( data != nil ) {
 			text = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
 			break;
 		}
 	}
+	if ( [jcPasteboard changeCount] != originalCount || ![self pasteTransactionIsCurrent:transaction] )
+		return NO;
 	if ( text == nil )
 		return NO;
+	if ( snapshot == nil ) {
+		// Nothing can go back, so the plain text is written at once and stays, marked as the
+		// borrowed item would be; no provider waits for the target's read.
+		NSLog(@"Paste as plain text: the clipboard could not be saved, so the plain text stays on the clipboard");
+		[transaction setSelectedPayload:text];
+		NSPasteboardItem *plain = [[[NSPasteboardItem alloc] init] autorelease];
+		[plain setString:text forType:NSPasteboardTypeString];
+		[plain setData:[NSData data] forType:FlycutTransientPasteboardType];
+		if ( concealed )
+			[plain setData:[NSData data] forType:FlycutConcealedPasteboardType];
+		NSInteger declaredCount = [jcPasteboard clearContents];
+		[transaction setOwnedChangeCount:declaredCount];
+		// Flycut's own write: never captured, never read by -pollPB:.
+		[self setPBBlockCount:@(declaredCount)];
+		return [jcPasteboard writeObjects:@[plain]] && [jcPasteboard changeCount] == declaredCount;
+	}
 	[transaction setPreviousPasteboardItems:snapshot];
 	// Flycut's own write (a paste from the history), or a copy while tracking is paused:
 	// what goes back is never captured. Whether a poll decided on the copy is asked only
@@ -4574,7 +4592,7 @@ static const NSTimeInterval kPlainPasteReadTimeout = 3.0;
 - (void)restoreClipboardAfterPlainTextPaste:(FCPasteTransaction *)transaction
 {
 	if ( [transaction previousPasteboardItems] == nil ) {
-		// The clipboard was left as it was: nothing goes back.
+		// The clipboard was left as it was, or could not be saved: nothing goes back.
 		[self finishPasteTransactionKeepingSelection:transaction];
 		return;
 	}
