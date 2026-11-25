@@ -404,7 +404,7 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPasswordLengthsList" id="NJg-wN-gsn"/>
                                                         </connections>
                                                     </textField>
-                                                    <button toolTip="For troubleshooting: saves the data type of each copy (for example public.utf8-plain-text) in the clippings list instead of the copied content. Use it to find identifiers for the Password types list." translatesAutoresizingMaskIntoConstraints="NO" id="mka-NZ-Esg">
+                                                    <button toolTip="For troubleshooting: saves one row per copy with all of its data types (for example public.utf8-plain-text, org.nspasteboard.ConcealedType) in the clippings list instead of the copied content, also for copies the filters skip. A copy with the same data types as the newest row adds none, and with &quot;Remove duplicates&quot; on, a listed row with the same types moves to the top. Use it to find identifiers for the Password types list." translatesAutoresizingMaskIntoConstraints="NO" id="mka-NZ-Esg">
                                                         <rect key="frame" x="36" y="240" width="266" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Diagnostics: save data type, not content" bezelStyle="regularSquare" imagePosition="left" inset="2" id="9Vi-RY-G0b">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>

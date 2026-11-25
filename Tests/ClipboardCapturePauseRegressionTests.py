@@ -381,8 +381,8 @@ int main(int argc, const char *argv[]) {
             [controller drainCaptures];
             if (strcmp(mode, "mixed-unpaused") == 0)
                 return Report(mode, op, 2, @"<image public.tiff>");
-            // Diagnostics record the copy's type once and never its payload.
-            return Report(mode, op, 1, withText ? NSPasteboardTypeString : NSPasteboardTypeTIFF);
+            // Diagnostics record one row with the copy's types and never its payload.
+            return Report(mode, op, 1, withText ? @"public.utf8-plain-text, public.tiff" : NSPasteboardTypeTIFF);
         }
 
         if (strcmp(mode, "diagnostics-gif-download") == 0) {
@@ -411,7 +411,8 @@ int main(int argc, const char *argv[]) {
                 [controller drainMainQueue];
             }
             printf("%s: download started=%s\n", mode, downloadStarted ? "YES" : "NO");
-            int result = Report(mode, op, 1, NSPasteboardTypeTIFF);
+            // One row with every type of the copy; no download.
+            int result = Report(mode, op, 1, @"public.tiff, public.html");
             if (result == 0 && downloadStarted) return 12;
             return result;
         }

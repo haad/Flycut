@@ -3581,6 +3581,23 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
     NSUInteger captureEpoch = clipboardCaptureEpoch;
     // A catch-up poll (-captureClipboardChangeNow) waits for this poll's reads, a bounded time.
     FCClipboardCatchUp *catchUp = clipboardCatchUp;
+    // Diagnostics: one row per copy with all of its data types, the markers among them, also
+    // for a copy the filters skip or that holds no text or image. Its content is never read.
+    // Flycut's own writes and a paused capture give no row, as for every copy. Rows merge like
+    // clippings: a copy with the newest row's types adds none (with removeDuplicates, any equal row
+    // moves to the top).
+    if ( [[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"] ) {
+        if ( [availableTypes count] > 0 &&
+             FCShouldCommitClipboardRead(pasteboardGeneration, pasteboardGeneration, blockedGeneration,
+                                         captureEpoch, clipboardCaptureEpoch, [flycutOperator storeDisabled]) )
+            [flycutOperator addClipping:[availableTypes componentsJoinedByString:@", "]
+                                 ofType:NSPasteboardTypeString
+                                fromApp:@"Flycut"
+                       withAppBundleURL:nil
+                                 target:self
+                 clippingAddedSelector:@selector(clippingWasAdded)];
+        return;
+    }
     if ( type == nil && imageType == nil )
         return;
 
@@ -3656,12 +3673,7 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                 }
 
                 if (revealPasteboardTypes) {
-                    [flycutOperator addClipping:type
-                                         ofType:type
-                                        fromApp:@"Flycut"
-                               withAppBundleURL:nil
-                                         target:self
-                         clippingAddedSelector:@selector(clippingWasAdded)];
+                    // Diagnostics went on during the read: never the content.
                     return;
                 }
 
@@ -3717,11 +3729,8 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
             // When the clipboard carries only a flattened still but embeds the source
             // GIF's URL (e.g. Chrome "Copy Image" on an animated GIF), fetch the real
             // animated file instead of capturing the still.
-            // Diagnostics record only the copy's type, so they never start a download;
-            // the still then goes to the image job below, which records its type.
             BOOL haveDirectGIF = [imageType isEqualToString:@"com.compuserve.gif"];
-            BOOL looksForGIF = !haveDirectGIF && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"]
-                 && ![[NSUserDefaults standardUserDefaults] boolForKey:@"revealPasteboardTypes"];
+            BOOL looksForGIF = !haveDirectGIF && [[NSUserDefaults standardUserDefaults] boolForKey:@"downloadAnimatedGIFs"];
             NSURL *gifURL = nil;
             // The GIF's address is in the clipboard's HTML. A catch-up poll reads no rich text
             // on the main thread, so it looks for the address in the image read below.
@@ -3737,7 +3746,6 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                 [self downloadAndCaptureGIFFromURL:gifURL fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path pasteboardGeneration:pasteboardGeneration];
             } else {
                 NSString *captureType = imageType;
-                BOOL textTypeRecordsDiagnostics = type != nil;
                 void (^readImage)(void) = ^{
                     BOOL changed = NO;
                     if ( looksForGIF && catchUp != nil ) {
@@ -3794,18 +3802,9 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
                                                            captureEpoch, clipboardCaptureEpoch, [flycutOperator storeDisabled])
                             && [[NSUserDefaults standardUserDefaults] boolForKey:@"captureImages"];
                         if (current || overtaken) {
-                            if (revealPasteboardTypes) {
-                                // Diagnostics record the type instead of the payload, once per copy.
-                                if (!textTypeRecordsDiagnostics)
-                                    [flycutOperator addClipping:captureType
-                                                         ofType:captureType
-                                                        fromApp:@"Flycut"
-                                               withAppBundleURL:nil
-                                                         target:self
-                                         clippingAddedSelector:@selector(clippingWasAdded)];
-                            } else {
+                            // Diagnostics went on during the read: never the content.
+                            if (!revealPasteboardTypes)
                                 [flycutOperator addImageClipping:imageData fromApp:[currRunningApp localizedName] withAppBundleURL:currRunningApp.bundleURL.path imageType:captureType target:self clippingAddedSelector:@selector(clippingWasAdded) fromClipboardGeneration:pasteboardGeneration];
-                            }
                         } else {
                             DLog(@"Image: Blocked, paused, or changed during read");
                         }
