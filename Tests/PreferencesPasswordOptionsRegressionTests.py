@@ -98,6 +98,19 @@ static NSControl *Bound(NSView *pane, NSString *key)
     return nil;
 }
 
+static NSView *appearance;
+static NSButton *BoundCheckbox(NSView *view, NSString *keyPath)
+{
+    if ([view isKindOfClass:[NSButton class]] &&
+        [[[view infoForBinding:NSValueBinding] objectForKey:NSObservedKeyPathKey] isEqualToString:keyPath])
+        return (NSButton *)view;
+    for (NSView *child in [view subviews]) {
+        NSButton *found = BoundCheckbox(child, keyPath);
+        if (found) return found;
+    }
+    return nil;
+}
+
 static NSView *WithIdentifier(NSView *view, NSString *identifier)
 {
     if ([[view identifier] isEqualToString:identifier]) return view;
@@ -111,6 +124,11 @@ static NSView *WithIdentifier(NSView *view, NSString *identifier)
 static NSDictionary *States(NSView *pane)
 {
     NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    // The Appearance pane's capture options (rows built in code).
+    for (NSString *key in @[@"captureImages", @"downloadAnimatedGIFs"]) {
+        NSButton *box = BoundCheckbox(appearance, key);   // rows built in code bind to the defaults
+        out[key] = box ? @{@"enabled": @([box isEnabled])} : @{@"missing": @YES};
+    }
     // The Restore Default arrows of the two list fields.
     for (NSString *key in @[@"skipPasswordLengthsList", @"skipPboardTypesList"]) {
         NSString *identifier = [@"restoreDefault" stringByAppendingString:
@@ -171,6 +189,7 @@ int main(int argc, const char **argv)
         }
         if (!controller || !prefs) return 11;
         window = [controller valueForKey:@"prefsPanel"];
+        appearance = [controller valueForKey:@"appearancePanel"];
         [window setDelegate:nil];
         NSView *pane = [[controller valueForKey:@"savingSectionLabel"] superview];
         if (spec) {
@@ -189,6 +208,7 @@ int main(int argc, const char **argv)
         NSMutableArray *steps = [NSMutableArray arrayWithObject:States(pane)];
         if (strcmp(argv[5], "-") != 0) {
             NSControl *box = Bound(pane, [NSString stringWithUTF8String:argv[5]]);
+            if (box == nil) box = BoundCheckbox(appearance, [NSString stringWithUTF8String:argv[5]]);
             if (![box isKindOfClass:[NSButton class]]) return 13;
             for (int i = 0; i < 2; i++) {      // off and on again (or on and off), as a click does
                 [(NSButton *)box performClick:nil];
@@ -303,6 +323,34 @@ class PreferencesPasswordOptionsRegressionTests(unittest.TestCase):
                                "skipPboardTypesList": "PasswordPboardType example.type"}, click="skipPboardTypes")
         self.assertEqual([self.enabled(s, "arrow:skipPboardTypesList") for s in steps], [True, False, True])
         self.assertEqual([self.enabled(s, "skipPboardTypesList") for s in steps], [True, False, True])
+
+    FILTERS = ("skipPasswordFields", "skipPasswordLengths", "skipPasswordLengthsList", "skipPboardTypes",
+               "skipPboardTypesList", "skipConcealedTypes")
+
+    def test_diagnostics_greys_out_every_filter(self) -> None:
+        # Diagnostics records the copy's types before any filter runs: no filter does anything.
+        lists = {"skipPasswordLengthsList": "12 20", "skipPboardTypesList": "PasswordPboardType example.type"}
+        step = self.run_case({"skipPasswordFields": True, "skipPasswordLengths": True, "skipPboardTypes": True,
+                              "skipConcealedTypes": True, "revealPasteboardTypes": True, **lists})[0]
+        for key in self.FILTERS:
+            self.assertFalse(self.enabled(step, key), f"{key} is enabled while Diagnostics is on")
+        for key in ("skipPasswordLengthsList", "skipPboardTypesList"):
+            self.assertFalse(self.enabled(step, "arrow:" + key), f"{key}: its arrow is enabled while Diagnostics is on")
+        self.assertTrue(self.enabled(step, "revealPasteboardTypes"), "Diagnostics itself must stay enabled")
+
+    def test_clicking_diagnostics_greys_and_restores_the_filters(self) -> None:
+        steps = self.run_case({"skipPasswordFields": True, "skipPasswordLengths": True, "skipPboardTypes": True,
+                               "skipConcealedTypes": True, "revealPasteboardTypes": False}, click="revealPasteboardTypes")
+        self.assertEqual([s["revealPasteboardTypes"]["value"] for s in steps], [False, True, False])
+        for key in self.FILTERS:
+            self.assertEqual([self.enabled(s, key) for s in steps], [True, False, True], f"{key} did not follow Diagnostics")
+        for key in ("captureImages", "downloadAnimatedGIFs"):
+            self.assertEqual([self.enabled(s, key) for s in steps], [True, False, True], f"{key} did not follow Diagnostics")
+
+    def test_gif_download_is_greyed_out_while_image_capture_is_off(self) -> None:
+        steps = self.run_case({"captureImages": True, "downloadAnimatedGIFs": True}, click="captureImages")
+        self.assertEqual([self.enabled(s, "downloadAnimatedGIFs") for s in steps], [True, False, True])
+        self.assertEqual([self.enabled(s, "captureImages") for s in steps], [True, True, True])
 
     def test_clicking_the_master_greys_and_restores_the_length_row(self) -> None:
         steps = self.run_case({"skipPasswordFields": True, "skipPasswordLengths": True, "skipPboardTypes": True},

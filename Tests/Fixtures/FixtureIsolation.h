@@ -72,19 +72,25 @@
 {
     if (key == nil)
         return;
+    // Key-value observers are told, as NSUserDefaults tells them.
+    [self willChangeValueForKey:key];
     if (value == nil) {
         [storedValues removeObjectForKey:key];
-        return;
+    } else {
+        id copy = [value copy];
+        [storedValues setObject:copy forKey:key];
+        [copy release];
     }
-    id copy = [value copy];
-    [storedValues setObject:copy forKey:key];
-    [copy release];
+    [self didChangeValueForKey:key];
 }
 
 - (void)removeObjectForKey:(NSString *)key
 {
-    if (key != nil)
-        [storedValues removeObjectForKey:key];
+    if (key == nil)
+        return;
+    [self willChangeValueForKey:key];
+    [storedValues removeObjectForKey:key];
+    [self didChangeValueForKey:key];
 }
 
 - (void)registerDefaults:(NSDictionary *)defaults

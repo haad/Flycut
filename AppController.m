@@ -1498,17 +1498,40 @@ static NSString *FlycutRestoreDefaultsIdentifier(NSString *key)
 // on, and so is its Restore Default arrow (see -buildGeneralPasswordOptionStates).
 static NSArray *FlycutRestoreDefaultSwitches(NSString *key)
 {
-	if ([key isEqualToString:@"skipPasswordLengthsList"]) return @[@"skipPasswordFields", @"skipPasswordLengths"];
-	if ([key isEqualToString:@"skipPboardTypesList"]) return @[@"skipPboardTypes"];
+	// "!name": a switch that must be off. While Diagnostics is on, -pollPB: records the copy's
+	// types before any filter runs, so no filter does anything.
+	if ([key isEqualToString:@"skipPasswordLengthsList"])
+		return @[@"skipPasswordFields", @"skipPasswordLengths", @"!revealPasteboardTypes"];
+	if ([key isEqualToString:@"skipPboardTypesList"]) return @[@"skipPboardTypes", @"!revealPasteboardTypes"];
 	return @[];
+}
+
+static NSString *FlycutSwitchKey(NSString *name)
+{
+	return [name hasPrefix:@"!"] ? [name substringFromIndex:1] : name;
 }
 
 static BOOL FlycutRestoreDefaultSwitchesOn(NSString *key)
 {
 	for (NSString *name in FlycutRestoreDefaultSwitches(key))
-		if (![[NSUserDefaults standardUserDefaults] boolForKey:name])
+		if ([[NSUserDefaults standardUserDefaults] boolForKey:FlycutSwitchKey(name)] == [name hasPrefix:@"!"])
 			return NO;
 	return YES;
+}
+
+// Greys out (disables) a control unless every switch is on ("!name": off), through the
+// defaults controller its value is bound to: "enabled", "enabled2", ... are ANDed by AppKit.
+static void FlycutBindEnabledToSwitches(NSControl *control, id defaults, NSArray *switches)
+{
+	for (NSUInteger i = 0; control != nil && defaults != nil && i < [switches count]; i++) {
+		NSString *binding = i == 0 ? NSEnabledBinding : [NSString stringWithFormat:@"%@%lu", NSEnabledBinding, (unsigned long)i + 1];
+		NSDictionary *options = [switches[i] hasPrefix:@"!"]
+			? @{NSValueTransformerNameBindingOption: NSNegateBooleanTransformerName} : nil;
+		// The NIB binds to a defaults controller ("values.key"), rows built in code to the defaults.
+		NSString *prefix = [defaults isKindOfClass:[NSUserDefaultsController class]] ? @"values." : @"";
+		[control bind:binding toObject:defaults withKeyPath:[prefix stringByAppendingString:FlycutSwitchKey(switches[i])]
+		      options:options];
+	}
 }
 
 static NSString *FlycutRestoreDefaultsKey(NSString *identifier)
@@ -1843,6 +1866,16 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 // greyed out while its own checkbox is off, as its list does nothing then.
 // Bound in code, through the defaults controller the NIB binds the checkboxes
 // to, so the states also hold with a NIB compiled before this change.
+-(void)bindCheckboxOfRow:(NSView *)row enabledToSwitches:(NSArray *)switches
+{
+	// A row is a box: its checkbox sits in the box's content view.
+	NSView *content = [row isKindOfClass:[NSBox class]] ? [(NSBox *)row contentView] : row;
+	for (NSView *view in [content subviews])
+		if ([view isKindOfClass:[NSButton class]])
+			FlycutBindEnabledToSwitches((NSButton *)view,
+				[[view infoForBinding:NSValueBinding] objectForKey:NSObservedObjectKey], switches);
+}
+
 -(void)buildGeneralPasswordOptionStates
 {
 	NSView *pane = [savingSectionLabel superview];
@@ -1850,18 +1883,15 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 	id defaults = [[master infoForBinding:NSValueBinding] objectForKey:NSObservedObjectKey];
 	if (defaults == nil)
 		return;
-	NSArray *dependencies = @[@[@"skipPasswordLengths", [NSButton class], @[@"skipPasswordFields"]],
+	// While Diagnostics is on, no filter does anything (see FlycutRestoreDefaultSwitches).
+	NSArray *dependencies = @[@[@"skipPasswordFields", [NSButton class], @[@"!revealPasteboardTypes"]],
+	                          @[@"skipPasswordLengths", [NSButton class], @[@"skipPasswordFields", @"!revealPasteboardTypes"]],
 	                          @[@"skipPasswordLengthsList", [NSTextField class], FlycutRestoreDefaultSwitches(@"skipPasswordLengthsList")],
-	                          @[@"skipPboardTypesList", [NSTextField class], FlycutRestoreDefaultSwitches(@"skipPboardTypesList")]];
-	for (NSArray *dependency in dependencies) {
-		NSControl *control = FlycutBoundControl(pane, dependency[0], dependency[1]);
-		NSArray *switches = dependency[2];
-		for (NSUInteger i = 0; control != nil && i < [switches count]; i++) {
-			// "enabled", "enabled2", ...: AppKit enables the control only while all are on.
-			NSString *binding = i == 0 ? NSEnabledBinding : [NSString stringWithFormat:@"%@%lu", NSEnabledBinding, (unsigned long)i + 1];
-			[control bind:binding toObject:defaults withKeyPath:[@"values." stringByAppendingString:switches[i]] options:nil];
-		}
-	}
+	                          @[@"skipPboardTypes", [NSButton class], @[@"!revealPasteboardTypes"]],
+	                          @[@"skipPboardTypesList", [NSTextField class], FlycutRestoreDefaultSwitches(@"skipPboardTypesList")],
+	                          @[@"skipConcealedTypes", [NSButton class], @[@"!revealPasteboardTypes"]]];
+	for (NSArray *dependency in dependencies)
+		FlycutBindEnabledToSwitches(FlycutBoundControl(pane, dependency[0], dependency[1]), defaults, dependency[2]);
 }
 
 // The General pane comes from the NIB and is laid out with constraints. Each
@@ -1998,7 +2028,7 @@ static void FlycutCollectRestoreDefaultButtons(NSView *view, NSMutableArray *but
 		// So do the switches that grey the field and its arrow out.
 		for (NSString *name in FlycutRestoreDefaultSwitches(key))
 			[[binding objectForKey:NSObservedObjectKey] addObserver:observer
-			                                              forKeyPath:[@"values." stringByAppendingString:name]
+			                                              forKeyPath:[@"values." stringByAppendingString:FlycutSwitchKey(name)]
 			                                                 options:0 context:NULL];
 	}
 	// A field at the margin ends under the right-most number field instead
@@ -2716,6 +2746,8 @@ static NSTextField *FlycutLabelAligned(NSArray *views, NSTextAlignment alignment
                                         frameMaxY:nextYMax
                                           binding:@"captureImages"
                                            action:nil];
+    // Diagnostics records image copies as their types, whatever this says.
+    [self bindCheckboxOfRow:row enabledToSwitches:@[@"!revealPasteboardTypes"]];
     [appearancePanel addSubview:row];
     nextYMax = row.frame.origin.y;
 
@@ -2723,6 +2755,9 @@ static NSTextField *FlycutLabelAligned(NSArray *views, NSTextAlignment alignment
                                         frameMaxY:nextYMax
                                           binding:@"downloadAnimatedGIFs"
                                            action:nil];
+    // A download replaces a captured image, so without image capture (or in Diagnostics,
+    // which never downloads) it does nothing.
+    [self bindCheckboxOfRow:row enabledToSwitches:@[@"captureImages", @"!revealPasteboardTypes"]];
     [appearancePanel addSubview:row];
     nextYMax = row.frame.origin.y;
 
