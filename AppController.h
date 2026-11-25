@@ -84,6 +84,7 @@
     IBOutlet NSSearchField *searchBox;
     dispatch_queue_t clipboardReadQueue;
     FCClipboardCatchUp *clipboardCatchUp; // -captureClipboardChangeNow waits for this poll's reads
+    BOOL bezelClosesKeepingFlycutShown;   // -closeBezelKeepingFlycutShown is ordering the bezel out
     NSEvent *menuOpenEvent;
     IBOutlet NSSlider * heightSlider;
     IBOutlet NSSlider * widthSlider;

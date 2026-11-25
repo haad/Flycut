@@ -441,6 +441,7 @@ static void FixtureBeep(void) { fixtureBeeps++; }
     [scheduled addObject:NSStringFromSelector(selector)];
 }
 - (void)hideApp { [calls addObject:@"hideApp"]; }
+- (BOOL)flycutWindowIsShown { return NO; }   // this harness shows no window of Flycut's
 - (void)fakeCommandV { [calls addObject:@"fakeCommandV"]; }
 - (NSRunningApplication *)frontmostApplicationForPaste {
     static FixtureTargetApplication *target;

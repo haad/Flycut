@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Displayed search rows retain identity across in-flight store mutations; a Return that pastes
-nothing (the row is gone, nothing matches, no paste target) beeps once."""
+nothing (the row is gone, nothing matches, no paste target) beeps once; a row chosen while
+Flycut's own window was in front when the search window opened is copied, without a beep; with
+Preferences open behind another application, which is in front, the row is pasted there."""
 import unittest
 from PasteNativeTestSupport import build_fixture, run_fixture
 
@@ -9,6 +11,26 @@ FIXTURE = r'''
 static int beeps;
 void FCTestNSBeep(void) { beeps++; }
 #import "AppController.h"
+@interface AppController (SearchOwnWindow)
+- (void)rememberFrontmostApplicationForPaste;
+@end
+// Flycut's Preferences window, shown.
+@interface FCShownWindow : NSObject
+@end
+@implementation FCShownWindow
+- (BOOL)isVisible { return YES; }
+@end
+// Another application, in front when the search window opens.
+@interface FCOtherApp : NSObject
+@end
+@implementation FCOtherApp
+- (pid_t)processIdentifier { return 4242; }
+- (BOOL)isTerminated { return NO; }
+@end
+static BOOL otherAppInFront, pasteScheduled;
+@interface AppController (SearchPaste)
+- (void)completePasteInRememberedApplication:(id)transaction;
+@end
 @interface FCSearchOperator : NSObject
 @property(retain) NSMutableArray *clippings;
 @end
@@ -71,6 +93,16 @@ void FCTestNSBeep(void) { beeps++; }
 - (void)updateMenu {}
 - (void)hideSearchWindowPreservingPasteTransaction {}
 - (void)hideSearchWindow {}
+// The application in front when the search window opens: Flycut itself (its Preferences), or
+// another application (prefs-behind).
+- (NSRunningApplication *)frontmostApplicationForPaste {
+    return otherAppInFront ? (NSRunningApplication *)[[FCOtherApp new] autorelease] : [NSRunningApplication currentApplication];
+}
+// The paste into the remembered application is scheduled, not run.
+- (void)performSelector:(SEL)selector withObject:(id)object afterDelay:(NSTimeInterval)delay {
+    (void)object; (void)delay;
+    if (selector == @selector(completePasteInRememberedApplication:)) pasteScheduled = YES;
+}
 - (void)fakeCommandV { abort(); }
 @end
 static FlycutClipping *clip(NSString *text) {
@@ -85,6 +117,10 @@ int main(int argc, const char **argv) { @autoreleasepool {
     FCSearchController *controller = [FCSearchController new];
     [controller prepare:op query:[mode isEqual:@"filtered"] ? @"same" : [mode isEqual:@"no-match"] ? @"no such clipping" : @""];
     [controller updateSearchResults];
+    if ([mode isEqual:@"own-window"] || [mode isEqual:@"prefs-behind"]) [controller setValue:[[FCShownWindow new] autorelease] forKey:@"prefsPanel"];
+    otherAppInFront = [mode isEqual:@"prefs-behind"];
+    if ([mode isEqual:@"own-window"] || [mode isEqual:@"flycut-windowless"] || [mode isEqual:@"prefs-behind"])
+        [controller rememberFrontmostApplicationForPaste];
     if ([mode isEqual:@"deleted"]) [op.clippings removeObjectAtIndex:1];
     else [op.clippings insertObject:clip(@"same title\nin-flight arrival") atIndex:0];
     [controller searchWindowItemSelected:nil];
@@ -92,7 +128,9 @@ int main(int argc, const char **argv) { @autoreleasepool {
     BOOL correct = nothing ? controller.placed == nil : [controller.placed isEqual:@"same title\nB"];
     if (!correct) { fprintf(stderr,"selected displayed identity B redirected: %s\n",[controller.placed UTF8String]); return 11; }
     // This fixture opens no paste transaction, so a placed row ends with that line and its beep.
-    if (beeps != 1) { fprintf(stderr,"%d beep(s) for mode %s\n",beeps,argv[1]); return 12; }
+    if (beeps != (([mode isEqual:@"own-window"] || [mode isEqual:@"flycut-windowless"] || [mode isEqual:@"prefs-behind"]) ? 0 : 1)) { fprintf(stderr,"%d beep(s) for mode %s\n",beeps,argv[1]); return 12; }
+    // Pasted into the application in front, not copied only.
+    if ([mode isEqual:@"prefs-behind"] && !pasteScheduled) { fprintf(stderr,"no paste was scheduled\n"); return 13; }
     printf("PASS search identity %s\n", argv[1]);
     [controller release]; [op release];
     return 0;
@@ -111,6 +149,21 @@ class SearchRowIdentityRegressionTests(unittest.TestCase):
         self.check_mode('filtered')
     def test_deleted_identity_does_not_fall_back_to_same_looking_title(self):
         self.check_mode('deleted')
+    def test_a_row_chosen_over_flycuts_own_window_is_copied_without_a_beep(self):
+        run = run_fixture(self.binary, 'own-window')
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        line = 'Search window: no other application is in front, so the clipping is copied, not pasted'
+        self.assertEqual(run.stderr.count(line), 1, run.stderr[-2000:])
+    def test_a_row_chosen_with_flycut_in_front_but_no_window_is_pasted_as_before(self):
+        run = run_fixture(self.binary, 'flycut-windowless')
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        line = 'Search window: no other application is in front, so the clipping is copied, not pasted'
+        self.assertEqual(run.stderr.count(line), 0, run.stderr[-2000:])
+    def test_a_row_chosen_with_preferences_open_behind_another_app_is_pasted(self):
+        run = run_fixture(self.binary, 'prefs-behind')
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        line = 'Search window: no other application is in front, so the clipping is copied, not pasted'
+        self.assertEqual(run.stderr.count(line), 0, run.stderr[-2000:])
     def test_return_without_a_matching_row_pastes_nothing_and_beeps(self):
         self.check_mode('no-match')
 if __name__ == '__main__':

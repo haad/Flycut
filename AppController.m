@@ -342,6 +342,7 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 	NSInteger _ownedChangeCount;
 	NSArray *_previousPasteboardItems;
 	BOOL _clipboardCommitted;
+	BOOL _copiesOnly;
 }
 @property(nonatomic, readonly, retain) NSRunningApplication *targetApplication;
 @property(nonatomic, readonly) pid_t targetProcessIdentifier;
@@ -357,6 +358,9 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 // YES once the selection is meant to stay on the clipboard: it was copied on purpose
 // (the bezel's copy-only action) or the paste attempt ended without a cancellation.
 @property(nonatomic, assign) BOOL clipboardCommitted;
+// Set while the bezel's copy key writes the clipboard: a failed write is a failed copy then,
+// not a cancelled paste.
+@property(nonatomic, assign) BOOL copiesOnly;
 - (id)initWithApplication:(NSRunningApplication *)application
 		processIdentifier:(pid_t)processIdentifier
 			 generation:(NSUInteger)generation;
@@ -375,6 +379,7 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 @synthesize ownedChangeCount = _ownedChangeCount;
 @synthesize previousPasteboardItems = _previousPasteboardItems;
 @synthesize clipboardCommitted = _clipboardCommitted;
+@synthesize copiesOnly = _copiesOnly;
 
 - (id)initWithApplication:(NSRunningApplication *)application
 		processIdentifier:(pid_t)processIdentifier
@@ -430,6 +435,8 @@ static const NSTimeInterval kClipboardCatchUpWait = 0.2;
 - (void)restorePasteboardForCancelledTransaction:(FCPasteTransaction *)transaction;
 - (BOOL)pasteboardIsOwnedByTransaction:(FCPasteTransaction *)transaction;
 - (void)captureClipboardChangeNow;
+- (void)closeBezelKeepingFlycutShown;
+- (BOOL)flycutWindowIsShown;
 - (void)hideSearchWindowPreservingPasteTransaction;
 - (BOOL)postCommandVToProcessIdentifier:(pid_t)processIdentifier;
 -(void)configureStatusItemInteraction;
@@ -3299,6 +3306,11 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	}
 	// Completion belongs to the invocation, never to an elapsed-time window.
 	[transaction setSelectionStarted:YES];
+	// No other application was in front when the bezel opened, one of Flycut's own windows was
+	// (e.g. Preferences while the user takes an identifier from the bezel): there is nothing to
+	// paste into, and hiding Flycut would take that window away. Decided before the clipboard
+	// write, which ends the transaction when it fails.
+	BOOL copiesOnly = [transaction targetApplication] == nil && [self flycutWindowIsShown];
 	FlycutClipping *clipping = [flycutOperator clippingAtStackPosition];
 	BOOL selected = NO;
 	if ( [clipping isImageClipping] ) {
@@ -3313,7 +3325,17 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 			[self addClipToPasteboard:content withRichData:richData];
 		}
 	}
-	if ( selected ) {
+	if ( selected && copiesOnly ) {
+		// The clipping is copied only, and Flycut stays. A write that failed has said so with a
+		// beep; the bezel closes as for the copy unless a newer selection owns it now.
+		if ( [self pasteTransactionIsCurrent:transaction] ) {
+			NSLog(@"Bezel selection: no other application is in front, so the clipping is copied, not pasted");
+			[self finishPasteTransactionKeepingSelection:transaction];
+			[self closeBezelKeepingFlycutShown];
+		} else if ( currentPasteTransaction == nil &&
+			[transaction generation] == nextPasteTransactionGeneration )
+			[self closeBezelKeepingFlycutShown];
+	} else if ( selected ) {
 		NSLog(@"Content found; adding it to the pasteboard and preparing to paste");
 		if ( [self pasteTransactionIsCurrent:transaction] ) {
 			[self performSelector:@selector(hideAppForPasteTransaction:)
@@ -3332,8 +3354,13 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	} else {
 		NSLog(@"No content found in stack position");
 		NSBeep();
-		if ( transaction == nil || [self pasteTransactionIsCurrent:transaction] )
-			[self hideApp];
+		if ( transaction == nil || [self pasteTransactionIsCurrent:transaction] ) {
+			// Over Flycut's own window only the bezel closes, as for a copy.
+			if ( copiesOnly )
+				[self closeBezelKeepingFlycutShown];
+			else
+				[self hideApp];
+		}
 		[self clearPasteTransactionIfCurrent:transaction];
 	}
 	[transaction release];
@@ -3348,11 +3375,16 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 		// The copy is final: a later Escape or hotkey press must not roll it back. The
 		// transaction stays open, so a modifier release can still paste this clipping.
 		FCPasteTransaction *transaction = [currentPasteTransaction retain];
-		if ( [self pasteStorePositionAndUpdate: [flycutOperator stackPosition]] &&
-			[self pasteTransactionIsCurrent:transaction] )
+		[transaction setCopiesOnly:YES];
+		BOOL copied = [self pasteStorePositionAndUpdate: [flycutOperator stackPosition]];
+		[transaction setCopiesOnly:NO];
+		if ( copied && [self pasteTransactionIsCurrent:transaction] )
 			[transaction setClipboardCommitted:YES];
+		// With Flycut's own window in front (no paste target) only the bezel closes.
+		SEL close = [transaction targetApplication] == nil && [self flycutWindowIsShown]
+			? @selector(closeBezelKeepingFlycutShown) : @selector(hideApp);
 		[transaction release];
-		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
+		[self performSelector:close withObject:nil afterDelay:0.2];
 	} else {
 		[self performSelector:@selector(hideApp) withObject:nil afterDelay:0.2];
 	}
@@ -3405,6 +3437,9 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 			[self hideSearchWindow];
 		return;
 	}
+	// The bezel closes for a copy while Flycut's own window is in front: that window stays.
+	if ( bezelClosesKeepingFlycutShown )
+		return;
 
 	[self hideApp];
 }
@@ -3897,6 +3932,7 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	// must not run after the cancellation either, e.g. into a bezel opened again.
 	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(fakeCommandV) object:nil];
 	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideApp) object:nil];
+	[NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(closeBezelKeepingFlycutShown) object:nil];
 	[self restoreStashedStoreAndUpdate];
 	[self hideApp];
 }
@@ -4131,6 +4167,27 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 	if ( isBezelDisplayed )
 		[self restoreStashedStoreAndUpdate];
 	[self hideBezel];
+}
+
+// Closes the bezel and nothing else: Flycut's other windows (Preferences) stay. Ordering out
+// the key bezel makes it resign key, which -windowDidResignKey: would take for focus moving
+// elsewhere and answer by hiding Flycut.
+- (void)closeBezelKeepingFlycutShown
+{
+	if ( isBezelDisplayed )
+		[self restoreStashedStoreAndUpdate];
+	isBezelPinned = NO;
+	bezelClosesKeepingFlycutShown = YES;
+	[self hideBezel];
+	bezelClosesKeepingFlycutShown = NO;
+}
+
+// One of Flycut's own windows is shown (Preferences, the search window). With Flycut in front and
+// one of them shown, a choice only copies and Flycut stays; with Flycut in front but no window of
+// its own (closing Preferences leaves Flycut active) Flycut hides as before.
+- (BOOL)flycutWindowIsShown
+{
+	return [prefsPanel isVisible] || [searchWindow isVisible];
 }
 
 
@@ -4372,7 +4429,16 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 		// The list never activates Flycut, so the frontmost application is still the one
 		// the user works in. Bind the paste to it now.
 		[self rememberFrontmostApplicationForPaste];
-		transaction = [currentPasteTransaction retain];
+		if ( [currentPasteTransaction targetApplication] == nil && [self flycutWindowIsShown] ) {
+			// No other application is in front, a Flycut window is (e.g. Preferences while the
+			// user takes an identifier from the list): there is nothing to paste into, and
+			// hiding Flycut would take that window away. The clipping is copied only.
+			NSLog(@"List selection: no other application is in front, so the clipping is copied, not pasted");
+			[self clearRememberedPasteTarget];
+			shouldPasteImmediately = NO;
+		} else {
+			transaction = [currentPasteTransaction retain];
+		}
 	}
 
 	bool pasted = [self pasteClipping:clipping fromList:list];
@@ -4497,14 +4563,17 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
         [jcPasteboard setData:[richData objectForKey:richType] forType:richType];
     [self setPBBlockCount:@(declaredCount)];
     if (!written || [jcPasteboard changeCount] != declaredCount) {
-        // A paste says so and beeps. A plain copy (a list row with "Menu selection
-        // pastes" off) has no transaction: it is only logged.
-        if (transaction != nil) {
+        // A paste says so and beeps, and so does the bezel's copy key, as a failed copy.
+        // A plain copy (a list row with "Menu selection pastes" off) has no transaction: it
+        // is only logged.
+        if (transaction != nil && ![transaction copiesOnly])
             NSLog(@"Paste cancelled because the clipboard could not be written");
+        else
+            NSLog(@"Could not write the clipboard");
+        if (transaction != nil) {
             NSBeep();
             [self clearPasteTransactionIfCurrent:transaction];
-        } else
-            NSLog(@"Could not write the clipboard");
+        }
     }
     [transaction release];
 }
@@ -4590,14 +4659,17 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
     }
     [self setPBBlockCount:@(declaredCount)];
     if (!written || [jcPasteboard changeCount] != declaredCount) {
-        // A paste says so and beeps. A plain copy (a list row with "Menu selection
-        // pastes" off) has no transaction: it is only logged.
-        if (transaction != nil) {
+        // A paste says so and beeps, and so does the bezel's copy key, as a failed copy.
+        // A plain copy (a list row with "Menu selection pastes" off) has no transaction: it
+        // is only logged.
+        if (transaction != nil && ![transaction copiesOnly])
             NSLog(@"Paste cancelled because the clipboard could not be written");
+        else
+            NSLog(@"Could not write the clipboard");
+        if (transaction != nil) {
             NSBeep();
             [self clearPasteTransactionIfCurrent:transaction];
-        } else
-            NSLog(@"Could not write the clipboard");
+        }
         written = NO;
     }
     [transaction release];
@@ -5123,8 +5195,14 @@ static NSEvent *FlycutPreferencesCloseKey(NSWindow *preferences, NSEvent *event)
 			[self hideSearchWindowPreservingPasteTransaction];
 
 			// Search selection always pastes, independent of menuSelectionPastes, but only
-			// through the transaction captured before this window took focus.
-			if ( [self pasteTransactionIsCurrent:transaction] ) {
+			// through the transaction captured before this window took focus. If no other
+			// application was in front then and a Flycut window is (e.g. Preferences), the
+			// clipping is copied only, and Flycut stays.
+			if ( [self pasteTransactionIsCurrent:transaction] && [transaction targetApplication] == nil
+				 && [self flycutWindowIsShown] ) {
+				NSLog(@"Search window: no other application is in front, so the clipping is copied, not pasted");
+				[self finishPasteTransactionKeepingSelection:transaction];
+			} else if ( [self pasteTransactionIsCurrent:transaction] ) {
 				[self performSelector:@selector(completePasteInRememberedApplication:)
 						 withObject:transaction
 						 afterDelay:0.3];

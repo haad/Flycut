@@ -126,6 +126,13 @@ void FCFixtureBeep(void) { }   // NSBeep, built with -DNSBeep=FCFixtureBeep: nev
 - (NSInteger)clickedRow { return 0; }
 @end
 
+// Flycut's Preferences window, shown.
+@interface FCShownWindow : NSObject
+@end
+@implementation FCShownWindow
+- (BOOL)isVisible { return YES; }
+@end
+
 @interface FCPendingPasteController : AppController {
     FCPasteTarget *_target;
     NSInteger _pasteboardCount;
@@ -305,8 +312,12 @@ int main(int argc, const char *argv[]) {
             controller.activationNeverSettles = YES;
         else if ([mode isEqualToString:@"missing-content"])
             operator.contentAvailable = NO;
-        else if ([mode isEqualToString:@"self-target"])
+        else if ([mode isEqualToString:@"self-target"] || [mode isEqualToString:@"self-target-windowless"]) {
             target.processIdentifier = getpid();
+            // Flycut in front with its Preferences window shown, or without a window of its own.
+            if ([mode isEqualToString:@"self-target"])
+                [controller setValue:[[[FCShownWindow alloc] init] autorelease] forKey:@"prefsPanel"];
+        }
         else if ([mode isEqualToString:@"mutable-pid"]) {
             secondTarget.processIdentifier = 101;
             target.alternateProcessIdentifier = 202;
@@ -374,7 +385,7 @@ int main(int argc, const char *argv[]) {
             ;
         else if ([mode isEqualToString:@"duplicate-release"] || [mode isEqualToString:@"late-duplicate-release"])
             ;
-        else if ([mode isEqualToString:@"self-target"])
+        else if ([mode isEqualToString:@"self-target"] || [mode isEqualToString:@"self-target-windowless"])
             ;
         else if ([mode isEqualToString:@"same-target-reentrant-overlap"])
             ;
@@ -439,7 +450,9 @@ int main(int argc, const char *argv[]) {
         NSInteger expectedHideCount =
             ([mode isEqualToString:@"menu-selection-disabled-overlap"] ||
              [mode isEqualToString:@"search-window-selection"] ||
-             [mode isEqualToString:@"search-window-cancel"]) ? 0 : 1;
+             [mode isEqualToString:@"search-window-cancel"] ||
+             // Flycut itself in front: the selection is copied, and Flycut stays.
+             [mode isEqualToString:@"self-target"]) ? 0 : 1;
         if (controller.hideCount != expectedHideCount) return 18;
         if ([mode isEqualToString:@"activation-never-settles"] &&
             controller.frontmostQueryCount != 9) return 30 + (int)controller.frontmostQueryCount;
@@ -496,6 +509,10 @@ class PendingPasteTransactionRegressionTests(unittest.TestCase):
             run.returncode, 0,
             f"Flycut captured its own PID as a paste target; exit={run.returncode}\n{run.stderr}",
         )
+
+    def test_flycut_in_front_without_a_window_of_its_own_is_hidden_as_before(self) -> None:
+        run = self._run_fixture("self-target-windowless")
+        self.assertEqual(run.returncode, 0, f"Flycut in front without a window was not hidden; exit={run.returncode}\n{run.stderr}")
 
     def test_posting_uses_the_same_pid_value_that_was_frontmost_validated(self) -> None:
         run = self._run_fixture("mutable-pid")

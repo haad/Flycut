@@ -59,6 +59,12 @@ void FCFixtureBeep(void) { }   // NSBeep, built with -DNSBeep=FCFixtureBeep: nev
 - (NSArray *)runningApplications { return @[]; }
 - (NSRunningApplication *)frontmostApplication { return nil; }
 @end
+// Flycut's Preferences window, shown.
+@interface FCShownWindow : NSObject
+@end
+@implementation FCShownWindow
+- (BOOL)isVisible { return YES; }
+@end
 
 // An in-process pasteboard: generations, types, string/data per type.
 @interface FCMemoryPasteboard : NSObject {
@@ -442,6 +448,44 @@ int main(int argc, const char *argv[]) {
             Escape();
             return Emit(0);
         }
+        if ([mode isEqualToString:@"no-other-app-release-keeps-flycut-shown"]) {
+            // No other application in front, Flycut's Preferences window is: releasing the keys
+            // copies the selection and closes the bezel, which resigns key; Flycut is not hidden
+            // and nothing is pasted.
+            [controller setValue:[[FCShownWindow new] autorelease] forKey:@"prefsPanel"];
+            [controller hitMainHotKey:nil];
+            if (!Open()) return Emit(80);
+            ReleaseModifiers();
+            Spin(0.6);
+            Observe(@"1-after-release");
+            if (![PasteboardText() isEqualToString:@"h3"]) return Emit(81);
+            if ([controller bezelDisplayed] || fakeBezel->visible) return Emit(82);
+            if (fakeBezel->resignedKey == 0) return Emit(83);
+            if (appHides != 0 || pasteKeystrokes != 0) return Emit(84);
+            return Emit(0);
+        }
+        if ([mode isEqualToString:@"own-window-close-then-focus-loss-hides"]) {
+            // A copy over Flycut's own window closes the bezel without hiding Flycut ...
+            [controller setValue:[[FCShownWindow new] autorelease] forKey:@"prefsPanel"];
+            [controller hitMainHotKey:nil];
+            if (!Open()) return Emit(90);
+            ReleaseModifiers();
+            Spin(0.6);
+            Observe(@"1-after-release");
+            if ([controller bezelDisplayed] || appHides != 0 || pasteKeystrokes != 0) return Emit(91);
+            // ... then the window is closed, and the next bezel loses the key window to another
+            // application: that still closes it and hides Flycut.
+            [controller setValue:nil forKey:@"prefsPanel"];
+            [controller hitMainHotKey:nil];
+            if (!Open()) return Emit(92);
+            int hidesBefore = appHides;
+            if (!OtherWindowBecomesKey()) return Emit(93);
+            Spin(0.3);
+            Observe(@"2-after-focus-loss");
+            if ([controller bezelDisplayed] || fakeBezel->visible) return Emit(94);
+            if (appHides != hidesBefore + 1) return Emit(95);
+            return Emit(0);
+        }
         if ([mode isEqualToString:@"pinned-f-then-focus-loss-closes"]) {
             [controller hitMainHotKey:nil];
             PinWithSpace();
@@ -475,6 +519,10 @@ MODES = {
     "sticky-bezel-then-f": "f in a sticky bezel ended the pin, closed it or hid Flycut",
     "unpinned-f-then-release-pastes": "f in an unpinned bezel, then releasing the keys, no longer pastes the favorite",
     "pinned-f-then-focus-loss-closes": "focus loss of a pinned bezel after f no longer closes it and ends its pin",
+    "no-other-app-release-keeps-flycut-shown":
+        "with no other application in front, a released selection hid Flycut or pasted",
+    "own-window-close-then-focus-loss-hides":
+        "after a copy over Flycut's own window, a later bezel's focus loss no longer closed it and hid Flycut",
 }
 
 
@@ -530,6 +578,12 @@ class BezelPinRegressionTests(unittest.TestCase):
 
     def test_focus_loss_still_closes_a_pinned_bezel_after_f(self) -> None:
         self.run_mode("pinned-f-then-focus-loss-closes")
+
+    def test_a_selection_with_no_other_application_in_front_keeps_flycut_shown(self) -> None:
+        self.run_mode("no-other-app-release-keeps-flycut-shown")
+
+    def test_after_a_copy_over_flycuts_own_window_a_focus_loss_still_hides_flycut(self) -> None:
+        self.run_mode("own-window-close-then-focus-loss-hides")
 
 
 if __name__ == "__main__":

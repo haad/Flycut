@@ -101,6 +101,12 @@ static FlycutClipping *ImageClipping(NSString *hash, NSString *type) {
 - (BOOL)isTerminated { return NO; }
 - (BOOL)activateWithOptions:(NSApplicationActivationOptions)options { self.activations++; return YES; }
 @end
+// Flycut's Preferences window, shown.
+@interface ShownWindow : NSObject
+@end
+@implementation ShownWindow
+- (BOOL)isVisible { return YES; }
+@end
 
 @interface ImageOperator : NSObject
 @property(retain) NSMutableArray *clippings;
@@ -203,7 +209,7 @@ int main(int argc, const char **argv) { @autoreleasepool {
     if ([mode isEqual:@"capture-follows-selection"]) return CaptureFollowsSelection();
 
     NSData *png = [@"png bytes" dataUsingEncoding:NSUTF8StringEncoding];
-    if (![mode isEqual:@"missing-data"] && ![mode isEqual:@"menu-missing-data"]) memoryStore.images[@"A"] = png;
+    if (![mode hasPrefix:@"missing-data"] && ![mode isEqual:@"menu-missing-data"]) memoryStore.images[@"A"] = png;
     memoryStore.images[@"B"] = [@"other png" dataUsingEncoding:NSUTF8StringEncoding];
     ImageBoard *board = [[ImageBoard new] autorelease];
     [board declareTypes:nil owner:nil]; [board setString:@"original" forType:NSPasteboardTypeString];
@@ -214,6 +220,11 @@ int main(int argc, const char **argv) { @autoreleasepool {
     ImageController *c = [[ImageController new] autorelease];
     c.target = [[ImageTarget new] autorelease];
     [c prepare:board operator:op];
+    if ([mode isEqual:@"missing-data-own-window"]) {
+        // Flycut itself is in front, its Preferences window shown.
+        c.target = (id)[NSRunningApplication currentApplication];
+        [c setValue:[[ShownWindow new] autorelease] forKey:@"prefsPanel"];
+    }
 
     if ([mode isEqual:@"menu-missing-data"]) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"menuSelectionPastes"];
@@ -261,6 +272,11 @@ int main(int argc, const char **argv) { @autoreleasepool {
             fprintf(stderr, "Escape after an unsaved clipboard: posts=%ld image=%d\n", (long)c.posts,
                 [[board dataForType:NSPasteboardTypePNG] isEqual:png]); return 83;
         }
+    } else if ([mode isEqual:@"missing-data-own-window"]) {
+        // Said with one line and one beep; Flycut and its window stay.
+        if (c.posts != 0 || ![[board stringForType:NSPasteboardTypeString] isEqual:@"original"] || beeps != 1) return 55;
+        if ([c ownsTransaction] || c.hides != 0) return 56;
+        if ([[c valueForKey:@"isBezelDisplayed"] boolValue]) return 57;   // the bezel stays open over the window
     } else if ([mode isEqual:@"missing-data"]) {
         // ... and says so: one log line and one beep.
         if (c.posts != 0 || ![[board stringForType:NSPasteboardTypeString] isEqual:@"original"] || beeps != 1) return 51;
@@ -328,6 +344,9 @@ class ImagePasteTransactionRegressionTests(unittest.TestCase):
 
     def test_missing_image_data_tears_down_without_pasting(self):
         self.check_mode('missing-data')
+
+    def test_missing_image_data_over_flycuts_own_window_beeps_and_keeps_flycut_shown(self):
+        self.check_mode('missing-data-own-window')
 
     def test_listed_image_row_without_its_image_says_so_once(self):
         self.check_mode('menu-missing-data')
