@@ -258,7 +258,7 @@ class BezelPendingPasteRegressionTests(unittest.TestCase):
 
     The fixture links every production source and replaces only OS
     boundaries (event posting, permission check, keyboard layout, NSApp,
-    pasteboard, preferences storage). It never posts input or touches TCC, and
+    the frontmost application, pasteboard, preferences storage). It never posts input or touches TCC, and
     it aborts if a case reaches the real image store or general pasteboard.
     """
 
@@ -308,7 +308,7 @@ class BezelPendingPasteRegressionTests(unittest.TestCase):
     def test_fixture_does_not_link_real_input_or_permission_functions(self) -> None:
         symbols = subprocess.check_output(["/usr/bin/nm", "-u", str(self.binary)], text=True)
         (self.artifacts / "undefined-symbols.log").write_text(symbols)
-        for name in ("CGEventPost", "AXIsProcessTrustedWithOptions",
+        for name in ("CGEventPost", "CGEventPostToPid", "AXIsProcessTrustedWithOptions",
                      "TISCopyCurrentKeyboardLayoutInputSource"):
             self.assertNotIn("_" + name + "\n", symbols)
 

@@ -14,7 +14,6 @@ Flycut incorporates the following libraries, used with gratitude:
 	• ShortcutRecorder by Jesper et al. (<http://wafflesoftware.net/>)
 	• a modified version of UKPrefsPanel by Uli Kusterer (<http://www.zathras.de/>)
 	• SGHotKeysLib by Justin Williams (<https://github.com/agilebits/SGHotKeysLib>)
-	• MJCloudKitUserDefaultsSync by Mark Jerde (<https://github.com/MarkJerde/MJCloudKitUserDefaultsSync>)
 
 Jumpcut is open source code built with open source code. Jumpcut incorporates the
 following libraries, used with gratitude:

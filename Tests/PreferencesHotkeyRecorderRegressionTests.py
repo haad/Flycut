@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import pathlib
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -137,11 +138,15 @@ static NSButton *RestoreButton(NSString *identifier)
     return [found isKindOfClass:[NSButton class]] ? (NSButton *)found : nil;
 }
 
+// The slider on the arrow's line (the pane holds every row's controls in one view).
 static NSSlider *SliderNextTo(NSButton *button)
 {
+    NSSlider *found = nil;
     for (NSView *view in [[button superview] subviews])
-        if ([view isKindOfClass:[NSSlider class]]) return (NSSlider *)view;
-    return nil;
+        if ([view isKindOfClass:[NSSlider class]] &&
+            (found == nil || fabs(NSMidY([view frame]) - NSMidY([button frame])) < fabs(NSMidY([found frame]) - NSMidY([button frame]))))
+            found = (NSSlider *)view;
+    return found;
 }
 
 static BOOL ComboIs(SRRecorderControl *recorder, NSInteger code, NSUInteger flags)
@@ -202,7 +207,7 @@ static NSDictionary *GeneralLabels(void)
 {
     return @{
         @"rememberNum": @"Restore default number of clippings to remember",
-        @"displayNum": @"Restore default number of clippings in the menu",
+        @"displayNum": @"Restore default number of rows in the menu",
         @"favoritesRememberNum": @"Restore default number of favorites to remember",
         @"skipPboardTypesList": @"Restore default pasteboard types",
         @"skipPasswordLengthsList": @"Restore default password lengths",
@@ -214,7 +219,7 @@ static NSString *IdentifierForKey(NSString *key)
     return [@"restoreDefault" stringByAppendingString:[[[key substringToIndex:1] uppercaseString] stringByAppendingString:[key substringFromIndex:1]]];
 }
 
-// As a committed edit or a stepper click: through the controller the NIB binds the field to.
+// As a committed edit: through the controller the NIB binds the field to.
 static void SetUserValue(NSString *key, id value)
 {
     NSDictionary *binding = [BoundControl(key, [NSTextField class]) infoForBinding:NSValueBinding];
@@ -293,6 +298,8 @@ static int RestoreButtons(void)
 static int RegisteredTable(void)
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    // A list field's arrow is greyed out with the field: the lengths checkbox is off by default.
+    [defaults setBool:YES forKey:@"skipPasswordLengths"];
     NSDictionary *table = @{
         @"ShortcutRecorder mainHotkey": @{@"keyCode": @11, @"modifierFlags": @(NSEventModifierFlagCommand | NSEventModifierFlagControl)},
         @"ShortcutRecorder searchHotkey": @{@"keyCode": @5, @"modifierFlags": @(NSEventModifierFlagControl | NSEventModifierFlagOption)},
@@ -400,9 +407,8 @@ static int GeneralButtons(void)
         if (failed) return failed;
         if (![button isHidden]) { fprintf(stderr, "%s is shown at the factory default\n", [identifier UTF8String]); return 91; }
         NSTextField *field = (NSTextField *)BoundControl(key, [NSTextField class]);
-        NSStepper *stepper = (NSStepper *)BoundControl(key, [NSStepper class]);
         if (field == nil) { fprintf(stderr, "no field bound to %s\n", [key UTF8String]); return 92; }
-        NSView *anchor = stepper ?: field;
+        NSView *anchor = field;
         NSRect frame = [button convertRect:[button bounds] toView:pane];
         if (!NSContainsRect([pane bounds], frame) || NSMinX(frame) < NSMaxX([anchor frame]) ||
             NSMinX(frame) > NSMaxX([anchor frame]) + 8 || fabs(NSMidY(frame) - NSMidY([field frame])) > 1.0) {
@@ -435,7 +441,7 @@ static NSText *Edit(NSTextField *field, NSString *text)
     return editor;
 }
 
-// The arrow follows the value while it changes: typing, stepping.
+// The arrow follows the value while it changes: typing, and a typed number once stored.
 static int GeneralLive(void)
 {
     NSTextField *lengths = (NSTextField *)BoundControl(@"skipPasswordLengthsList", [NSTextField class]);
@@ -450,19 +456,19 @@ static int GeneralLive(void)
     if (![lengthsButton isHidden]) { fprintf(stderr, "the same lengths without spaces count as custom\n"); return 104; }
     [window makeFirstResponder:nil];
 
-    NSStepper *stepper = (NSStepper *)BoundControl(@"displayNum", [NSStepper class]);
+    NSTextField *display = (NSTextField *)BoundControl(@"displayNum", [NSTextField class]);
     NSButton *displayButton = AnyRestoreButton(IdentifierForKey(@"displayNum"));
     NSInteger value = [[Registered() objectForKey:@"displayNum"] integerValue];
-    [stepper setIntegerValue:value + 1];
-    [stepper sendAction:[stepper action] to:[stepper target]];
+    [(NSTextView *)Edit(display, [NSString stringWithFormat:@"%ld", (long)value + 1]) doCommandBySelector:@selector(insertNewline:)];
+    [window makeFirstResponder:nil];
     if ([displayButton isHidden]) {
-        fprintf(stderr, "stepping does not show the arrow: stepper %ld stored %s\n", (long)[stepper integerValue],
+        fprintf(stderr, "a stored typed number does not show the arrow: field %s stored %s\n", [[display stringValue] UTF8String],
                 [[[[NSUserDefaults standardUserDefaults] objectForKey:@"displayNum"] description] UTF8String]);
         return 105;
     }
-    [stepper setIntegerValue:value];
-    [stepper sendAction:[stepper action] to:[stepper target]];
-    if (![displayButton isHidden]) { fprintf(stderr, "stepping back does not hide the arrow\n"); return 106; }
+    [(NSTextView *)Edit(display, [NSString stringWithFormat:@"%ld", (long)value]) doCommandBySelector:@selector(insertNewline:)];
+    [window makeFirstResponder:nil];
+    if (![displayButton isHidden]) { fprintf(stderr, "storing the default back does not hide the arrow\n"); return 106; }
     return 0;
 }
 
@@ -478,6 +484,8 @@ static int GeneralLive(void)
 @implementation FCRememberOperator
 - (int)rememberNum { return favorites ? favoritesRemember : remember; }
 - (int)jcListCount { return count; }
+// #17: -checkFavoritesRememberNumPref: asks which store is selected before switching.
+- (bool)favoritesStoreIsSelected { return favorites; }
 - (void)switchToFavoritesStore { favorites = YES; [calls addObject:@"switchToFavoritesStore"]; }
 - (void)restoreStashedStore { favorites = NO; [calls addObject:@"restoreStashedStore"]; }
 // The contract of -[FlycutOperator setRememberNum:forPrimaryStore:]: shrinking
@@ -509,11 +517,13 @@ static FCRememberOperator *Operator(int remember, int count, NSString *choice)
 }
 
 // Every General arrow restores the registered value; the remember limits go
-// through the operator's resize path like a stepper change.
+// through the operator's resize path like a typed change.
 static int GeneralRestore(void)
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     FCRememberOperator *op = Operator(80, 60, @"Resize");
+    // A list field's arrow is greyed out with the field: the lengths checkbox is off by default.
+    [defaults setBool:YES forKey:@"skipPasswordLengths"];
     NSDictionary *custom = @{@"rememberNum": @80, @"displayNum": @12, @"favoritesRememberNum": @80,
                              @"skipPboardTypesList": @"PasswordPboardType", @"skipPasswordLengthsList": @"12, 20"};
     for (NSString *key in custom) SetUserValue(key, custom[key]);
@@ -567,14 +577,14 @@ static int RememberCancel(void)
 }
 
 // The Hotkeys pane's help text says what the arrow next to the recorder does,
-// and still fits next to it.
+// and fits under the recorder, from where the recorder starts.
 static int HelpText(void)
 {
     NSView *pane = [mainRecorder superview];
     NSButton *button = RestoreButton(@"restoreDefaultMainHotkey");
     NSTextField *help = nil;
     for (NSView *view in [pane subviews])
-        if ([view isKindOfClass:[NSTextField class]] && NSMinX([view frame]) > NSMaxX([mainRecorder frame])) help = (NSTextField *)view;
+        if ([view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] hasPrefix:@"To change"]) help = (NSTextField *)view;
     if (help == nil || button == nil) return 130;
     NSString *text = [help stringValue];
     if ([text rangeOfString:@"arrow"].location == NSNotFound || [text rangeOfString:@"default"].location == NSNotFound) {
@@ -587,8 +597,9 @@ static int HelpText(void)
         fprintf(stderr, "help text needs %.1f, has %.1f\n", needed.height, NSHeight([help frame]));
         return 133;
     }
+    NSRect helpEdges = [help alignmentRectForFrame:[help frame]], recorderEdges = [mainRecorder alignmentRectForFrame:[mainRecorder frame]];
     if (!NSContainsRect([pane bounds], [help frame]) || NSIntersectsRect([help frame], [button frame]) ||
-        NSMinX([help frame]) < NSMaxX([button frame]) + 4) {
+        fabs(NSMinX(helpEdges) - NSMinX(recorderEdges)) > 0.5 || NSMaxY(helpEdges) > NSMinY(recorderEdges) + 0.5) {
         fprintf(stderr, "help %s button %s pane %s\n", [NSStringFromRect([help frame]) UTF8String],
                 [NSStringFromRect([button frame]) UTF8String], [NSStringFromRect([pane bounds]) UTF8String]);
         return 134;
@@ -744,7 +755,7 @@ static int PaneSwitchRefused(void)
 
 // Every arrow is one gap right of its control, and the arrows of a pane line
 // up: on Appearance one column for sliders and the search hotkey, ending at
-// the rows' inset (where the menu bar colour row ends, too); on General the
+// the rows' inset; on General the
 // arrows that end a line share one column, and so do the two folder arrows.
 static const CGFloat ArrowGap = 4.0;
 
@@ -779,22 +790,37 @@ static int ArrowColumns(void)
             return 142;
         }
     }
-    // The column ends as far from the row's right edge as the row labels start from its left edge.
+    // The column ends as far from the pane's right edge as the row labels start from its left
+    // edge, in the pane's own view (where the window's width rule measures it).
     NSView *label = Find(panel, ^BOOL(NSView *view) {
-        return [view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] isEqualToString:@"Bezel width"];
+        return [view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] isEqualToString:@"Bezel width:"];
     });
     NSButton *width = RestoreButton(@"restoreDefaultBezelWidth");
-    if (label == nil || [label superview] != [width superview]) return 143;
-    if (!Same(NSWidth([[label superview] bounds]) - NSMaxX([width frame]), NSMinX([label frame]))) {
-        fprintf(stderr, "Appearance: the arrow column ends at %.1f of %.1f, the labels start at %.1f\\n", NSMaxX([width frame]),
-                NSWidth([[label superview] bounds]), NSMinX([label frame]));
+    NSView *item = [[[prefs tabView] tabViewItemAtIndex:appearancePane] view];
+    if (label == nil || width == nil || ![panel isDescendantOf:item]) return 143;
+    NSRect labelEdges = [item convertRect:[label alignmentRectForFrame:[label frame]] fromView:[label superview]];
+    NSRect arrowFrame = [item convertRect:[width frame] fromView:[width superview]];
+    if (!Same(NSWidth([item bounds]) - NSMaxX(arrowFrame), NSMinX(labelEdges))) {
+        fprintf(stderr, "Appearance: the arrow column ends at %.1f of %.1f, the labels start at %.1f\\n", NSMaxX(arrowFrame),
+                NSWidth([item bounds]), NSMinX(labelEdges));
         return 144;
     }
-    // With the menu bar colour row (#20), that row ends at the column's right edge.
+    // The menu bar colour options (#20) stand on their own line under their
+    // checkbox, from its title on; they end before the arrow column.
     NSView *paused = Find(panel, ^BOOL(NSView *view) { return [[view identifier] isEqualToString:@"menuIconPausedPreview"]; });
-    if (paused != nil && !Same(NSMaxX(FrameIn(paused, content)), NSMaxX(first))) {
-        fprintf(stderr, "Appearance: the colour row ends at %.1f, the arrow column at %.1f\\n", NSMaxX(FrameIn(paused, content)), NSMaxX(first));
-        return 145;
+    NSButton *colors = (NSButton *)Find(panel, ^BOOL(NSView *view) { return [[view identifier] isEqualToString:@"menuIconCustomColorsCheckbox"]; });
+    NSView *active = Find(panel, ^BOOL(NSView *view) {
+        return [view isKindOfClass:[NSTextField class]] && [[(NSTextField *)view stringValue] isEqualToString:@"Active:"];
+    });
+    if (paused != nil) {
+        CGFloat title = NSMinX([colors convertRect:[[colors cell] titleRectForBounds:[colors bounds]] toView:content]);
+        CGFloat start = NSMinX([[active superview] convertRect:[active alignmentRectForFrame:[active frame]] toView:content]);
+        if (colors == nil || active == nil || NSMaxX(FrameIn(paused, content)) > NSMinX(first) - ArrowGap + 0.5 || !Same(start, title)
+            || NSMaxY(FrameIn(paused, content)) > NSMinY(FrameIn(colors, content)) + 0.5) {
+            fprintf(stderr, "Appearance: the colour options start at %.1f (title %.1f), end at %.1f; the arrow column starts at %.1f\\n",
+                    start, title, NSMaxX(FrameIn(paused, content)), NSMinX(first));
+            return 145;
+        }
     }
 
     // Hotkeys: the same gap.
@@ -804,9 +830,9 @@ static int ArrowColumns(void)
     // General.
     NSView *pane = GeneralPane();
     NSDictionary *anchors = @{
-        @"rememberNum": BoundControl(@"rememberNum", [NSStepper class]),
-        @"displayNum": BoundControl(@"displayNum", [NSStepper class]),
-        @"favoritesRememberNum": BoundControl(@"favoritesRememberNum", [NSStepper class]),
+        @"rememberNum": BoundControl(@"rememberNum", [NSTextField class]),
+        @"displayNum": BoundControl(@"displayNum", [NSTextField class]),
+        @"favoritesRememberNum": BoundControl(@"favoritesRememberNum", [NSTextField class]),
         @"skipPboardTypesList": BoundControl(@"skipPboardTypesList", [NSTextField class]),
         @"skipPasswordLengthsList": BoundControl(@"skipPasswordLengthsList", [NSTextField class]),
         @"saveToLocation": [controller valueForKey:@"saveToLocationButton"],
@@ -894,6 +920,8 @@ static int LiveArrow(void)
 static int RestoreRemoves(void)
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    // A list field's arrow is greyed out with the field: the lengths checkbox is off by default.
+    [defaults setBool:YES forKey:@"skipPasswordLengths"];
     NSDictionary *sliders = @{@"restoreDefaultBezelAlpha": @"bezelAlpha", @"restoreDefaultBezelWidth": @"bezelWidth", @"restoreDefaultBezelHeight": @"bezelHeight"};
     for (NSString *identifier in sliders) {
         NSString *key = sliders[identifier];
@@ -960,7 +988,8 @@ static int FolderArrows(void)
         NSButton *folder = buttons[key];
         [controller storeSaveLocation:[NSURL fileURLWithPath:@"/private/var/empty/flycut-folder-probe" isDirectory:YES] forButton:folder];
         if (Stored(key) == nil) return 202;
-        if (![[folder title] isEqualToString:@"flycut-folder-probe"]) { fprintf(stderr, "folder button shows %s\\n", [[folder title] UTF8String]); return 203; }
+        // A long name is shortened on the button; VoiceOver reads it whole.
+        if (![[folder accessibilityTitle] isEqualToString:@"flycut-folder-probe"] || ![[folder title] hasPrefix:@"fly"]) { fprintf(stderr, "folder button shows %s\\n", [[folder title] UTF8String]); return 203; }
         if ([arrow isHidden] || ![arrow isEnabled]) { fprintf(stderr, "%s arrow not offered for another folder\\n", [key UTF8String]); return 204; }
     }
     [[pane window] layoutIfNeeded];
@@ -1029,10 +1058,12 @@ int main(int argc, const char **argv)
         originalSetBezelWidth = method_setImplementation(class_getInstanceMethod([AppController class], @selector(setBezelWidth:)), (IMP)CountBezelWidth);
         originalSetBezelHeight = method_setImplementation(class_getInstanceMethod([AppController class], @selector(setBezelHeight:)), (IMP)CountBezelHeight);
         [controller buildAppearancesPreferencePanel];
-        if ([controller respondsToSelector:@selector(buildMainHotkeyRestoreDefaultButton)])
-            [controller buildMainHotkeyRestoreDefaultButton];
-        if ([controller respondsToSelector:@selector(buildGeneralRestoreDefaultButtons)])
-            [controller buildGeneralRestoreDefaultButtons];
+        // The arrow builders, and the number fields' builder that changes the row they
+        // stand in, in the order -awakeFromNib sends them (argv[3], read from AppController.m).
+        for (NSString *name in [[NSString stringWithUTF8String:argc > 3 ? argv[3] : ""] componentsSeparatedByString:@","]) {
+            SEL builder = NSSelectorFromString(name);
+            if ([name length] && [controller respondsToSelector:builder]) ((void (*)(id, SEL))objc_msgSend)(controller, builder);
+        }
         searchRecorder = [controller valueForKey:@"searchRecorder"];
         mainRecorder = [controller valueForKey:@"mainRecorder"];
         [prefs mapTabsToToolbar];
@@ -1130,8 +1161,18 @@ class PreferencesHotkeyRecorderRegressionTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.temp.cleanup()
 
+    @staticmethod
+    def builders() -> list[str]:
+        """The builders this fixture needs, in the order -[AppController awakeFromNib] sends them."""
+        source = (ROOT / "AppController.m").read_text()
+        start = source.index("- (void)awakeFromNib\n{")
+        body = source[start:source.index("\n}\n", start)]
+        wanted = ("buildMainHotkeyRestoreDefaultButton", "buildGeneralNumberFields", "buildGeneralRestoreDefaultButtons")
+        order = [name for name in re.findall(r"\[self (build\w+)\]", body) if name in wanted]
+        return list(dict.fromkeys(order)) or ["buildMainHotkeyRestoreDefaultButton", "buildGeneralRestoreDefaultButtons"]
+
     def run_mode(self, mode: str) -> None:
-        run = subprocess.run([str(self.binary), str(self.bundle), mode], cwd=ROOT, text=True,
+        run = subprocess.run([str(self.binary), str(self.bundle), mode, ",".join(self.builders())], cwd=ROOT, text=True,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
@@ -1159,7 +1200,7 @@ class PreferencesHotkeyRecorderRegressionTests(unittest.TestCase):
     def test_general_pane_has_restore_arrows_next_to_its_fields(self) -> None:
         self.run_mode("general-buttons")
 
-    def test_general_arrows_follow_typing_and_stepping(self) -> None:
+    def test_general_arrows_follow_typing_and_stored_typed_numbers(self) -> None:
         self.run_mode("general-live")
 
     def test_general_arrows_restore_registered_values_through_the_resize_path(self) -> None:

@@ -77,6 +77,7 @@
 -(NSString *) clippingContentsAtPosition:(int)index;
 -(NSString *) clippingDisplayStringAtPosition:(int)index;
 -(NSString *) clippingTypeAtPosition:(int)index;
+-(NSDictionary *) clippingRichDataAtPosition:(int)index;
 -(NSArray *) previousContents:(int)howMany;
 -(NSArray *) previousDisplayStrings:(int)howMany;
 -(NSArray *) previousDisplayStrings:(int)howMany containing:(NSString*)search;
@@ -88,8 +89,21 @@
 // Add a clipping
 -(bool) addClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger) timestamp;
 -(bool) addImageClippingWithHash:(NSString *)hash imageSize:(NSSize)size imageType:(NSString *)imageType fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger)timestamp;
+-(bool) addClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger) timestamp withRichData:(NSDictionary *)richData;
+// As the two above, at this position (0 = newest). They return the new clipping (nil for empty
+// text or no hash), which the store holds unless the limit dropped it at once.
+-(FlycutClipping *) insertClipping:(NSString *)clipping ofType:(NSString *)type fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger) timestamp withRichData:(NSDictionary *)richData atIndex:(int)index;
+-(FlycutClipping *) insertImageClippingWithHash:(NSString *)hash imageSize:(NSSize)size imageType:(NSString *)imageType fromAppLocalizedName:(NSString *)appLocalizedName fromAppBundleURL:(NSString *)bundleURL atTimestamp:(NSInteger)timestamp atIndex:(int)index;
 -(void) addClipping:(FlycutClipping*) clipping;
 -(void) insertClipping:(FlycutClipping*) clipping atIndex:(int) index;
+
+// Replace the rich representations of a text clipping; returns whether they changed
+-(bool) setRichData:(NSDictionary *)richData forClippingAtPosition:(int)index;
+
+// The clipping objects in list order (newest first), as an immutable copy.
+-(NSArray *) clippingsSnapshot;
+// Puts back an earlier -clippingsSnapshot (undo). Nothing is deleted or exported.
+-(void) restoreClippingsSnapshot:(NSArray *)clippings;
 
 // Delete a clipping
 -(void) clearItem:(int)index;

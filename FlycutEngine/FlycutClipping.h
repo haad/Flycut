@@ -22,6 +22,8 @@
     NSInteger clipTimestamp;
     NSString * imageHash;
     NSSize imageSize;
+    // Optional rich representations of the text (pasteboard type -> NSData), e.g. RTF or HTML
+    NSDictionary * clipRichData;
 }
 
 -(id) initWithContents:(NSString *)contents withType:(NSString *)type withDisplayLength:(int)displayLength withAppLocalizedName:(NSString *)localizedName withAppBundleURL:(NSString *)bundleURL withTimestamp:(NSInteger)timestamp;
@@ -36,6 +38,7 @@
 -(void) setType:(NSString *)newType;
 -(void) setDisplayLength:(int)newDisplayLength;
 -(void) setHasName:(BOOL)newHasName;
+-(void) setRichData:(NSDictionary *)newRichData;
 
 // Retrieve values
 -(FlycutClipping *) clipping;
@@ -52,6 +55,7 @@
 -(NSSize) imageSize;
 -(void) setImageHash:(NSString *)hash;
 -(void) setImageSize:(NSSize)size;
+-(NSDictionary *) richData;
 
 // Additional functions
 -(void) resetDisplayString;
