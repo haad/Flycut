@@ -22,6 +22,9 @@
 
 @class SGHotKey;
 @class FlycutClipping;
+@class FlycutListController;
+@class FCClipboardCatchUp;
+@class FlycutAccountShareService;
 
 @interface AppController : NSResponder <NSMenuDelegate, NSApplicationDelegate, FlycutStoreDelegate, FlycutOperatorDelegate, BezelWindowDelegate> {
     BezelWindow					*bezel;
@@ -36,6 +39,11 @@
 	SRKeyCodeTransformer        *srTransformer;
 	BOOL						isBezelDisplayed;
 	BOOL						isBezelPinned;
+	BOOL						bezelSelectionFinished;	// the shown bezel was pasted or cancelled
+	BOOL						isMenuOpen;
+	NSUInteger nextPasteTransactionGeneration;
+	id currentPasteTransaction;
+	BOOL						hasShownAccessibilityExplanationThisSession;
 	NSString					*currentKeycodeCharacter;
     NSDateFormatter*            dateFormat;
 	
@@ -44,17 +52,48 @@
 	NSSearchField				*searchWindowSearchField;
 	NSTableView					*searchWindowTableView;
 	NSArray						*searchResults;
+	NSArray *searchResultClippings;
 	BOOL						isSearchWindowDisplayed;
-
-    NSArray *settingsSyncList;
 
     FlycutOperator				*flycutOperator;
 
     // Status item -- the little icon in the menu bar
     NSStatusItem *statusItem;
-    NSString *statusItemText;
-    NSImage *statusItemImage;
-    
+    id statusItemMouseDownMonitor;
+    // When the mouse-down monitor last finished with a press (seconds since startup).
+    NSTimeInterval statusItemMouseDownHandledAt;
+    NSMenuItem *clipboardTrackingMenuItem;
+    NSButton *menuIconCustomColorsCheckbox;
+    NSColorWell *menuIconActiveColorWell;
+    NSColorWell *menuIconPausedColorWell;
+    NSImageView *menuIconActivePreview;
+    NSImageView *menuIconPausedPreview;
+    // "Share copied text with other accounts on this Mac" (General pane).
+    FlycutAccountShareService *accountShareService;
+    NSInteger accountShareOfferedGeneration;   // the clipboard generation offered last (-pollPB:)
+    NSButton *accountSharingCheckbox;
+    // The account list (Preferences, General): the "Send" and "Receive" column
+    // headers and, per other login account of this Mac, its name and its Send
+    // and Receive checkboxes.
+    NSMutableArray *accountSharingRows;
+    // The height of the note's line below the list; the pane has it only while
+    // the note shows.
+    CGFloat accountSharingNoteLine;
+    // The section's label and how much the section made the pane taller
+    // (without the note's line), to build it again once the accounts can be
+    // read (-rebuildAccountSharingSectionIfUnread).
+    NSTextField *accountSharingLabel;
+    CGFloat accountSharingSectionHeight;
+    // "Sharing is unavailable: ..." under the list while the inbox cannot be set up.
+    NSTextField *accountSharingStatus;
+    // The pasteboard generation when the session left the console (or at
+    // launch), and the last one whose content Flycut keeps (-1: none): a copy
+    // it took into the history or a clipping it put there from its lists.
+    NSInteger accountSharePasteboardMark;
+    NSInteger accountShareKeptGeneration;
+    // YES while the accounts chosen at launch could not be looked up yet.
+    BOOL accountShareChoicePending;
+
     IBOutlet NSTextField *savingSectionLabel;
     IBOutlet NSTextField *saveFromBezelToLabel;
     IBOutlet NSTextField *forgottenItemLabel;
@@ -64,11 +103,14 @@
     IBOutlet NSButton *autoSaveToLocationButton;
     // The menu attatched to same
     IBOutlet NSMenu *jcMenu;
-    int jcMenuBaseItemsCount;
+    // The list the status item opens (search, favorites, history, commands).
+    FlycutListController *listController;
+    // The search field of the status menu in MainMenu.nib. The menu-bar list has its own;
+    // the outlet stays because loading the nib sets it.
     IBOutlet NSSearchField *searchBox;
-    NSResponder *menuFirstResponder;
     dispatch_queue_t clipboardReadQueue;
-    NSRunningApplication *currentRunningApplication;
+    FCClipboardCatchUp *clipboardCatchUp; // -captureClipboardChangeNow waits for this poll's reads
+    BOOL bezelClosesKeepingFlycutShown;   // -closeBezelKeepingFlycutShown is ordering the bezel out
     NSEvent *menuOpenEvent;
     IBOutlet NSSlider * heightSlider;
     IBOutlet NSSlider * widthSlider;
@@ -88,21 +130,19 @@
 	NSDictionary *standardPreferences;
     int jcDisplayNum;
 	BOOL needBezelUpdate;
-	BOOL needMenuUpdate;
 }
 
 // Basic functionality
 -(void) pollPB:(NSTimer *)timer;
 -(void) addClipToPasteboard:(NSString*)pbFullText;
--(void) addImageClipToPasteboard:(FlycutClipping *)clipping;
+-(BOOL) addImageClipToPasteboard:(FlycutClipping *)clipping;
+-(void) addClipToPasteboard:(NSString*)pbFullText withRichData:(NSDictionary *)richData;
 -(void) setPBBlockCount:(NSNumber *)newPBBlockCount;
 -(void) hideApp;
 -(void) fakeCommandV;
 -(IBAction)clearClippingList:(id)sender;
 -(IBAction)mergeClippingList:(id)sender;
--(void)controlTextDidChange:(NSNotification *)aNotification;
 -(BOOL)control:(NSControl *)control textView:(NSTextView *)fieldEditor doCommandBySelector:(SEL)commandSelector;
--(IBAction)searchItems:(id)sender;
 
 // Hotkey related
 -(void)hitMainHotKey:(SGHotKey *)hotKey;
@@ -128,8 +168,6 @@
 -(void) windowDidResignKey:(NSNotification *)notification;
 
 // Menu related
--(void) updateMenu;
--(IBAction) processMenuClippingSelection:(id)sender;
 -(IBAction) activateAndOrderFrontStandardAboutPanel:(id)sender;
 
 // Preference related
@@ -140,13 +178,14 @@
 -(IBAction) setBezelAlpha:(id)sender;
 -(IBAction) setBezelHeight:(id)sender;
 -(IBAction) setBezelWidth:(id)sender;
--(IBAction) switchMenuIcon:(id)sender;
+-(void)updateMenuBarIcon;
+-(IBAction)toggleClipboardTracking:(id)sender;
+-(IBAction)toggleMenuIconCustomColors:(id)sender;
+-(IBAction)setActiveMenuIconColor:(id)sender;
+-(IBAction)setPausedMenuIconColor:(id)sender;
 -(IBAction) toggleLoadOnStartup:(id)sender;
 -(IBAction) toggleMainHotKey:(id)sender;
 -(IBAction) recheckAccessibility:(id)sender;
--(IBAction) toggleICloudSyncSettings:(id)sender;
--(IBAction) toggleICloudSyncClippings:(id)sender;
--(IBAction) setSavePreference:(id)sender;
 -(void) setHotKeyPreferenceForRecorder:(SRRecorderControl *)aRecorder;
 
 @end

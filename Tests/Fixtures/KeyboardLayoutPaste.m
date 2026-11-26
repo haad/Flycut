@@ -121,14 +121,22 @@ static void NoDispatch(dispatch_queue_t queue, dispatch_block_t block) {
 #if __has_include("FlycutPasteKey.h")
 #import "FlycutPasteKey.h"
 #endif
-@interface PasteHarness : NSObject
+// #15 gates the denied paste through the once-per-session consent policy.
+#if __has_include("AccessibilityPromptPolicy.h")
+#import "AccessibilityPromptPolicy.h"
+#endif
+@interface PasteHarness : NSObject {
+    BOOL hasShownAccessibilityExplanationThisSession;
+}
 - (void)fakeKey:(NSNumber *)code withCommandFlag:(BOOL)flag;
 - (void)fakeCommandV;
 - (void)openAccessibilitySettings;
+- (void)showAccessibilityAlert;
 @end
 @implementation PasteHarness
 #include "PasteMethods.inc"
 - (void)openAccessibilitySettings { CHECK(false, "unexpected Settings call"); }
+- (void)showAccessibilityAlert { CHECK(false, "unexpected Accessibility consent request"); }
 @end
 
 #undef CFRelease

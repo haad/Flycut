@@ -122,23 +122,23 @@
                 <autoresizingMask key="autoresizingMask"/>
                 <subviews>
                     <tabView fixedFrame="YES" type="noTabsNoBorder" translatesAutoresizingMaskIntoConstraints="NO" id="345">
-                        <rect key="frame" x="0.0" y="0.0" width="507" height="520"/>
+                        <rect key="frame" x="0.0" y="0.0" width="507" height="606"/>
                         <autoresizingMask key="autoresizingMask"/>
                         <font key="font" metaFont="system"/>
                         <tabViewItems>
                             <tabViewItem label="General" identifier="net.sf.jumpcut.preferences.general.tiff" id="359">
                                 <view key="view" id="360">
-                                    <rect key="frame" x="0.0" y="0.0" width="507" height="520"/>
+                                    <rect key="frame" x="0.0" y="0.0" width="507" height="606"/>
                                     <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                     <subviews>
                                         <box misplaced="YES" boxType="oldStyle" borderType="none" title="Box" titlePosition="noTitle" translatesAutoresizingMaskIntoConstraints="NO" id="387">
-                                            <rect key="frame" x="0.0" y="40" width="507" height="520"/>
+                                            <rect key="frame" x="0.0" y="40" width="507" height="606"/>
                                             <view key="contentView" id="OKE-OW-DrT">
-                                                <rect key="frame" x="0.0" y="0.0" width="507" height="520"/>
+                                                <rect key="frame" x="0.0" y="0.0" width="507" height="606"/>
                                                 <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                                 <subviews>
                                                     <button toolTip="The bezel must be manually dismissed using the &quot;escape&quot; or &quot;return&quot; keys." translatesAutoresizingMaskIntoConstraints="NO" id="390">
-                                                        <rect key="frame" x="14" y="487" width="477" height="18"/>
+                                                        <rect key="frame" x="16" y="574" width="475" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Sticky bezel (bezel, or pop-up, stays visible after hotkey is released)" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="750">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -148,7 +148,7 @@
                                                         </connections>
                                                     </button>
                                                     <button toolTip="In the bezel, moving down from the last item takes you to the top and moving up from the first item takes you to the bottom." translatesAutoresizingMaskIntoConstraints="NO" id="692">
-                                                        <rect key="frame" x="14" y="467" width="477" height="18"/>
+                                                        <rect key="frame" x="16" y="552" width="475" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Wraparound bezel (the first and last items are adjacent in order)" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="762">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -158,7 +158,7 @@
                                                         </connections>
                                                     </button>
                                                     <button toolTip="Selecting a clipping from the menu causes it to be pasted instead of copied back onto the pasteboard." translatesAutoresizingMaskIntoConstraints="NO" id="694">
-                                                        <rect key="frame" x="14" y="447" width="477" height="18"/>
+                                                        <rect key="frame" x="16" y="530" width="475" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Menu selection pastes" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="763">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -168,7 +168,7 @@
                                                         </connections>
                                                     </button>
                                                     <button translatesAutoresizingMaskIntoConstraints="NO" id="398">
-                                                        <rect key="frame" x="14" y="427" width="477" height="18"/>
+                                                        <rect key="frame" x="16" y="508" width="475" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Launch Flycut on login" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="753">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -178,38 +178,8 @@
                                                             <binding destination="808" name="value" keyPath="values.loadOnStartup" id="820"/>
                                                         </connections>
                                                     </button>
-                                                    <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="oXn-B4-1Ni">
-                                                        <rect key="frame" x="34" y="408" width="80" height="16"/>
-                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="iCloud Sync:" id="17g-S0-Mqp">
-                                                            <font key="font" metaFont="system"/>
-                                                            <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
-                                                            <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
-                                                        </textFieldCell>
-                                                    </textField>
-                                                    <button translatesAutoresizingMaskIntoConstraints="NO" id="bqG-v4-vqw">
-                                                        <rect key="frame" x="118" y="407" width="77" height="18"/>
-                                                        <buttonCell key="cell" type="check" title="Settings" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="d4T-QV-zqa">
-                                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                                            <font key="font" metaFont="system"/>
-                                                        </buttonCell>
-                                                        <connections>
-                                                            <action selector="toggleICloudSyncSettings:" target="213" id="lWN-Hi-1aI"/>
-                                                            <binding destination="808" name="value" keyPath="values.syncSettingsViaICloud" id="q7Y-Id-atI"/>
-                                                        </connections>
-                                                    </button>
-                                                    <button translatesAutoresizingMaskIntoConstraints="NO" id="IXN-q7-y5J">
-                                                        <rect key="frame" x="201" y="407" width="83" height="18"/>
-                                                        <buttonCell key="cell" type="check" title="Clippings" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="oLL-dD-GRW">
-                                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
-                                                            <font key="font" metaFont="system"/>
-                                                        </buttonCell>
-                                                        <connections>
-                                                            <action selector="toggleICloudSyncClippings:" target="213" id="hdD-v4-8dV"/>
-                                                            <binding destination="808" name="value" keyPath="values.syncClippingsViaICloud" id="gbJ-fW-npv"/>
-                                                        </connections>
-                                                    </button>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="416">
-                                                        <rect key="frame" x="14" y="384" width="479" height="16"/>
+                                                        <rect key="frame" x="14" y="476" width="479" height="16"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Clippings:" id="754">
                                                             <font key="font" metaFont="systemSemibold" size="13"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -217,17 +187,15 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <textField verticalHuggingPriority="1000" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="418">
-                                                        <rect key="frame" x="14" y="348" width="30" height="28"/>
-                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" id="755">
-                                                            <font key="font" metaFont="label" size="11"/>
-                                                            <string key="title">Save
-</string>
+                                                        <rect key="frame" x="14" y="448" width="37" height="16"/>
+                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Save:" id="755">
+                                                            <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                                         </textFieldCell>
                                                     </textField>
                                                     <popUpButton verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="392">
-                                                        <rect key="frame" x="47" y="355" width="189" height="25"/>
+                                                        <rect key="frame" x="57" y="444" width="182" height="24"/>
                                                         <constraints>
                                                             <constraint firstAttribute="width" constant="182" id="xgu-QS-ucU"/>
                                                         </constraints>
@@ -243,22 +211,19 @@
                                                             </menu>
                                                         </popUpButtonCell>
                                                         <connections>
-                                                            <action selector="setSavePreference:" target="213" id="Tad-Qs-Oft"/>
                                                             <binding destination="808" name="selectedIndex" keyPath="values.savePreference" id="823"/>
                                                         </connections>
                                                     </popUpButton>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="419">
-                                                        <rect key="frame" x="14" y="312" width="61" height="28"/>
-                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" id="756">
-                                                            <font key="font" metaFont="label" size="11"/>
-                                                            <string key="title">Remember
-</string>
+                                                        <rect key="frame" x="14" y="422" width="73.5" height="16"/>
+                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Remember:" id="756">
+                                                            <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                                         </textFieldCell>
                                                     </textField>
                                                     <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="470">
-                                                        <rect key="frame" x="79" y="326" width="34" height="16"/>
+                                                        <rect key="frame" x="91.5" y="422" width="34" height="16"/>
                                                         <constraints>
                                                             <constraint firstAttribute="width" constant="30" id="CUk-dH-iV9"/>
                                                         </constraints>
@@ -279,7 +244,7 @@
                                                         </connections>
                                                     </textField>
                                                     <stepper toolTip="Controls how many clippings Flycut stores in its stack" horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="472">
-                                                        <rect key="frame" x="113" y="320" width="19" height="28"/>
+                                                        <rect key="frame" x="128.5" y="418" width="20" height="24"/>
                                                         <stepperCell key="cell" continuous="YES" alignment="left" minValue="10" maxValue="999" doubleValue="10" valueWraps="YES" id="760"/>
                                                         <connections>
                                                             <action selector="setRememberNumPref:" target="213" id="485"/>
@@ -287,15 +252,15 @@
                                                         </connections>
                                                     </stepper>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="420">
-                                                        <rect key="frame" x="143" y="326" width="87" height="14"/>
-                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Display in menu" id="757">
-                                                            <font key="font" metaFont="label" size="11"/>
+                                                        <rect key="frame" x="162.5" y="422" width="103.5" height="16"/>
+                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Display in menu:" id="757">
+                                                            <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                                         </textFieldCell>
                                                     </textField>
                                                     <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="471">
-                                                        <rect key="frame" x="234" y="326" width="29" height="16"/>
+                                                        <rect key="frame" x="270" y="422" width="29" height="16"/>
                                                         <constraints>
                                                             <constraint firstAttribute="width" constant="25" id="xtz-2M-8Nx"/>
                                                         </constraints>
@@ -315,8 +280,8 @@
                                                             <binding destination="808" name="value" keyPath="values.displayNum" id="832"/>
                                                         </connections>
                                                     </textField>
-                                                    <stepper toolTip="Controls how many clippings Flycut shows in the menu" horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="473">
-                                                        <rect key="frame" x="264" y="320" width="19" height="28"/>
+                                                    <stepper toolTip="Controls how many rows the menu shows before it scrolls; the menu lists all clippings" horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="473">
+                                                        <rect key="frame" x="303" y="418" width="20" height="24"/>
                                                         <stepperCell key="cell" continuous="YES" alignment="left" minValue="5" maxValue="99" doubleValue="5" valueWraps="YES" id="761"/>
                                                         <connections>
                                                             <action selector="setDisplayNumPref:" target="213" id="486"/>
@@ -325,15 +290,15 @@
                                                         </connections>
                                                     </stepper>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Ubt-DS-zHf">
-                                                        <rect key="frame" x="294" y="326" width="52" height="14"/>
-                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Favorites" id="2L6-OM-5rx">
-                                                            <font key="font" metaFont="label" size="11"/>
+                                                        <rect key="frame" x="337" y="422" width="63" height="16"/>
+                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Favorites:" id="2L6-OM-5rx">
+                                                            <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                                         </textFieldCell>
                                                     </textField>
                                                     <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="dM5-eN-Zvt">
-                                                        <rect key="frame" x="350" y="326" width="29" height="16"/>
+                                                        <rect key="frame" x="404" y="422" width="29" height="16"/>
                                                         <constraints>
                                                             <constraint firstAttribute="width" constant="25" id="wV6-2I-Qfq"/>
                                                         </constraints>
@@ -354,7 +319,7 @@
                                                         </connections>
                                                     </textField>
                                                     <stepper toolTip="Controls how many clippings Flycut stores in its favorites stack" horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="wZv-HJ-VdW">
-                                                        <rect key="frame" x="380" y="320" width="19" height="28"/>
+                                                        <rect key="frame" x="437" y="418" width="20" height="24"/>
                                                         <stepperCell key="cell" continuous="YES" alignment="left" minValue="10" maxValue="999" doubleValue="10" valueWraps="YES" id="gUi-gl-RH6"/>
                                                         <connections>
                                                             <action selector="setFavoritesRememberNumPref:" target="213" id="rm7-TX-1af"/>
@@ -362,16 +327,16 @@
                                                         </connections>
                                                     </stepper>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="IZZ-Ep-7nD" userLabel="Passwords:">
-                                                        <rect key="frame" x="14" y="288" width="479" height="16"/>
-                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Passwords:" id="cLX-o3-ZMz">
+                                                        <rect key="frame" x="14" y="390" width="479" height="16"/>
+                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Passwords &amp; privacy:" id="cLX-o3-ZMz">
                                                             <font key="font" metaFont="systemSemibold" size="13"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                                         </textFieldCell>
                                                     </textField>
-                                                    <button translatesAutoresizingMaskIntoConstraints="NO" id="897">
-                                                        <rect key="frame" x="14" y="263" width="477" height="18"/>
-                                                        <buttonCell key="cell" type="check" title="Don't copy from password fields" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="898">
+                                                    <button toolTip="Turns on the length &amp; complexity check below, which keeps strings that look like generated passwords out of Flycut's history. The options under Skip by data type work on their own, also while this is off." translatesAutoresizingMaskIntoConstraints="NO" id="897">
+                                                        <rect key="frame" x="16" y="366" width="475" height="16"/>
+                                                        <buttonCell key="cell" type="check" title="Don't save passwords" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="898">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
                                                         </buttonCell>
@@ -379,9 +344,17 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPasswordFields" id="902"/>
                                                         </connections>
                                                     </button>
-                                                    <button translatesAutoresizingMaskIntoConstraints="NO" id="pDS-jE-9jb">
-                                                        <rect key="frame" x="34" y="243" width="136" height="18"/>
-                                                        <buttonCell key="cell" type="check" title="Pasteboard types:" bezelStyle="regularSquare" imagePosition="left" inset="2" id="tzh-NM-RSb">
+                                                    <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="SkD-tY-Lbl" userLabel="Skip by data type:">
+                                                        <rect key="frame" x="14" y="314" width="113" height="16"/>
+                                                        <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Skip by data type:" id="SkD-tY-Cel">
+                                                            <font key="font" metaFont="system"/>
+                                                            <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                                            <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                                        </textFieldCell>
+                                                    </textField>
+                                                    <button toolTip="Skip clipboard content whose data type marks it as a password (password managers, password fields), also while Don't save passwords is off. The field lists those data-type identifiers." translatesAutoresizingMaskIntoConstraints="NO" id="pDS-jE-9jb">
+                                                        <rect key="frame" x="36" y="288" width="121.5" height="16"/>
+                                                        <buttonCell key="cell" type="check" title="Password types:" bezelStyle="regularSquare" imagePosition="left" inset="2" id="tzh-NM-RSb">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
                                                         </buttonCell>
@@ -389,8 +362,8 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPboardTypes" id="kfD-fG-t1V"/>
                                                         </connections>
                                                     </button>
-                                                    <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="x34-dK-wxl">
-                                                        <rect key="frame" x="178" y="242" width="313" height="21"/>
+                                                    <textField toolTip="Comma-separated clipboard data-type identifiers treated as passwords, e.g. PasswordPboardType, com.agilebits.onepassword." verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="x34-dK-wxl">
+                                                        <rect key="frame" x="165.5" y="284" width="325.5" height="24"/>
                                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" title="PasswordPboardType" drawsBackground="YES" id="kTZ-dC-s1q">
                                                             <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -400,9 +373,19 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPboardTypesList" id="Wbn-u9-3vY"/>
                                                         </connections>
                                                     </textField>
-                                                    <button translatesAutoresizingMaskIntoConstraints="NO" id="Bxp-pI-XMk">
-                                                        <rect key="frame" x="34" y="223" width="345" height="18"/>
-                                                        <buttonCell key="cell" type="check" title="Detect with Upper, Lower, Digit, and Symbol lengths:" bezelStyle="regularSquare" imagePosition="left" inset="2" id="aAK-L0-EHa">
+                                                    <button toolTip="Password managers, Firefox private windows and some tools mark copies as concealed or temporary (org.nspasteboard.ConcealedType / TransientType / AutoGeneratedType). On by default so such content is not saved; turn off to keep Firefox private-window clippings, which can then include passwords. Works on its own, also while Don't save passwords is off." verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Cnc-b0-001">
+                                                        <rect key="frame" x="36" y="262" width="271" height="16"/>
+                                                        <buttonCell key="cell" type="check" title="Private-browsing &amp; temporary clipboards" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="Cnc-c0-002">
+                                                            <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                                            <font key="font" metaFont="system"/>
+                                                        </buttonCell>
+                                                        <connections>
+                                                            <binding destination="808" name="value" keyPath="values.skipConcealedTypes" id="Cnc-n0-003"/>
+                                                        </connections>
+                                                    </button>
+                                                    <button toolTip="Skip strings whose length is listed and that mix upper- and lower-case letters, digits and symbols – typical of generated passwords. Works only while Don't save passwords is on." translatesAutoresizingMaskIntoConstraints="NO" id="Bxp-pI-XMk">
+                                                        <rect key="frame" x="36" y="340" width="164.5" height="16"/>
+                                                        <buttonCell key="cell" type="check" title="by length &amp; complexity:" bezelStyle="regularSquare" imagePosition="left" inset="2" id="aAK-L0-EHa">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
                                                         </buttonCell>
@@ -410,8 +393,8 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPasswordLengths" id="PyJ-gO-ieM"/>
                                                         </connections>
                                                     </button>
-                                                    <textField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="RYj-wx-tTx">
-                                                        <rect key="frame" x="387" y="222" width="104" height="21"/>
+                                                    <textField toolTip="Comma-separated lengths to treat as likely passwords, e.g. 12, 20, 32." verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="RYj-wx-tTx">
+                                                        <rect key="frame" x="208.5" y="336" width="282.5" height="24"/>
                                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" state="on" borderStyle="bezel" title="12, 20, 32" drawsBackground="YES" id="aqQ-SR-BmT">
                                                             <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -421,9 +404,9 @@
                                                             <binding destination="808" name="value" keyPath="values.skipPasswordLengthsList" id="NJg-wN-gsn"/>
                                                         </connections>
                                                     </textField>
-                                                    <button toolTip="For identifying types to include in Pasteboard Types above." translatesAutoresizingMaskIntoConstraints="NO" id="mka-NZ-Esg">
-                                                        <rect key="frame" x="34" y="203" width="274" height="18"/>
-                                                        <buttonCell key="cell" type="check" title="Include pasteboard types in clippings list" bezelStyle="regularSquare" imagePosition="left" inset="2" id="9Vi-RY-G0b">
+                                                    <button toolTip="For troubleshooting: saves one row per copy with all of its data types (for example public.utf8-plain-text, org.nspasteboard.ConcealedType) in the clippings list instead of the copied content, also for copies the filters skip. A copy with the same data types as the newest row adds none, and with &quot;Remove duplicates&quot; on, a listed row with the same types moves to the top. Use it to find identifiers for the Password types list. While it is on, no filter does anything, so the filters are greyed out, and nothing is shared with other accounts." translatesAutoresizingMaskIntoConstraints="NO" id="mka-NZ-Esg">
+                                                        <rect key="frame" x="36" y="240" width="266" height="16"/>
+                                                        <buttonCell key="cell" type="check" title="Diagnostics: save data type, not content" bezelStyle="regularSquare" imagePosition="left" inset="2" id="9Vi-RY-G0b">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
                                                         </buttonCell>
@@ -432,7 +415,7 @@
                                                         </connections>
                                                     </button>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="Y84-Ix-WCR" userLabel="Organizing:">
-                                                        <rect key="frame" x="14" y="180" width="479" height="16"/>
+                                                        <rect key="frame" x="14" y="208" width="479" height="16"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Organizing:" id="3tC-1z-0C9">
                                                             <font key="font" metaFont="systemSemibold" size="13"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -440,7 +423,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <button translatesAutoresizingMaskIntoConstraints="NO" id="903">
-                                                        <rect key="frame" x="14" y="155" width="477" height="18"/>
+                                                        <rect key="frame" x="16" y="184" width="475" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Remove duplicates" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="904">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -449,8 +432,8 @@
                                                             <binding destination="808" name="value" keyPath="values.removeDuplicates" id="906"/>
                                                         </connections>
                                                     </button>
-                                                    <button translatesAutoresizingMaskIntoConstraints="NO" id="914">
-                                                        <rect key="frame" x="14" y="135" width="477" height="18"/>
+                                                    <button toolTip="Applies to the clipboard history only. Favorites keep their order when you paste them." translatesAutoresizingMaskIntoConstraints="NO" id="914">
+                                                        <rect key="frame" x="16" y="162" width="475" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Move pasted item to top of stack" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="915">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -460,7 +443,7 @@
                                                         </connections>
                                                     </button>
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="g6p-DW-uAA" userLabel="Saving:">
-                                                        <rect key="frame" x="14" y="112" width="479" height="16"/>
+                                                        <rect key="frame" x="14" y="130" width="479" height="16"/>
                                                         <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Saving:" id="bsj-XZ-XVF">
                                                             <font key="font" metaFont="systemSemibold" size="13"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -468,7 +451,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="GRg-nv-Opa" userLabel="Save from bezel to:">
-                                                        <rect key="frame" x="14" y="88" width="121" height="16"/>
+                                                        <rect key="frame" x="14" y="102" width="121" height="16"/>
                                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Save from bezel to:" id="5L1-9C-Fdd">
                                                             <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -476,7 +459,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="Bqn-So-8E9" userLabel="SaveToButton">
-                                                        <rect key="frame" x="134" y="79" width="85" height="32"/>
+                                                        <rect key="frame" x="141" y="98" width="74.5" height="24"/>
                                                         <buttonCell key="cell" type="push" title="Desktop" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="Ldc-9D-vz1">
                                                             <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -486,7 +469,7 @@
                                                         </connections>
                                                     </button>
                                                     <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="FNU-zj-OIm">
-                                                        <rect key="frame" x="14" y="64" width="149" height="16"/>
+                                                        <rect key="frame" x="14" y="72" width="149" height="16"/>
                                                         <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" sendsActionOnEndEditing="YES" title="Save forgotten items to:" id="ksy-al-FbE">
                                                             <font key="font" metaFont="system"/>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
@@ -494,7 +477,7 @@
                                                         </textFieldCell>
                                                     </textField>
                                                     <button verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" translatesAutoresizingMaskIntoConstraints="NO" id="PJD-Fc-76A" userLabel="AutoSaveToButton">
-                                                        <rect key="frame" x="162" y="55" width="85" height="32"/>
+                                                        <rect key="frame" x="169" y="68" width="74.5" height="24"/>
                                                         <buttonCell key="cell" type="push" title="Desktop" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="K2A-qx-BB8">
                                                             <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -504,7 +487,7 @@
                                                         </connections>
                                                     </button>
                                                     <button translatesAutoresizingMaskIntoConstraints="NO" id="LLh-vf-2Q3">
-                                                        <rect key="frame" x="246" y="63" width="83" height="18"/>
+                                                        <rect key="frame" x="251.5" y="72" width="79" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Clippings" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="oLu-XL-Wuo">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -514,7 +497,7 @@
                                                         </connections>
                                                     </button>
                                                     <button translatesAutoresizingMaskIntoConstraints="NO" id="cGj-g9-2Dm">
-                                                        <rect key="frame" x="335" y="63" width="81" height="18"/>
+                                                        <rect key="frame" x="338.5" y="72" width="77" height="16"/>
                                                         <buttonCell key="cell" type="check" title="Favorites" bezelStyle="regularSquare" imagePosition="left" alignment="left" state="on" inset="2" id="vC2-Ch-UPQ">
                                                             <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
                                                             <font key="font" metaFont="system"/>
@@ -525,6 +508,8 @@
                                                     </button>
                                                 </subviews>
                                                 <constraints>
+                                                    <constraint firstItem="SkD-tY-Lbl" firstAttribute="top" secondItem="RYj-wx-tTx" secondAttribute="bottom" constant="6" id="SkD-tY-Top"/>
+                                                    <constraint firstItem="SkD-tY-Lbl" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="SkD-tY-Lea"/>
                                                     <constraint firstItem="419" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="0OA-ei-ed9"/>
                                                     <constraint firstItem="IZZ-Ep-7nD" firstAttribute="trailing" secondItem="390" secondAttribute="trailing" id="1Yq-Ci-o9Y"/>
                                                     <constraint firstItem="897" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="2EU-FY-QhB"/>
@@ -536,40 +521,39 @@
                                                     <constraint firstItem="IZZ-Ep-7nD" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="58a-TR-ref"/>
                                                     <constraint firstItem="x34-dK-wxl" firstAttribute="centerY" secondItem="pDS-jE-9jb" secondAttribute="centerY" id="5gD-Jm-AWK"/>
                                                     <constraint firstAttribute="trailing" secondItem="x34-dK-wxl" secondAttribute="trailing" constant="16" id="63n-I3-kLa"/>
-                                                    <constraint firstItem="GRg-nv-Opa" firstAttribute="top" secondItem="g6p-DW-uAA" secondAttribute="bottom" constant="8" id="63n-kR-a6q"/>
+                                                    <constraint firstItem="Bqn-So-8E9" firstAttribute="top" secondItem="g6p-DW-uAA" secondAttribute="bottom" constant="8" id="63n-kR-a6q"/>
                                                     <constraint firstItem="903" firstAttribute="top" secondItem="Y84-Ix-WCR" secondAttribute="bottom" constant="8" id="85d-e5-tMQ"/>
-                                                    <constraint firstItem="419" firstAttribute="top" secondItem="418" secondAttribute="bottom" constant="8" id="8QQ-I9-aMj"/>
+                                                    <constraint firstItem="470" firstAttribute="top" secondItem="392" secondAttribute="bottom" constant="6" id="8QQ-I9-aMj"/>
                                                     <constraint firstItem="Y84-Ix-WCR" firstAttribute="trailing" secondItem="390" secondAttribute="trailing" id="8n3-Fh-HPU"/>
                                                     <constraint firstItem="470" firstAttribute="firstBaseline" secondItem="419" secondAttribute="firstBaseline" id="9I5-Oh-rPd"/>
                                                     <constraint firstItem="Bqn-So-8E9" firstAttribute="centerY" secondItem="GRg-nv-Opa" secondAttribute="centerY" id="AFQ-dB-abo"/>
                                                     <constraint firstItem="398" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="BAI-dH-bSv"/>
-                                                    <constraint firstAttribute="bottom" relation="greaterThanOrEqual" secondItem="FNU-zj-OIm" secondAttribute="bottom" constant="16" id="Bgo-q3-Evl"/>
+                                                    <constraint firstAttribute="bottom" relation="greaterThanOrEqual" secondItem="PJD-Fc-76A" secondAttribute="bottom" constant="16" id="Bgo-q3-Evl"/>
                                                     <constraint firstItem="416" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="BxJ-J8-n2m"/>
                                                     <constraint firstAttribute="trailing" secondItem="RYj-wx-tTx" secondAttribute="trailing" constant="16" id="C8f-Q9-F5O"/>
                                                     <constraint firstItem="903" firstAttribute="trailing" secondItem="390" secondAttribute="trailing" id="CEg-IE-Ros"/>
                                                     <constraint firstItem="dM5-eN-Zvt" firstAttribute="firstBaseline" secondItem="419" secondAttribute="firstBaseline" id="CW3-B2-Nke"/>
-                                                    <constraint firstItem="416" firstAttribute="top" secondItem="oXn-B4-1Ni" secondAttribute="bottom" constant="8" id="F4X-cP-nBC"/>
+                                                    <constraint firstItem="416" firstAttribute="top" secondItem="398" secondAttribute="bottom" constant="16" id="F4X-cP-nBC"/>
                                                     <constraint firstItem="FNU-zj-OIm" firstAttribute="centerY" secondItem="PJD-Fc-76A" secondAttribute="centerY" id="GLR-pi-A9f"/>
                                                     <constraint firstItem="pDS-jE-9jb" firstAttribute="leading" secondItem="897" secondAttribute="leading" constant="20" id="GYo-j6-3vw"/>
                                                     <constraint firstItem="398" firstAttribute="trailing" secondItem="390" secondAttribute="trailing" id="Ggu-1n-f2v"/>
                                                     <constraint firstItem="914" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="HgF-tD-X6T"/>
-                                                    <constraint firstItem="Bxp-pI-XMk" firstAttribute="top" secondItem="pDS-jE-9jb" secondAttribute="bottom" constant="4" id="IB8-Wb-AWb"/>
+                                                    <constraint firstItem="Cnc-b0-001" firstAttribute="top" secondItem="x34-dK-wxl" secondAttribute="bottom" constant="6" id="Cnc-t0-004"/>
+                                                    <constraint firstItem="Cnc-b0-001" firstAttribute="leading" secondItem="897" secondAttribute="leading" constant="20" id="Cnc-l0-005"/>
+                                                    <constraint firstItem="RYj-wx-tTx" firstAttribute="top" secondItem="897" secondAttribute="bottom" constant="6" id="IB8-Wb-AWb"/>
                                                     <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="cGj-g9-2Dm" secondAttribute="trailing" constant="16" id="IO6-sz-Wmo"/>
-                                                    <constraint firstItem="mka-NZ-Esg" firstAttribute="top" secondItem="Bxp-pI-XMk" secondAttribute="bottom" constant="4" id="LMp-eg-a6v"/>
-                                                    <constraint firstItem="398" firstAttribute="top" secondItem="694" secondAttribute="bottom" constant="4" id="LYa-Bc-sCv"/>
-                                                    <constraint firstItem="oXn-B4-1Ni" firstAttribute="leading" secondItem="398" secondAttribute="leading" constant="20" id="LiX-K9-GGv"/>
+                                                    <constraint firstItem="mka-NZ-Esg" firstAttribute="top" secondItem="Cnc-b0-001" secondAttribute="bottom" constant="6" id="LMp-eg-a6v"/>
+                                                    <constraint firstItem="398" firstAttribute="top" secondItem="694" secondAttribute="bottom" constant="6" id="LYa-Bc-sCv"/>
                                                     <constraint firstItem="694" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="MBb-5l-ePl"/>
                                                     <constraint firstItem="dM5-eN-Zvt" firstAttribute="leading" secondItem="Ubt-DS-zHf" secondAttribute="trailing" constant="8" symbolic="YES" id="NXg-qx-3RD"/>
                                                     <constraint firstItem="392" firstAttribute="firstBaseline" secondItem="418" secondAttribute="firstBaseline" id="NYT-Ws-Grq"/>
                                                     <constraint firstItem="LLh-vf-2Q3" firstAttribute="centerY" secondItem="FNU-zj-OIm" secondAttribute="centerY" id="OCy-GX-PhU"/>
                                                     <constraint firstItem="897" firstAttribute="trailing" secondItem="390" secondAttribute="trailing" id="OOV-o3-Kqw"/>
-                                                    <constraint firstItem="IXN-q7-y5J" firstAttribute="leading" secondItem="bqG-v4-vqw" secondAttribute="trailing" constant="8" id="OWr-XG-nOi"/>
                                                     <constraint firstItem="cGj-g9-2Dm" firstAttribute="leading" secondItem="LLh-vf-2Q3" secondAttribute="trailing" constant="8" id="OiD-MJ-3oZ"/>
-                                                    <constraint firstItem="bqG-v4-vqw" firstAttribute="leading" secondItem="oXn-B4-1Ni" secondAttribute="trailing" constant="8" id="Pnm-sg-o01"/>
                                                     <constraint firstItem="PJD-Fc-76A" firstAttribute="leading" secondItem="FNU-zj-OIm" secondAttribute="trailing" constant="8" id="QQj-Rc-WHS"/>
                                                     <constraint firstItem="694" firstAttribute="trailing" secondItem="390" secondAttribute="trailing" id="QjU-Yy-d2y"/>
                                                     <constraint firstItem="cGj-g9-2Dm" firstAttribute="centerY" secondItem="FNU-zj-OIm" secondAttribute="centerY" id="UXg-nV-5uk"/>
-                                                    <constraint firstItem="418" firstAttribute="top" secondItem="416" secondAttribute="bottom" constant="8" id="VNz-aL-KCx"/>
+                                                    <constraint firstItem="392" firstAttribute="top" secondItem="416" secondAttribute="bottom" constant="8" id="VNz-aL-KCx"/>
                                                     <constraint firstItem="473" firstAttribute="leading" secondItem="471" secondAttribute="trailing" constant="6" id="VdT-8E-s3R"/>
                                                     <constraint firstItem="Bqn-So-8E9" firstAttribute="trailing" relation="lessThanOrEqual" secondItem="390" secondAttribute="trailing" id="VeU-DE-gRe"/>
                                                     <constraint firstItem="Y84-Ix-WCR" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="WHB-9p-hWJ"/>
@@ -582,8 +566,8 @@
                                                     <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="wZv-HJ-VdW" secondAttribute="trailing" constant="16" id="bAa-Y7-Ufp"/>
                                                     <constraint firstItem="897" firstAttribute="top" secondItem="IZZ-Ep-7nD" secondAttribute="bottom" constant="8" id="bWw-xW-3pk"/>
                                                     <constraint firstItem="Ubt-DS-zHf" firstAttribute="leading" secondItem="473" secondAttribute="trailing" constant="16" id="bq9-zJ-hAm"/>
-                                                    <constraint firstItem="pDS-jE-9jb" firstAttribute="top" secondItem="897" secondAttribute="bottom" constant="4" id="bzC-5n-599"/>
-                                                    <constraint firstItem="g6p-DW-uAA" firstAttribute="top" secondItem="914" secondAttribute="bottom" constant="8" id="c0s-2l-T8Z"/>
+                                                    <constraint firstItem="x34-dK-wxl" firstAttribute="top" secondItem="SkD-tY-Lbl" secondAttribute="bottom" constant="6" id="bzC-5n-599"/>
+                                                    <constraint firstItem="g6p-DW-uAA" firstAttribute="top" secondItem="914" secondAttribute="bottom" constant="16" id="c0s-2l-T8Z"/>
                                                     <constraint firstItem="GRg-nv-Opa" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="cgO-SI-hPU"/>
                                                     <constraint firstItem="wZv-HJ-VdW" firstAttribute="firstBaseline" secondItem="419" secondAttribute="firstBaseline" id="crp-Nh-USz"/>
                                                     <constraint firstItem="914" firstAttribute="trailing" secondItem="390" secondAttribute="trailing" id="dnB-pc-kVq"/>
@@ -593,29 +577,25 @@
                                                     <constraint firstItem="418" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="gzd-Qn-vkn"/>
                                                     <constraint firstItem="420" firstAttribute="leading" secondItem="472" secondAttribute="trailing" constant="16" id="ish-En-B66"/>
                                                     <constraint firstItem="692" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="jLX-6E-xU8"/>
-                                                    <constraint firstItem="IXN-q7-y5J" firstAttribute="centerY" secondItem="oXn-B4-1Ni" secondAttribute="centerY" id="jrR-OL-dfq"/>
                                                     <constraint firstItem="472" firstAttribute="firstBaseline" secondItem="419" secondAttribute="firstBaseline" id="k8D-eK-Lkg"/>
                                                     <constraint firstItem="mka-NZ-Esg" firstAttribute="leading" secondItem="897" secondAttribute="leading" constant="20" id="kqa-hO-Tgb"/>
-                                                    <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="IXN-q7-y5J" secondAttribute="trailing" constant="16" id="lnR-NY-f9w"/>
                                                     <constraint firstItem="903" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="mcA-EQ-hXJ"/>
                                                     <constraint firstItem="692" firstAttribute="trailing" secondItem="390" secondAttribute="trailing" id="nT0-7c-Qau"/>
-                                                    <constraint firstItem="FNU-zj-OIm" firstAttribute="top" secondItem="GRg-nv-Opa" secondAttribute="bottom" constant="8" id="p6b-hb-TkQ"/>
+                                                    <constraint firstItem="PJD-Fc-76A" firstAttribute="top" secondItem="Bqn-So-8E9" secondAttribute="bottom" constant="6" id="p6b-hb-TkQ"/>
                                                     <constraint firstItem="392" firstAttribute="leading" secondItem="418" secondAttribute="trailing" constant="8" id="qNy-dd-GTI"/>
-                                                    <constraint firstItem="694" firstAttribute="top" secondItem="692" secondAttribute="bottom" constant="4" id="qVT-TM-MxF"/>
-                                                    <constraint firstItem="Y84-Ix-WCR" firstAttribute="top" secondItem="mka-NZ-Esg" secondAttribute="bottom" constant="8" id="qcI-Ml-osE"/>
-                                                    <constraint firstItem="oXn-B4-1Ni" firstAttribute="top" secondItem="398" secondAttribute="bottom" constant="4" id="rLY-8f-Ddg"/>
+                                                    <constraint firstItem="694" firstAttribute="top" secondItem="692" secondAttribute="bottom" constant="6" id="qVT-TM-MxF"/>
+                                                    <constraint firstItem="Y84-Ix-WCR" firstAttribute="top" secondItem="mka-NZ-Esg" secondAttribute="bottom" constant="16" id="qcI-Ml-osE"/>
                                                     <constraint firstItem="RYj-wx-tTx" firstAttribute="centerY" secondItem="Bxp-pI-XMk" secondAttribute="centerY" id="t66-fT-3SX"/>
                                                     <constraint firstAttribute="trailing" secondItem="390" secondAttribute="trailing" constant="16" id="ti1-k0-aLE"/>
                                                     <constraint firstItem="RYj-wx-tTx" firstAttribute="leading" secondItem="Bxp-pI-XMk" secondAttribute="trailing" constant="8" id="uer-Iu-d76"/>
                                                     <constraint firstItem="g6p-DW-uAA" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="v9C-kf-Qoy"/>
                                                     <constraint firstItem="416" firstAttribute="trailing" secondItem="390" secondAttribute="trailing" id="vN9-3Q-dlX"/>
-                                                    <constraint firstItem="914" firstAttribute="top" secondItem="903" secondAttribute="bottom" constant="4" id="vUJ-m6-h6j"/>
+                                                    <constraint firstItem="914" firstAttribute="top" secondItem="903" secondAttribute="bottom" constant="6" id="vUJ-m6-h6j"/>
                                                     <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="392" secondAttribute="trailing" constant="16" id="w0m-0A-rhs"/>
-                                                    <constraint firstItem="bqG-v4-vqw" firstAttribute="centerY" secondItem="oXn-B4-1Ni" secondAttribute="centerY" id="xqP-UF-xeE"/>
                                                     <constraint firstItem="473" firstAttribute="firstBaseline" secondItem="419" secondAttribute="firstBaseline" id="yKX-vf-1GN"/>
                                                     <constraint firstItem="FNU-zj-OIm" firstAttribute="leading" secondItem="390" secondAttribute="leading" id="yqk-DD-uql"/>
-                                                    <constraint firstItem="692" firstAttribute="top" secondItem="390" secondAttribute="bottom" constant="4" id="yvi-Jb-7If"/>
-                                                    <constraint firstItem="IZZ-Ep-7nD" firstAttribute="top" secondItem="419" secondAttribute="bottom" constant="8" id="ztE-db-uZr"/>
+                                                    <constraint firstItem="692" firstAttribute="top" secondItem="390" secondAttribute="bottom" constant="6" id="yvi-Jb-7If"/>
+                                                    <constraint firstItem="IZZ-Ep-7nD" firstAttribute="top" secondItem="470" secondAttribute="bottom" constant="16" id="ztE-db-uZr"/>
                                                 </constraints>
                                             </view>
                                         </box>
@@ -643,10 +623,8 @@
                                                     <textField verticalHuggingPriority="750" horizontalCompressionResistancePriority="250" fixedFrame="YES" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="350">
                                                         <rect key="frame" x="16" y="87" width="65" height="18"/>
                                                         <autoresizingMask key="autoresizingMask"/>
-                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" id="747">
+                                                        <textFieldCell key="cell" sendsActionOnEndEditing="YES" title="Main Hotkey:" id="747">
                                                             <font key="font" metaFont="system" size="10"/>
-                                                            <string key="title">Main Hotkey
-</string>
                                                             <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                                             <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                                         </textFieldCell>
@@ -769,7 +747,6 @@
                         <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
                     </searchFieldCell>
                     <connections>
-                        <action selector="searchItems:" target="213" id="9IB-LV-utg"/>
                         <outlet property="delegate" destination="213" id="PRe-HH-Het"/>
                     </connections>
                 </searchField>

@@ -10,6 +10,16 @@
 //    still reaches a real defaults object (for example a separately created
 //    suite) ends the fixture with exit status FC_FIXTURE_ISOLATION_EXIT
 //    instead of persisting anything;
+//  * a fixed backing scale: -backingScaleFactor of every NSScreen and every
+//    NSWindow answers FC_FIXTURE_BACKING_SCALE (2, a Retina screen). An
+//    offscreen window otherwise takes the scale of the screen it would be on,
+//    and images pick their representation by the screens' scale. Both differ
+//    between Macs and even between sessions (with another account on the
+//    console, this session can see a 1x main screen next to the 2x built-in
+//    one), and Auto Layout, text sizes, backing alignment and drawing round to
+//    that pixel grid: a label 73.5 pt wide at 2x is 74 pt at 1x and moves every
+//    view after it. Pinned, frame and pixel checks give the same numbers in
+//    every session; what a 1x screen draws is not covered;
 // and provides FCOffscreenStatusItem, a stand-in for NSStatusItem whose button
 // lives in a borderless, non-activating panel that is never ordered on screen,
 // so no item appears in the menu bar.
@@ -21,6 +31,7 @@
 #import <unistd.h>
 
 #define FC_FIXTURE_ISOLATION_EXIT 86
+#define FC_FIXTURE_BACKING_SCALE 2.0
 
 @interface FCMemoryDefaults : NSUserDefaults {
     NSMutableDictionary *registeredValues;
@@ -61,19 +72,25 @@
 {
     if (key == nil)
         return;
+    // Key-value observers are told, as NSUserDefaults tells them.
+    [self willChangeValueForKey:key];
     if (value == nil) {
         [storedValues removeObjectForKey:key];
-        return;
+    } else {
+        id copy = [value copy];
+        [storedValues setObject:copy forKey:key];
+        [copy release];
     }
-    id copy = [value copy];
-    [storedValues setObject:copy forKey:key];
-    [copy release];
+    [self didChangeValueForKey:key];
 }
 
 - (void)removeObjectForKey:(NSString *)key
 {
-    if (key != nil)
-        [storedValues removeObjectForKey:key];
+    if (key == nil)
+        return;
+    [self willChangeValueForKey:key];
+    [storedValues removeObjectForKey:key];
+    [self didChangeValueForKey:key];
 }
 
 - (void)registerDefaults:(NSDictionary *)defaults
@@ -197,6 +214,13 @@ static void FCRealDefaultsWrite(id self, SEL _cmd, ...)
     _exit(FC_FIXTURE_ISOLATION_EXIT);
 }
 
+static CGFloat FCFixtureBackingScaleFactor(id self, SEL _cmd)
+{
+    (void)self;
+    (void)_cmd;
+    return FC_FIXTURE_BACKING_SCALE;
+}
+
 static BOOL FCIsPersistingDefaultsSelector(SEL selector)
 {
     static const char *const names[] = {
@@ -236,6 +260,17 @@ __attribute__((constructor)) static void FCInstallFixtureIsolation(void)
                 method_setImplementation(methods[index], (IMP)FCRealDefaultsWrite);
         }
         free(methods);
+
+        // objc_getClass, not [NSWindow class]: no +initialize before main().
+        const char *scaled[] = {"NSScreen", "NSWindow"};
+        for (size_t index = 0; index < sizeof(scaled) / sizeof(scaled[0]); index++) {
+            Method scale = class_getInstanceMethod(objc_getClass(scaled[index]), @selector(backingScaleFactor));
+            if (scale == NULL) {
+                fprintf(stderr, "FixtureIsolation: -[%s backingScaleFactor] not found\n", scaled[index]);
+                _exit(FC_FIXTURE_ISOLATION_EXIT);
+            }
+            method_setImplementation(scale, (IMP)FCFixtureBackingScaleFactor);
+        }
     }
 }
 
