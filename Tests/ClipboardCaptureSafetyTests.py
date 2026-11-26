@@ -140,8 +140,13 @@ int main(void) {
         self.assertLess(policy, diagnostic)
         self.assertLess(diagnostic, payload)
         diagnostic_branch = poll_method[diagnostic:payload]
-        self.assertIn("[flycutOperator addClipping:type", diagnostic_branch)
+        # Diagnostics turned on during the read: the commit records nothing, never the content.
+        self.assertNotIn("addClipping", diagnostic_branch)
         self.assertIn("return;", diagnostic_branch)
+        # The row is recorded before any content read: every type of the copy, one row.
+        before_reads = poll_method[:poll_method.index("stringForType:")]
+        self.assertIn('boolForKey:@"revealPasteboardTypes"', before_reads)
+        self.assertIn('[availableTypes componentsJoinedByString:@", "]', before_reads)
 
 
 if __name__ == "__main__":
